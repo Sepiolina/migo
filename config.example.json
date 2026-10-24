@@ -1,0 +1,19 @@
+{
+  "port": 3081,
+
+  "db_enabled": true,
+  "db_server": "sql-server-host",
+  "db_port": 1433,
+  "db_user": "user",
+  "db_password": "change-me",
+  "db_name": "SAP_ForthFacDb",
+  "db_tls_min": "1.0",
+
+  "sap_enabled": true,
+  "sap_host": "sap-gateway-host",
+  "sap_port": 5000,
+  "sap_tcode": "CHANGE_ME",
+  "sap_werks": "CHANGE_ME",
+  "api_batch_size": 50,
+  "api_retries": 3
+}
