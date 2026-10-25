@@ -1,195 +1,136 @@
-# Spreadsheet workflows
+# Workflows
 
-`bomrun -workflow` supports two recipe engines. This guide describes generic
-table recipes over spreadsheet values. Recipes with `engine: bom` orchestrate
-the original Go BOM stages, including vendor policy and SQL/SAP enrichment;
-see [BOM_PIPELINES.md](BOM_PIPELINES.md) for the complete equivalent recipe,
-CLI options and HTTP configuration. Generic workflows do not apply those
-domain rules automatically.
+A workflow is one YAML file. Its name is its endpoint:
 
-From the repository root:
+| File | Endpoints |
+| --- | --- |
+| `workflows/bom.yaml` | `POST /api/bom/upload`, `GET /api/bom/download` |
+| `workflows/<name>.yaml` | `POST /api/<name>/upload`, `GET /api/<name>/download` |
+
+All workflows use the same request and response. Upload sends multipart `files`
+(one per input, in any order) plus `bam` (the employee number). The response is:
+
+```json
+{"status":"success","message":"<name> processed successfully.","fileName":"<first input>_<bam>.xlsx","downloadUrl":"http://host/api/<name>/download","bam":"113280"}
+```
+
+Download returns the latest result of that workflow only.
+
+Where the files come from:
+- The files in the repo folder `workflows/` are built into the binary.
+- A file in `<config dir>/workflows/` replaces the built-in one with the same name, or adds a new endpoint.
+
+Names use lowercase letters, digits and `-`. A file with a mistake stops startup with the file, step and reason.
+
+Outputs go to `outputs/<name>/`. Each employee keeps their newest two files, and the 14-day retention applies.
+
+## Shape
+
+```yaml
+name: Parts summary            # shown in the response message
+input:                         # one entry per uploaded file
+  parts: {label: Parts list}   # label: used in "Expected 1 file (Parts list)"
+steps:                         # run top to bottom
+  - from: parts[Parts]
+  - filter: 'num("Quantity") > 0'
+  - save: summary
+output:
+  sheets: {Parts: summary}     # sheet name -> saved dataset, in this order
+```
+
+**Inputs.** Files are matched to inputs in upload order. An input with
+`match: "<regexp>"` takes the first uploaded file whose name matches, wherever
+it sits. For example, `match: "(?i)prio|shortage"` lets the Priority file come
+first or second.
+
+**Steps.** Each step is either a bare name (`- group_rows`) or one `name: argument` pair.
+
+**Conditions.** Conditions are expressions inside the step that uses them. Nothing is imported from another file.
+
+**Output.** A workflow either lists `output.sheets` or ends in a step that writes the workbook itself, such as `write_bom`.
+
+## Table steps
+
+These work on the *current table*. `from` loads it and `save` stores a copy under a name.
+
+| Step | Argument | Effect |
+| --- | --- | --- |
+| `from` | `input`, `input[Sheet]` or `dataset` | load the first sheet, a named sheet, or a saved dataset |
+| `save` | `name` | keep a snapshot for `output.sheets`, `join`, `append` or `compare` |
+| `filter` | `'<expression>'` | keep the rows where it is true |
+| `set` | `{Col: '<expression>', ...}` | compute columns in order; new ones are appended |
+| `select` | `{New: Source, ...}` | keep only these columns, renamed and in this order |
+| `rename` | `{Old: New, ...}` | rename and keep everything |
+| `fill` | `[Col, ...]` | fill blank cells from the row above |
+| `dedupe` | `[Col, ...]` | keep the first row per key |
+| `group` | `{by: [Key], sum: [..], count: [..], mean/min/max/first/last/join: [..]}` | one row per key; without `by`, one row in total |
+| `sort` | `{by: [Col, ...], desc: false, numeric: false}` | stable sort |
+| `join` | `{with: dataset, on: [Key], right_on: [Key], how: left\|inner, normalize: false, suffix: _right}` | add the matching columns |
+| `append` | `[dataset, ...]` | add rows; columns are matched by name |
+| `compare` | `{with: baseline, by: [Key], columns: [..], normalize: false, status: status}` | add `added` / `removed` / `changed` / `unchanged` |
+| `style` | `{header: {bold, background: "#RRGGBB", color}, auto_width, freeze_header, number_formats: {Col: "0.00"}}` | formatting used when written |
+
+Cells are text. A column listed in `number_formats` is written as numbers.
+
+## Expressions
+
+Expressions use [expr](https://expr-lang.org/docs/language-definition). Wrap
+them in single quotes in YAML. Inside `filter` and `set` you can use:
+
+| | |
+| --- | --- |
+| `col("Part Number")` | the cell as text |
+| `num("Quantity")` | the cell as a number (a blank or non-number cell is an error) |
+| `norm(s)` | trimmed upper case |
+| `trim`, `upper`, `lower`, `replace(s, old, new)`, `len` | text helpers |
+| `a startsWith "X"`, `contains`, `endsWith`, `matches "regexp"` | text tests, each with a `not` form: `a not startsWith "X"` |
+| `&&`, `\|\|`, `!`, `==`, `<`, `+`, `*`, `x ? a : b` | the usual operators |
+
+## BOM steps
+
+`workflows/bom.yaml` is the BOM processor. Its output is cell-for-cell
+identical to the original service; `TestOutputMatchesGolden` checks this.
+
+| Step | Does | Needs earlier |
+| --- | --- | --- |
+| `read_bom: bom` | read the customer BOM (first sheet, header detection) | |
+| `read_priority: priority` | read the Priority `Shortage` sheet | `read_bom` |
+| `group_rows` | forward fill, find-number groups, quantity repair | `read_bom` |
+| `pcb_scope` | rows after the last PCB row are out of scope | `group_rows` |
+| `pcb_reformat` | PCB MPN `_REV_` reformat | `pcb_scope` |
+| `vendor_policy` | CFT-001 (argument below) | `pcb_reformat` |
+| `material_master` | Forth P/N from SQL Server (`db_enabled`) | `vendor_policy` |
+| `sap_enrich` | block status, vendor, stock (`sap_enabled`) | `material_master` |
+| `select_priority` | CFT-002 MAIN / SUBn | `read_priority`, `pcb_scope`, `vendor_policy` (plus `material_master` and `sap_enrich` when present) |
+| `write_bom` | BOM + debug sheets | `read_bom` |
+
+`vendor_policy` holds every CFT-001 rule:
+
+```yaml
+- vendor_policy:
+    banned: [YAGEO CORPORATION, WALSIN TECHNOLOGY CORPORATION, KDS]
+    exceptions:                              # first matching brand wins
+      - name: TDK
+        brand: 'brand matches "\\bTDK\\b" || brand startsWith "TDK"'
+        allow: 'desc not startsWith "CAP" || mpn startsWith "CGA"'
+        log: "TDK Exception: {count} TDK CAP (CGA series) row(s) confirmed valid."
+```
+
+The expressions can read these fields:
+- `brand`: the manufacturer;
+- `mpn`: the MPN without leading punctuation;
+- `desc`: the effective description.
+
+All three are trimmed and upper case. A row whose brand matches an exception is forbidden unless `allow` is true. Any other row is forbidden only if its brand is in `banned`.
+
+## Run locally
 
 ```sh
-go run ./cmd/bomrun -workflow examples/workflows/basic.yaml -check
-go run ./cmd/bomrun -workflow examples/workflows/basic.yaml
-go run ./cmd/bomrun -workflow examples/workflows/presets.yaml
+go run ./cmd/migo -in bom=testdata/bom_basic.xlsx -in priority=testdata/prio_basic.xlsx -out out.xlsx workflows/bom.yaml
+go run ./cmd/migo -in parts=examples/parts.xlsx -check examples/parts-summary.yaml
 ```
 
-`-check` reads inputs, processes every step, and validates and renders the
-workbooks without publishing output files. The other commands create
-`examples/workflows/generated/basic.xlsx` and `presets.xlsx`. Both recipes use
-`parts.xlsx`, a small synthetic workbook bundled beside them: its `Parts` sheet
-has `Part Number`, `Description`, and `Quantity` headers, two rows for `00123`
-with quantities 2 and 3, a row for `00456` with quantity 1, and a zero-quantity
-row. The result contains `00123` with quantity 5 and `00456` with quantity 1.
-The padded first identifier demonstrates trimming and preservation of leading
-zeros. This fixture is independent of the legacy BOM golden workbooks, whose
-sparse headers are unsuitable for strict generic tables.
-
-## Recipe structure
-
-```yaml
-workflow: My report
-input:
-  source: source.xlsx
-process:
-  - from: source["Parts"]
-    as: cleaned
-    header_row: 1
-    do:
-      - filter: {column: Quantity, greater_than: 0}
-  - from: cleaned
-    as: sorted
-    do:
-      - sort: {by: [Part Number], order: ascending}
-output:
-  - file: report.xlsx
-    sheets: {Parts: sorted, Raw: cleaned}
-```
-
-Input aliases map to paths. `from` selects `alias["Sheet Name"]` (the sheet
-name must be double quoted) or an earlier dataset. Each `as` creates a unique,
-independent snapshot. Processes and their `do` lists execute in order;
-branching from the same dataset does not alter it. Join, merge, and comparison
-references must also name earlier datasets. `header_row` defaults to 1 and
-counts from the input reader's declared-range origin. Headers must be unique
-and nonblank; unused trailing blank headers are trimmed. Names are exact and
-case sensitive. Use `@A`, `@B`, through `@AA`, etc. for positional references;
-`A` means a literal header named `A`.
-
-`header_row` applies only to file/sheet sources; it is rejected on references
-to an earlier dataset.
-
-Input, output, and template paths resolve relative to the recipe file, even
-when the command runs elsewhere. Output is a list of workbooks, each with a
-`file`, optional literal `template` path, and a `sheets` mapping from Excel sheet
-names to datasets. Sheet names are processed in sorted order. Every process
-and workbook is prepared before files are published. Each file replacement is
-atomic; publication of multiple files is not a single transaction.
-Output directories must already exist. The bundled examples include an ignored
-`generated` directory for their results.
-
-YAML is strictly decoded: unknown properties, duplicate keys, invalid operation
-values, missing references, and preset cycles are errors. Each step contains
-one operation and may add `enabled: false`. Disabled steps still need valid
-syntax and operation properties. Quote string values such as `equal: "00123"`.
-
-## Operations
-
-The following are operation bodies under a `do` item, for example
-`- forward_fill: {columns: [Category]}`. Column lists are required unless
-explicitly described as optional.
-
-| Operation | Properties and behavior |
-|---|---|
-| `map` | `columns: [{from: Old, to: New, move: true}]`, optional `keep: true`. Default projection emits exactly the listed destinations in list order. With `keep`, original columns stay in their original order and new destinations append. `move` removes a renamed source only with `keep`; otherwise the source is copied. Conflicting destinations fail. |
-| `filter` | Leaf `column` plus one or more predicates: `equal`, `not_equal`, `contains`, `in: [a, b]`, `blank: true/false`, `greater_than`, `greater_or_equal`, `less_than`, `less_or_equal`. Predicates on a leaf are ANDed. Alternatively use recursive `all: [...]` or `any: [...]`; do not combine these modes on one node. String comparisons are exact; blank checks trim whitespace. |
-| `forward_fill` | `columns: [Category]`. Replace blank or whitespace cells with the preceding nonblank value in that column; initial blanks stay blank. |
-| `group` | `by: [Part Number]`, optional `aggregate: {Quantity: sum}`. Retains group keys followed by explicitly aggregated columns in source column order. Groups retain first encounter order. Other columns are dropped. Group keys cannot also be aggregated. |
-| `aggregate` | `columns: {Quantity: sum}`. Aggregate the whole table into one row. |
-| `sort` | `by: [Category, Part Number]`, optional `order: ascending` (default) or `descending`, optional `numeric: true`. Stable sort; numeric applies to every sort key. |
-| `deduplicate` | `columns: [Part Number]`. Keep the first row for each exact key tuple. |
-| `calculate` | `column: Total`, `operation: add/subtract/multiply/divide`, `columns: [Quantity, Unit Cost]`, optional numeric `value`. Fold source operands left to right, then apply `value` as the last operand. Adds or replaces the destination. Division by zero fails. |
-| `transform` | `columns: [Part Number]`, `operation: trim/upper/lower/normalize/replace`. `replace` uses literal `old` and `new` strings, replacing every occurrence. `normalize` trims and uppercases using the shared part-number normalizer. |
-| `join` | `with: earlier_dataset`, `on: [Part Number]`, optional `right_on` list, `how: left` (default) or `inner`, `normalize: true`, and `suffix: _right`. Right key columns are omitted; colliding nonkey names get the suffix. Duplicate right matches produce multiple rows. |
-| `merge` | `with: [earlier_dataset, another_dataset]`. Append rows in listed dataset order. Column sets must match; right columns are reordered to the left table. |
-| `compare` | `with: baseline`, `by: [Part Number]`, optional `columns: [Quantity]`, `normalize: true`, `status_column: status`. Current rows precede baseline-only rows. Emits the union of columns and `added`, `removed`, `changed`, or `unchanged`. Matched rows carry current values; removed rows carry baseline values. Default comparison checks the union of nonkey columns, treating missing cells as blank; explicit comparison columns must exist on both sides. Duplicate keys on either side fail; normalization affects keys only. |
-| `style` | Optional `header: {bold: true, background: "#D9EAF7", color: "#17365D"}`, `auto_width: true`, `freeze_header: true`, `number_formats: {Quantity: "0.00"}`. Replaces the dataset's style settings. |
-
-Aggregation functions are `sum`, `first`, `last`, `min`, `max`, `count`, `mean`,
-and `join`. `min` and `max` are numeric. `count` counts rows, including blanks;
-`join` combines distinct nonblank values in encounter order with `, `.
-Arithmetic, numeric predicates, numeric sorting, and numeric aggregation reject
-blank, invalid, and nonfinite values rather than silently converting them to
-zero. Calculations also reject nonfinite results.
-All conditions in a filter are evaluated, even after another condition decides
-the match. To exclude blank quantities before a numeric comparison, use a
-separate `filter: {column: Quantity, blank: false}` step first.
-
-## Presets and imports
-
-Preset categories are `filters`, `forward_fills`, `groups`, `aggregations`,
-`mappings`, `styles`, `sorts`, `transforms`, and `pipelines`. Use an operation's
-singular YAML name with `preset`:
-
-```yaml
-imports: [shared-presets.yaml]
-presets:
-  styles:
-    local_report:
-      preset: report
-      header: {bold: true}
-      override:
-        header: {color: "#17365D"}
-```
-
-This inherits the imported `styles.report`. Maps merge recursively; lists and
-scalars replace their inherited values. Local properties override inherited
-ones, and `override` wins last. This also works directly on a step:
-
-```yaml
-- filter:
-    preset: positive
-    override: {greater_than: 10}
-- group:
-    by: [Part Number]
-    aggregation_preset: quantities
-    aggregate: {Description: first}
-- style: {preset: local_report}
-- pipeline: {preset: clean}
-```
-
-An aggregation preset has an `aggregate` operation body (`columns: {...}`);
-`group.aggregation_preset` imports those functions and explicit `aggregate`
-entries win. Pipeline presets have `do: [...]` and expand into ordinary steps.
-See the executable `presets.yaml` and its `shared-presets.yaml` import.
-
-Imports contain only `imports` and `presets`; they cannot supply input,
-process, or output sections. Nested imports resolve relative to the file that
-declares them. Imported and local preset names must be unique within their
-category; use a new name plus `preset` to inherit instead of redefining a name.
-Missing presets, import cycles, inheritance cycles, and pipeline cycles fail.
-
-## Workbooks and templates
-
-Inputs support XLSX and Excel 97–2003 BIFF8 XLS. Output is XLSX. Reading is
-values-only: formulas use their cached values, with no formula recalculation
-and no transfer of source formatting. General cells are written as strings,
-including identifiers with leading zeros and strings starting with `=`.
-`style.number_formats` explicitly opts a column into numeric Excel cells:
-nonblank values must be finite numbers; blanks remain blank. Do not use it on
-identifier columns whose leading zeros matter.
-Cells longer than Excel's 32,767-character limit are rejected instead of
-silently truncated. Calculations use finite 64-bit floating-point numbers;
-they do not provide arbitrary-precision decimal arithmetic.
-
-For a template, set `template: report-template.xlsx` beside `file`. Untouched
-sheets retain their formulas and styles. An output sheet that matches an
-existing template sheet is regenerated completely, including its data and
-formatting; formulas and custom layout on that replaced sheet are not retained.
-There is no formula translation, expression evaluation, or implicit enrichment.
-
-## Advanced example and migration
-
-`advanced.yaml` is a recipe for user-supplied workbooks placed beside the YAML:
-
-| File / sheet | Required headers |
-|---|---|
-| `current.xlsx` / `Parts` | `Part Number`, `Description`, `Quantity`, `Category` |
-| `previous.xlsx` / `Parts` | `Part Number`, `Description`, `Quantity` |
-| `catalog.xlsx` / `Catalog` | `Part Number`, `Unit Cost` |
-
-All headers are on the first row. Quantities and costs must contain finite
-numbers. Baseline part numbers must be unique; current duplicates are grouped.
-The catalog keeps its first row for duplicate part numbers. The example joins
-only catalog matches before calculating cost and writes separate Changes and
-Purchasing sheets. Run it with `-check` after supplying the files, then remove
-`-check` to publish `generated/purchasing.xlsx`.
-
-To move a customization from Go into YAML, identify the generic projection,
-filtering, grouping, or reporting steps and express each as an ordered recipe
-step. Keep using the legacy BOM pipeline for find-number grouping, quantity
-repair, vendor/SAP decisions, and other domain rules: generic `group` only
-performs the requested key grouping and aggregate functions. Use an `engine: bom` recipe when you need those original domain stages in
-YAML; see [BOM_PIPELINES.md](BOM_PIPELINES.md). Generic and BOM recipes have
-different schemas and cannot mix their operations.
+The flags:
+- `-check` runs everything and keeps no file.
+- `-cfg '<json>'` takes `config.json` keys. The default `{}` turns off DB and SAP.
+- `-stubdb file.json` stands in for Material_Master, for example `{"ABC123":{"MaterialNo":"100001","ZBlock":""}}`.

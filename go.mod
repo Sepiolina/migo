@@ -3,6 +3,7 @@ module miservice
 go 1.22
 
 require (
+	github.com/expr-lang/expr v1.17.5
 	github.com/microsoft/go-mssqldb v1.7.2
 	github.com/richardlehane/mscfb v1.0.4
 	github.com/xuri/excelize/v2 v2.8.1

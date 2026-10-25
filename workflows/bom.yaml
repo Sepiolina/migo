@@ -1,0 +1,33 @@
+# POST /api/bom/upload   files: Customer BOM + Priority (any order), bam: employee number
+# GET  /api/bom/download latest result of this workflow
+name: BOM
+input:
+  bom: {label: Customer BOM}
+  priority: {label: Priority, match: "(?i)prio|shortage"}
+
+steps:
+  - read_bom: bom
+  - read_priority: priority
+  - group_rows                 # forward fill, find-num groups, quantity fix
+  - pcb_scope
+  - pcb_reformat
+
+  # CFT-001: forbidden vendors. A row whose brand matches an exception is
+  # banned unless `allow` is true. Expressions see brand, mpn and desc
+  # (normalised: trimmed, upper case; mpn without leading punctuation).
+  - vendor_policy:
+      banned: [YAGEO CORPORATION, WALSIN TECHNOLOGY CORPORATION, KDS]
+      exceptions:
+        - name: TDK
+          brand: 'brand matches "\\bTDK\\b" || brand startsWith "TDK"'
+          allow: 'desc not startsWith "CAP" || mpn startsWith "CGA"'
+          log: "TDK Exception: {count} TDK CAP (CGA series) row(s) confirmed valid."
+        - name: SAMSUNG
+          brand: 'brand contains "SAMSUNG" || brand contains "SEMCO"'
+          allow: 'desc not startsWith "CAP" || mpn matches "(?s)^CL(.{6}|.{10})P"'
+          log: "Samsung Exception: {count} Samsung MLCC (CL...P...) row(s) confirmed valid."
+
+  - material_master            # Forth P/N from SQL Server (db_enabled)
+  - sap_enrich                 # block status, vendor, stock (sap_enabled)
+  - select_priority            # CFT-002: MAIN / SUBn per group
+  - write_bom                  # BOM + debug sheets

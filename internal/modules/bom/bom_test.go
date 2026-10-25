@@ -3,12 +3,21 @@ package bom
 import (
 	"context"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
+	"regexp"
+	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"miservice/internal/config"
+	"miservice/internal/jsx"
 	"miservice/internal/logx"
+	"miservice/internal/workflow"
+	builtin "miservice/workflows"
 )
 
 func TestHelpers(t *testing.T) {
@@ -23,26 +32,6 @@ func TestHelpers(t *testing.T) {
 	if ReformatPcbMpn("PN", "B") != "PN_REV_B" || ReformatPcbMpn("PN_REV_B", "B") != "PN_REV_B" || ReformatPcbMpn("", "B") != "" {
 		t.Error("reformat")
 	}
-	a, b := IdentifyUploadedFiles(Uploaded{"1", "Shortage.xlsx"}, Uploaded{"2", "my.xls"})
-	if a.Path != "2" || b.Path != "1" {
-		t.Error("swap")
-	}
-	a, _ = IdentifyUploadedFiles(Uploaded{"1", "x.xlsx"}, Uploaded{"2", "y.xlsx"})
-	if a.Path != "1" {
-		t.Error("keep order")
-	}
-	for _, bad := range []string{"", "../x", "a b", "123456789012345678901"} {
-		if _, ok := ParseEmployeeNumber(bad); ok {
-			t.Errorf("accepted %q", bad)
-		}
-	}
-	if v, ok := ParseEmployeeNumber(" 113280 "); !ok || v != "113280" {
-		t.Error("employee")
-	}
-	if BuildOutputFilename("Customer BOM.v2.xls", "9") != "Customer BOM.v2_9.xlsx" ||
-		BuildOutputFilename(`a:b*c.xls`, "9") != "a_b_c_9.xlsx" || BuildOutputFilename(".xls", "9") != ".xls_9.xlsx" {
-		t.Error("output filename")
-	}
 }
 
 func row(desc, mfg, mpn string) *Row {
@@ -56,7 +45,7 @@ func TestVendorPolicy(t *testing.T) {
 		row("RES", "yageo corporation", "x"), row("RES", "Murata", "x"),
 	}
 	rows = append(rows, &Row{Description: "RES", MfgName: "KDS", InScope: false})
-	res := RunVendorPolicy(rows, DefaultVendorPolicy)
+	res := RunVendorPolicy(rows, defaultPolicy(t))
 	want := []bool{false, true, false, true, false, true, false, false}
 	for i, w := range want {
 		if rows[i].IsForbidden != w {
@@ -68,15 +57,17 @@ func TestVendorPolicy(t *testing.T) {
 	}
 }
 
-// A new brand rule is data: this is all it takes (see docs/EXTENDING.md).
+// A new brand rule is data: in a workflow file it is the same four keys.
 func TestVendorPolicyCustomException(t *testing.T) {
-	p := &VendorPolicy{
-		BannedUnconditional: []string{"ACME"},
-		BrandExceptions: []BrandException{{
-			Name: "VISHAY", LogLabel: "Vishay Exception", LogSuffix: "Vishay CAP row(s) confirmed valid.",
-			BrandMatch: brandContainsAny("VISHAY"),
-			IsExempt:   capsMustSatisfy(mpnStartsWith("VJ")),
+	p, err := VendorPolicySpec{
+		Banned: []string{"ACME"},
+		Exceptions: []VendorException{{
+			Name: "VISHAY", Brand: `brand contains "VISHAY"`, Allow: `desc not startsWith "CAP" || mpn startsWith "VJ"`,
+			Log: "Vishay Exception: {count} Vishay CAP row(s) confirmed valid.",
 		}},
+	}.Compile()
+	if err != nil {
+		t.Fatal(err)
 	}
 	rows := []*Row{row("CAP", "Vishay", "VJ0603"), row("CAP", "Vishay", "XX"), row("RES", "Vishay", "XX"), row("RES", "acme", "x")}
 	res := RunVendorPolicy(rows, p)
@@ -131,7 +122,7 @@ func TestCft002Duplicates(t *testing.T) {
 	one := 1.0
 	c.PriorityValue = &one
 	rows := []*Row{a, b, c, d}
-	RunCft002(rows, PriorityMap{"F1": &one}, DefaultVendorPolicy, logx.Nop)
+	RunCft002(rows, PriorityMap{"F1": &one}, &VendorPolicy{}, logx.Nop)
 	if !c.IsDuplicateForthPN || a.IsDuplicateForthPN || d.IsDuplicateForthPN {
 		t.Error("duplicate flags")
 	}
@@ -147,7 +138,7 @@ func TestCft002StockTieBreak(t *testing.T) {
 	r1, r2 := cftRow(1, "F1"), cftRow(2, "F2")
 	r1.Stock, r2.Stock = 10, 10
 	r1.VName, r2.VName = "V1", "V2"
-	RunCft002([]*Row{r1, r2}, PriorityMap{}, DefaultVendorPolicy, logx.Nop)
+	RunCft002([]*Row{r1, r2}, PriorityMap{}, &VendorPolicy{}, logx.Nop)
 	if r1.Priority != "MAIN" || r2.Priority != "SUB1" || r1.DebugReason != "MAIN (Cond C: No P1 -> Vendor match [V1, top-most])" {
 		t.Errorf("%q %q %q", r1.Priority, r2.Priority, r1.DebugReason)
 	}
@@ -160,7 +151,7 @@ func pcbRows() []*Row {
 }
 
 func jobWith(rows []*Row, db bool, log logx.Logger) *Job {
-	return &Job{Cfg: &config.Config{DB: config.DB{Enabled: db}}, Policy: DefaultVendorPolicy, Log: log, Rows: rows}
+	return &Job{Cfg: &config.Config{DB: config.DB{Enabled: db}}, Policy: &VendorPolicy{}, Log: log, Rows: rows}
 }
 
 func TestDBLookupPcbSanmina(t *testing.T) {
@@ -212,45 +203,36 @@ func TestResultMap(t *testing.T) {
 	}
 }
 
-// ---- pipeline wiring ---------------------------------------------------------
+// ---- workflow wiring ---------------------------------------------------------
 
-func TestDefaultStageOrder(t *testing.T) {
-	var names []string
-	for _, s := range DefaultStages(Deps{}) {
-		names = append(names, s.Name)
+func TestBOMWorkflowSteps(t *testing.T) {
+	want := []string{"read_bom", "read_priority", "group_rows", "pcb_scope", "pcb_reformat", "vendor_policy",
+		"material_master", "sap_enrich", "select_priority", "write_bom"}
+	if got := bomWorkflow(t, Deps{}).Steps; !reflect.DeepEqual(got, want) {
+		t.Errorf("steps %v, want %v", got, want)
 	}
-	want := []string{"read-inputs", "group-rows", "pcb-scope", "pcb-reformat", "cft-001-vendor-policy",
-		"material-master", "sap-enrich", "cft-002-priority", "write-workbook"}
-	if len(names) != len(want) {
-		t.Fatalf("%v", names)
-	}
-	for i := range want {
-		if names[i] != want[i] {
-			t.Errorf("stage %d = %s, want %s", i, names[i], want[i])
+}
+
+func TestStepOrderIsChecked(t *testing.T) {
+	for name, steps := range map[string]string{
+		"needs":   "[read_bom, pcb_scope, write_bom]",
+		"after":   "[read_bom, read_priority, group_rows, pcb_scope, pcb_reformat, {vendor_policy: {}}, select_priority, material_master, write_bom]",
+		"no read": "[group_rows, write_bom]",
+		"arg":     "[read_bom, {group_rows: x}, write_bom]",
+	} {
+		doc := "name: X\ninput: {bom: {}, priority: {}}\nsteps: " + steps + "\n"
+		if _, err := workflow.Parse([]byte(doc), Ops(Deps{})); err == nil {
+			t.Errorf("%s: accepted %s", name, steps)
 		}
 	}
 }
 
-// Adding a feature = adding a Stage. This one marks rows and stops the run
-// before anything is written.
-func TestCustomStageAndAbort(t *testing.T) {
-	var ran []string
-	p := &Pipeline{Cfg: &config.Config{}, Stages: []Stage{
-		{"first", func(context.Context, *Job) error { ran = append(ran, "first"); return nil }},
-		{"boom", func(context.Context, *Job) error { ran = append(ran, "boom"); return errors.New("bad input") }},
-		{"never", func(context.Context, *Job) error { ran = append(ran, "never"); return nil }},
-	}}
-	err := p.Process(context.Background(), "a", "b", "c")
-	if err == nil || err.Error() != "bad input" || len(ran) != 2 {
-		t.Errorf("err=%v ran=%v", err, ran)
-	}
-}
-
-func TestPipelineRealFilesNoExternals(t *testing.T) {
+func TestWorkflowRealFilesNoExternals(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "o.xlsx")
 	var lines []string
-	p := NewPipeline(&config.Config{}, func(s string) { lines = append(lines, s) }, Deps{})
-	if err := p.Process(context.Background(), "../../../testdata/bom_basic.xlsx", "../../../testdata/prio_basic.xlsx", out); err != nil {
+	err := bomWorkflow(t, Deps{}).Run(context.Background(), &config.Config{}, func(s string) { lines = append(lines, s) },
+		map[string]string{"bom": "../../../testdata/bom_basic.xlsx", "priority": "../../../testdata/prio_basic.xlsx"}, out)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if st, err := os.Stat(out); err != nil || st.Size() == 0 {
@@ -258,5 +240,91 @@ func TestPipelineRealFilesNoExternals(t *testing.T) {
 	}
 	if len(lines) == 0 || lines[len(lines)-1] != "Successfully processed and generated: "+out {
 		t.Errorf("%q", lines)
+	}
+}
+
+// bomWorkflow compiles the built-in workflows/bom.yaml.
+func bomWorkflow(t *testing.T, d Deps) *workflow.Workflow {
+	t.Helper()
+	data, err := fs.ReadFile(builtin.FS, "bom.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wf, err := workflow.Parse(data, workflow.TableOps().With(Ops(d)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return wf
+}
+
+// defaultPolicy is the vendor_policy of workflows/bom.yaml.
+func defaultPolicy(t *testing.T) *VendorPolicy {
+	t.Helper()
+	data, err := fs.ReadFile(builtin.FS, "bom.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		Steps []yaml.Node `yaml:"steps"`
+	}
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		t.Fatal(err)
+	}
+	for _, st := range doc.Steps {
+		if st.Kind == yaml.MappingNode && st.Content[0].Value == "vendor_policy" {
+			n := st.Content[1]
+			var spec VendorPolicySpec
+			if err := n.Decode(&spec); err != nil {
+				t.Fatal(err)
+			}
+			p, err := spec.Compile()
+			if err != nil {
+				t.Fatal(err)
+			}
+			return p
+		}
+	}
+	t.Fatal("bom.yaml has no vendor_policy step")
+	return nil
+}
+
+// The CFT-001 rules moved from Go into workflows/bom.yaml. These are the old
+// Go matchers; the expressions must agree with them on every edge case.
+func TestVendorPolicyMatchesFormerGoRules(t *testing.T) {
+	tdkWord := regexp.MustCompile(`\bTDK\b`)
+	isCap := func(r *Row) bool {
+		d := r.EffectiveDescription
+		if d == "" {
+			d = r.Description
+		}
+		return strings.HasPrefix(jsx.Norm(d), "CAP")
+	}
+	clean := func(r *Row) string { return stripLeadingNonAlnum(jsx.Norm(r.MfrPN)) }
+	old := func(r *Row) (forbidden bool) {
+		b := jsx.Norm(r.MfgName)
+		switch {
+		case b != "" && strings.Contains(b, "TDK") && (tdkWord.MatchString(b) || strings.HasPrefix(b, "TDK")):
+			return isCap(r) && !strings.HasPrefix(clean(r), "CGA")
+		case b != "" && (strings.Contains(b, "SAMSUNG") || strings.Contains(b, "SEMCO")):
+			c := []rune(clean(r))
+			auto := len(c) >= 2 && c[0] == 'C' && c[1] == 'L' && (len(c) >= 13 && c[12] == 'P' || len(c) >= 9 && c[8] == 'P')
+			return isCap(r) && !auto
+		}
+		return b == "YAGEO CORPORATION" || b == "WALSIN TECHNOLOGY CORPORATION" || b == "KDS"
+	}
+	brands := []string{"TDK", " tdk corp", "XTDKY", "TDK-LAMBDA", "EPCOS (TDK)", "SAMSUNG", "Samsung Electro", "semco", "SAMSUNGX", "kds", "Yageo Corporation", "", "MURATA"}
+	descs := []string{"CAP CER", " cap", "RES", "", "CAPACITOR"}
+	mpns := []string{"CGA3E", "--cga3e", "XCGA", "CL10B104PXYZ", "CL10B104KB8NNNC", "CL10B104KBP", "CL10B1P", "CLxxxxxxPyy", "CLÄÄÄÄÄÄP", "", "  -CL10B104KB8PNC"}
+	policy := defaultPolicy(t)
+	for _, b := range brands {
+		for _, d := range descs {
+			for _, m := range mpns {
+				r := row(d, b, m)
+				RunVendorPolicy([]*Row{r}, policy)
+				if want := old(r); r.IsForbidden != want {
+					t.Errorf("brand=%q desc=%q mpn=%q: forbidden=%v, former rule %v", b, d, m, r.IsForbidden, want)
+				}
+			}
+		}
 	}
 }

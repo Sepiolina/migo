@@ -1,12 +1,16 @@
-# miservice (Go)
+# migo / miservice (Go)
 
-Go port of the Node/Express BOM-processor service. Same endpoints, same JSON, same workbook output.
+A Go microservice where every process is one YAML file in `workflows/`. Each file is its own
+endpoint pair, maps its uploaded inputs to one output workbook, and keeps its rules inline.
+`workflows/bom.yaml` is the BOM processor, ported from the Node/Express service with the same
+endpoints, JSON and workbook output.
 
 ```
-POST /api/bom/upload     multipart: files (2: BOM + Priority, any order), bam (employee number)
-GET  /api/bom/download   latest generated workbook of this process
-GET  /api/health         {"status":"online","service":"BOM Processor Node.js API"}
+POST /api/<name>/upload     multipart: files (one per workflow input, any order), bam (employee number)
+GET  /api/<name>/download   latest generated workbook of this workflow
+GET  /api/health            {"status":"online","service":"BOM Processor Node.js API"}
 ```
+For the BOM: `POST /api/bom/upload` takes 2 files (BOM + Priority), and `GET /api/bom/download` returns the result.
 `docs/API.md` of the Node project still describes the contract (unchanged).
 
 ## Quick start
@@ -17,32 +21,39 @@ go build -o miservice ./cmd/miservice   # or: make linux / make windows
 ```
 Config lookup order: `-config` flag, then `MISERVICE_CONFIG`, then `./config.json`, then `config.json` beside the
 executable. `PORT` env overrides `"port"` (as before). `uploads/` and `outputs/` are created next to the config file.
-The existing `outputs/.manifest.json` format is unchanged, so an old outputs folder carries over.
+Each workflow keeps its results in `outputs/<name>/`. Files left in the `outputs/` root by older versions are still
+removed by the root's retention cleanup.
 Deploy = copy the single binary + `config.json`. No Node, no node_modules (Node is only needed on the server if you
 choose PM2 as the process manager, see below).
 
 ### What is kept on disk
 | Folder | Contents | Lifetime |
 |---|---|---|
-| `outputs/` | generated workbooks + `.manifest.json` | newest 2 per employee number; unused files deleted after 14 days (checked daily, runs every 14 days) |
+| `outputs/<workflow>/` | generated workbooks + `.manifest.json` | newest 2 per employee number; unused files deleted after 14 days (checked daily, runs every 14 days) |
 | `uploads/` | the two input files of a request | not registered in `uploads/.keep.json`: deleted at the end of the request, plus an hourly sweep for leftovers. Registered in keep: deleted on the 14-day schedule. See `docs/EXTENDING.md` |
 
 After any request, `uploads/` should contain nothing except `.gitkeep` (and `.keep.json` if a module uses keep).
 
-## Declarative spreadsheet workflows
-
-The default BOM HTTP route executes the embedded YAML recipe through the
-original Go BOM stages, preserving its workbook behavior. To run that same
-pipeline from a file, configure an additional upload route, or change stage
-orchestration without editing Go, see [BOM pipelines](docs/BOM_PIPELINES.md).
-The guide includes the full equivalent YAML, CLI commands and server config.
-
-Generic table recipes also run through
-`go run ./cmd/bomrun -workflow examples/workflows/basic.yaml`.
-Add `-check` to execute and render without publishing files. The bundled basic
-and preset examples use a synthetic workbook and need no external services.
-See [the generic workflow guide](docs/WORKFLOWS.md) for operations, presets,
-imports, templates, and a multi-workbook example.
+## Workflows
+```yaml
+# workflows/<name>.yaml  ->  /api/<name>/upload, /api/<name>/download
+name: Parts summary
+input:
+  parts: {label: Parts list}
+steps:
+  - from: parts[Parts]
+  - filter: 'num("Quantity") > 0'
+  - group: {by: [Part Number], sum: [Quantity]}
+  - save: summary
+output:
+  sheets: {Parts: summary}
+```
+Drop a file into `<config dir>/workflows/` and restart to add an endpoint, or to replace a built-in one with the
+same name. Steps, expressions and the BOM steps (including the CFT-001 vendor rules in `bom.yaml`) are described in
+[docs/WORKFLOWS.md](docs/WORKFLOWS.md). Run any workflow without HTTP:
+```
+go run ./cmd/migo -in bom=testdata/bom_basic.xlsx -in priority=testdata/prio_basic.xlsx -out out.xlsx workflows/bom.yaml
+```
 
 ## Testing on Windows
 Everything below is PowerShell, run from the project folder. None of it needs SQL Server, SAP or Node.
@@ -60,7 +71,7 @@ go test ./...
 ```
 These use the files in `testdata/` with a stubbed Material_Master and a fake SAP server, so they run anywhere. To see
 one package in detail: `go test -v ./internal/storage/` (retention, uploads keep registry), `./internal/modules/bom/`
-(upload endpoint end to end, golden workbook), `./internal/sheet/` (.xls and .xlsx readers). Add `-race` if you have a
+(BOM steps, golden workbook), `./internal/modules/workflows/` (upload endpoints end to end), `./internal/sheet/` (.xls and .xlsx readers). Add `-race` if you have a
 C toolchain installed; it is optional. If an antivirus quarantines the test binaries, exclude `%TEMP%\go-build*`.
 
 **3. Run the service locally**
@@ -84,20 +95,20 @@ program on first start; allow "Private networks" if colleagues should reach it.
 curl.exe http://localhost:3081/api/health
 curl.exe -F "files=@testdata/bom_basic.xlsx" -F "files=@testdata/prio_basic.xlsx" -F "bam=113280" http://localhost:3081/api/bom/upload
 curl.exe -o out.xlsx http://localhost:3081/api/bom/download
-dir uploads, outputs
+dir uploads, outputs\bom
 ```
 Expected: health returns `{"status":"online",...}`; upload returns `"status":"success"` and a `downloadUrl`; `out.xlsx`
-opens in Excel; `uploads\` holds only `.gitkeep`; `outputs\` holds `bom_basic_113280.xlsx` and `.manifest.json`.
+opens in Excel; `uploads\` holds only `.gitkeep`; `outputs\bom\` holds `bom_basic_113280.xlsx` and `.manifest.json`.
 The Priority file is recognised by a file name containing `prio` or `shortage`; otherwise the first file is the BOM.
 Error cases worth trying: one file only (400 "Expected 2 files"), `bam=../x` (400), a file over 25 MB (400).
 
-**5. Run the pipeline on real files, without HTTP**
+**5. Run a workflow on real files, without HTTP**
 ```
-go build -o bomrun.exe ./cmd/bomrun
-.\bomrun.exe -bom "C:\data\Customer BOM.xlsx" -prio "C:\data\Priority.xlsx" -out out.xlsx -cfg "{}"
+go build -o migo.exe ./cmd/migo
+.\migo.exe -in "bom=C:\data\Customer BOM.xlsx" -in "priority=C:\data\Priority.xlsx" -out out.xlsx workflows\bom.yaml
 ```
-`-cfg` takes config.json keys as JSON; `{}` skips DB and SAP. Use `-stubdb file.json` to stand in for Material_Master.
-Compare the result with the output of the Node service on the same files (see "Verifying against the Node service").
+`-cfg` takes config.json keys as JSON; the default `{}` skips DB and SAP. Use `-stubdb file.json` to stand in for
+Material_Master, and `-check` to run without keeping the output.
 Ubuntu is the production OS, so also run `go test ./...` on the Ubuntu machine (or WSL2 Ubuntu) once before a release.
 
 **6. Cross-build the Ubuntu binary from Windows**
@@ -263,10 +274,15 @@ logs with `journalctl -u miservice -f`. Use one supervisor or the other, never b
 
 ## Layout
 ```
+workflows/             built-in workflow files (embedded); bom.yaml = the BOM processor
 cmd/miservice          server entrypoint (flags + app.Run)
-cmd/bomrun             run the BOM pipeline on two files without HTTP (batch checks; -stubdb for tests)
-internal/app           wiring; modules.go is the list of features the service runs
+cmd/migo               run a workflow file on local files without HTTP (-check; -stubdb for tests)
+internal/app           wiring; modules.go is the list of modules the service runs
 internal/module        what a module is (Module / Starter / Closer / Services)
+internal/workflow      workflow files: strict parser, step registry, table steps, expressions, xlsx writer
+internal/modules/workflows  serves each workflow at /api/<name>/{upload,download}
+internal/modules/bom        the BOM steps (read, group, PCB, CFT-001, Material_Master, SAP, CFT-002, write)
+internal/modules/system     GET /api/health (the smallest example module)
 internal/httpx         router, error responses, multipart upload, CORS + panic-recovery middleware
 internal/config        config.json (typed shared keys; cfg.String/Int/Bool for a module's own keys)
 internal/storage       generated files: atomic commit, newest-N per owner, retention cleanup
@@ -275,19 +291,10 @@ internal/clients/sap        SAP RFC gateway client (batching is the caller's, re
 internal/clients/sqlserver  shared lazy SQL Server pool
 internal/jsx           JavaScript-exact trim / Number toString / parseFloat
 internal/sheet         .xlsx streaming reader + BIFF8 .xls reader (typed cells, SheetJS range semantics)
-internal/modules/system     GET /api/health (the smallest example module)
-internal/modules/bom        the BOM feature: handlers + a pipeline of named stages
-tools/difftest         differential test against the ORIGINAL Node code (see below)
-docs/EXTENDING.md      how to add an endpoint, a module, a pipeline stage or a business rule
+examples/              a generic table workflow and its input
+docs/WORKFLOWS.md      the workflow file reference
+docs/EXTENDING.md      how to add a step type, a module or a custom endpoint
 ```
-Adding an endpoint, a module, a pipeline step or a vendor rule is described step by step in
-[`docs/EXTENDING.md`](docs/EXTENDING.md). The vendor/brand rules are in `internal/modules/bom/vendorpolicy_default.go`.
-
-## Verifying against the Node service
-`tools/difftest/difftest.sh 1 100` generates random BOM/Priority files (.xlsx and .xls), runs the original
-Node pipeline and this port on them (same stubbed Material_Master, fake SAP server) and compares the output
-workbooks cell by cell plus the log lines. Run it, and `cmd/bomrun` + `tools/difftest/compare_xlsx.js`,
-on your real BOM files before cut-over.
 
 ## Known differences
 * Output is **cell/style identical, not byte identical** (different xlsx library: the XML differs, Excel renders the same).

@@ -29,11 +29,6 @@ type Config struct {
 	DB  DB
 	SAP SAP
 
-	// BOMWorkflow selects the YAML recipe for the existing /api/bom endpoints.
-	// BOMPipelines adds named recipes at /api/pipelines/<name>/{upload,download}.
-	BOMWorkflow  string
-	BOMPipelines map[string]string
-
 	raw map[string]any // every key as decoded, for module-specific settings
 }
 
@@ -117,27 +112,6 @@ func Load(path string) (*Config, error) {
 	}
 	abs, _ := filepath.Abs(target)
 	c := &Config{raw: m, Dir: filepath.Dir(abs)}
-	if v, ok := m["bom_workflow"]; ok {
-		var valid bool
-		c.BOMWorkflow, valid = v.(string)
-		if !valid || strings.TrimSpace(c.BOMWorkflow) == "" {
-			return nil, errors.New("bom_workflow must be a nonempty YAML file path")
-		}
-	}
-	if v, ok := m["bom_pipelines"]; ok {
-		entries, valid := v.(map[string]any)
-		if !valid {
-			return nil, errors.New("bom_pipelines must map pipeline names to YAML file paths")
-		}
-		c.BOMPipelines = make(map[string]string, len(entries))
-		for name, value := range entries {
-			path, valid := value.(string)
-			if !valid || strings.TrimSpace(path) == "" {
-				return nil, fmt.Errorf("bom_pipelines.%s must be a nonempty YAML file path", name)
-			}
-			c.BOMPipelines[name] = path
-		}
-	}
 	c.DB = DB{
 		Enabled:  c.Bool("db_enabled"),
 		Server:   c.String("db_server"),

@@ -1,4 +1,4 @@
-package bom
+package workflows
 
 import (
 	"strings"
@@ -6,24 +6,10 @@ import (
 	"miservice/internal/jsx"
 )
 
-// Uploaded names a (path, original filename) pair.
-type Uploaded struct{ Path, Name string }
-
-// IdentifyUploadedFiles ports helpers.identifyUploadedFiles: the Priority file
-// is recognised by filename; otherwise upload order (BOM first) is assumed.
-func IdentifyUploadedFiles(a, b Uploaded) (bom, priority Uploaded) {
-	na, nb := strings.ToLower(a.Name), strings.ToLower(b.Name)
-	if (strings.Contains(na, "prio") || strings.Contains(na, "shortage")) &&
-		(strings.Contains(nb, "bom") || strings.Contains(nb, ".xls")) {
-		return b, a
-	}
-	return a, b
-}
-
 // ParseEmployeeNumber ports helpers.parseEmployeeNumber; ok is false for
 // missing/invalid values (letters, digits, '-' and '_' only, 1-20 chars).
 func ParseEmployeeNumber(raw string) (string, bool) {
-	v := cellToStr(raw)
+	v := jsx.Trim(raw)
 	if len(v) < 1 || len(v) > 20 {
 		return "", false
 	}

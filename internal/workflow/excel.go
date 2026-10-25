@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -15,181 +13,31 @@ import (
 	"github.com/xuri/excelize/v2"
 )
 
-type stagedWorkbook struct{ target, temp string }
-
 var headerColor = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
 
-func exportWorkbooks(ctx context.Context, cfg *Config, tables map[string]*Table, publish bool) error {
-	staged := make([]stagedWorkbook, 0, len(cfg.Output))
-	defer func() {
-		for _, s := range staged {
-			if s.temp != "" {
-				_ = os.Remove(s.temp)
-			}
-		}
-	}()
-	// Protect every input and template before staging, including aliases through
-	// existing symlinks and hard links.
-	protected := make([]string, 0, len(cfg.Input)+len(cfg.Output))
-	for _, p := range cfg.Input {
-		protected = append(protected, resolvePath(cfg.BaseDir, p))
-	}
-	for _, o := range cfg.Output {
-		if o.Template != "" {
-			protected = append(protected, resolvePath(cfg.BaseDir, o.Template))
-		}
-	}
-	targets := make([]string, 0, len(cfg.Output))
-	for i, o := range cfg.Output {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		path := resolvePath(cfg.BaseDir, o.File)
-		if strings.ToLower(filepath.Ext(path)) != ".xlsx" {
-			return fmt.Errorf("output %d: file must have .xlsx extension", i+1)
-		}
-		for _, p := range append(append([]string(nil), protected...), targets...) {
-			if samePath(path, p) {
-				return fmt.Errorf("output %d: %q collides with input, template, or another output %q", i+1, path, p)
-			}
-		}
-		targets = append(targets, path)
-	}
-	for i, o := range cfg.Output {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		temp, err := renderWorkbook(ctx, cfg, o, tables, targets[i])
-		if err != nil {
-			return fmt.Errorf("output %d (%s): %w", i+1, o.File, err)
-		}
-		staged = append(staged, stagedWorkbook{targets[i], temp})
-	}
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if !publish {
-		return nil
-	}
-	for i, s := range staged {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if err := os.Rename(s.temp, s.target); err != nil {
-			return fmt.Errorf("publish %q (earlier outputs may already be published): %w", s.target, err)
-		}
-		staged[i].temp = ""
-	}
-	return nil
-}
-
-func samePath(a, b string) bool {
-	aa, _ := filepath.Abs(a)
-	bb, _ := filepath.Abs(b)
-	if aa == bb {
-		return true
-	}
-	ai, ae := os.Stat(aa)
-	bi, be := os.Stat(bb)
-	if ae == nil && be == nil && os.SameFile(ai, bi) {
-		return true
-	}
-	canonical := func(p string) string {
-		if v, e := filepath.EvalSymlinks(p); e == nil {
-			return v
-		}
-		if d, e := filepath.EvalSymlinks(filepath.Dir(p)); e == nil {
-			return filepath.Join(d, filepath.Base(p))
-		}
-		return p
-	}
-	return canonical(aa) == canonical(bb)
-}
-
-func renderWorkbook(ctx context.Context, cfg *Config, o Output, tables map[string]*Table, target string) (temp string, err error) {
+// writeWorkbook writes the saved datasets as sheets, in declared order.
+func writeWorkbook(ctx context.Context, out string, sheets []Sheet, tables map[string]*Table) error {
 	f := excelize.NewFile()
-	if o.Template != "" {
-		_ = f.Close()
-		f, err = excelize.OpenFile(resolvePath(cfg.BaseDir, o.Template))
-		if err != nil {
-			return "", fmt.Errorf("template %q: %w", o.Template, err)
-		}
-	}
-	defer func() {
-		if e := f.Close(); err == nil && e != nil {
-			err = e
-		}
-		if err != nil && temp != "" {
-			_ = os.Remove(temp)
-		}
-	}()
-	names := make([]string, 0, len(o.Sheets))
-	for n := range o.Sheets {
-		names = append(names, n)
-	}
-	sort.Strings(names)
-	if len(names) == 0 {
-		return "", fmt.Errorf("no sheets configured")
-	}
-	// Keep one temporary sheet so deleting the sole template/default sheet works.
-	scratch := ""
-	for i := 0; ; i++ {
-		scratch = fmt.Sprintf("_workflow_%d", i)
-		idx, _ := f.GetSheetIndex(scratch)
-		reserved := false
-		for name := range o.Sheets {
-			reserved = reserved || strings.EqualFold(name, scratch)
-		}
-		if idx < 0 && !reserved {
-			break
-		}
-	}
-	if _, err = f.NewSheet(scratch); err != nil {
-		return "", err
-	}
-	if o.Template == "" {
-		if err = f.DeleteSheet("Sheet1"); err != nil {
-			return "", err
-		}
-	}
-	for _, name := range names {
-		if err = ctx.Err(); err != nil {
-			return "", err
-		}
-		t, ok := tables[o.Sheets[name]]
+	defer f.Close()
+	for i, sh := range sheets {
+		t, ok := tables[sh.Dataset]
 		if !ok {
-			return "", fmt.Errorf("sheet %q references unknown dataset %q", name, o.Sheets[name])
+			return fmt.Errorf("output sheet %q: unknown dataset %q", sh.Name, sh.Dataset)
 		}
-		if err = ValidateTable(t); err != nil {
-			return "", fmt.Errorf("sheet %q: %w", name, err)
+		var err error
+		if i == 0 {
+			err = f.SetSheetName("Sheet1", sh.Name)
+		} else {
+			_, err = f.NewSheet(sh.Name)
 		}
-		if idx, _ := f.GetSheetIndex(name); idx >= 0 {
-			if err = f.DeleteSheet(name); err != nil {
-				return "", err
-			}
+		if err != nil {
+			return err
 		}
-		if _, err = f.NewSheet(name); err != nil {
-			return "", err
-		}
-		if err = writeTable(ctx, f, name, t); err != nil {
-			return "", fmt.Errorf("sheet %q: %w", name, err)
+		if err := writeTable(ctx, f, sh.Name, t); err != nil {
+			return fmt.Errorf("output sheet %q: %w", sh.Name, err)
 		}
 	}
-	if err = f.DeleteSheet(scratch); err != nil {
-		return "", err
-	}
-	tmp, err := os.CreateTemp(filepath.Dir(target), ".workflow-*.xlsx")
-	if err != nil {
-		return "", err
-	}
-	temp = tmp.Name()
-	if err = tmp.Close(); err != nil {
-		return temp, err
-	}
-	if err = f.SaveAs(temp); err != nil {
-		return temp, err
-	}
-	return temp, nil
+	return f.SaveAs(out)
 }
 
 func writeTable(ctx context.Context, f *excelize.File, name string, t *Table) error {
@@ -204,7 +52,7 @@ func writeTable(ctx context.Context, f *excelize.File, name string, t *Table) er
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
-			c, e := styleColumn(t, k)
+			c, e := t.col(k)
 			if e != nil {
 				return e
 			}
@@ -326,20 +174,4 @@ func writeTable(ctx context.Context, f *excelize.File, name string, t *Table) er
 		}
 	}
 	return nil
-}
-
-func styleColumn(t *Table, key string) (int, error) {
-	if strings.HasPrefix(key, "@") {
-		n, e := excelize.ColumnNameToNumber(strings.TrimPrefix(key, "@"))
-		if e == nil && n > 0 && n <= len(t.Columns) {
-			return n - 1, nil
-		}
-		return 0, fmt.Errorf("unknown column %q", key)
-	}
-	for i, h := range t.Columns {
-		if h == key {
-			return i, nil
-		}
-	}
-	return 0, fmt.Errorf("unknown column %q", key)
 }

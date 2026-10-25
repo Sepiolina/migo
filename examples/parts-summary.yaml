@@ -1,0 +1,23 @@
+# A generic table workflow. Run it locally:
+#   go run ./cmd/migo -in parts=examples/parts.xlsx -out summary.xlsx examples/parts-summary.yaml
+# or copy it to <config dir>/workflows/ to serve /api/parts-summary/upload.
+name: Parts summary
+input:
+  parts: {label: Parts list}
+
+steps:
+  - from: parts[Parts]
+  - set:
+      Part Number: 'trim(col("Part Number"))'
+  - filter: 'col("Part Number") != "" && num("Quantity") > 0'
+  - group: {by: [Part Number], first: [Description], sum: [Quantity]}
+  - sort: {by: [Part Number]}
+  - style:
+      header: {bold: true, background: "#D9EAF7"}
+      auto_width: true
+      freeze_header: true
+      number_formats: {Quantity: "0"}
+  - save: summary
+
+output:
+  sheets: {Parts: summary}

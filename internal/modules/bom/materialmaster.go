@@ -15,7 +15,7 @@ type Match struct{ MaterialNo, ZBlock string }
 
 // LookupFunc resolves manufacturer part numbers against Material_Master. The
 // result map is keyed by jsx.Norm(mpn). Anything with this signature can
-// stand in for the database (tests, bomrun -stubdb).
+// stand in for the database (tests, migo -stubdb).
 type LookupFunc func(ctx context.Context, mpns []string) (map[string]Match, error)
 
 // MasterRecord is one Material_Master row as returned by the query.
@@ -95,7 +95,7 @@ func queryChunk(ctx context.Context, db *sql.DB, chunk []string) ([]MasterRecord
 	return recs, rs.Err()
 }
 
-// ---- the pipeline stage ----------------------------------------------------
+// ---- the material_master step ---------------------------------------------
 
 const createPN = "CREATE P/N" // marker for "no Forth P/N exists yet"
 

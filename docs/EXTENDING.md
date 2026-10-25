@@ -1,7 +1,8 @@
 # Extending miservice
 
-How to add an endpoint, a feature or a whole module without reading the rest
-of the code. Every recipe says which files to touch.
+Most changes are a workflow file: a new upload/download endpoint, a new rule, a
+different step order. See [WORKFLOWS.md](WORKFLOWS.md). This page covers what
+needs Go: a new step type, a new module, or a custom endpoint.
 
 ## The map
 
@@ -16,8 +17,11 @@ internal/jobs            Gate (limit concurrent heavy jobs), FreeMemory
 internal/clients/sap     SAP RFC gateway client (retries)
 internal/clients/sqlserver  shared lazy SQL Server pool
 internal/jsx, sheet      JS-exact number/trim semantics; .xls/.xlsx readers
+internal/workflow        workflow files: parser, step registry, table steps, expressions
 internal/modules/system  /api/health   <- smallest example of a module
-internal/modules/bom     the BOM feature (see the layout in its module.go)
+internal/modules/workflows  serves every workflow file at /api/<name>/{upload,download}
+internal/modules/bom     the BOM steps used by workflows/bom.yaml (see its doc.go)
+workflows/               built-in workflow files (embedded in the binary)
 ```
 
 Rule of thumb: **handlers are thin** (parse -> call logic -> respond), logic
@@ -66,8 +70,8 @@ that catches crashes. A file **registered** with `m.uploads.Keep(path, owner, cl
 survives its request and is deleted by the scheduled cleanup (every 14 days,
 files registered more than 14 days ago). Dotfiles (`.gitkeep`, the registry)
 are never touched. If the registry is unreadable nothing is deleted.
-The BOM module registers nothing, so its inputs are removed after each request
-as before.
+The workflow endpoints register nothing, so their inputs are removed after
+each request.
 
 ## 2. Add a new module (a new feature area)
 
@@ -91,7 +95,7 @@ as before.
    ```go
    var DefaultModules = []module.Factory{
        system.New,
-       bom.New,
+       workflows.New,
        reports.New,   // <- new
    }
    ```
@@ -110,19 +114,12 @@ New config keys need no change to `internal/config`:
 Need SQL Server? Take a pool: `sqlserver.New(sqlserver.Config{...})`, call `pool.DB()`,
 return `pool.Close()` from your `Close`. Need SAP? `(&sap.Client{}).CallRFC(ctx, endpoint, rows, retries)`.
 
-## 3. Add a processing step to the BOM pipeline
+## 3. Add a step type
 
-For selecting, disabling or reordering existing stages, edit a BOM YAML recipe
-and restart the service. [BOM_PIPELINES.md](BOM_PIPELINES.md) provides the full
-original-equivalent recipe, dependency constraints, CLI usage, and config for
-replacing the default route or adding `/api/pipelines/<id>/upload`.
+Reordering, removing or reconfiguring steps is a workflow file edit. A new
+kind of step needs Go.
 
-A new processing primitive requires Go. `RecipeStageRegistry` in
-`internal/modules/bom/recipe.go` imports the original `DefaultStages` and is
-the registration point for additional YAML-selectable stages. The embedded
-`internal/modules/bom/default.yaml` declares the default execution order.
-
-1. Write the logic as a plain function on rows, in its own file:
+1. Write the logic as a plain function, in its own file. For the BOM:
 
    ```go
    // internal/modules/bom/obsolete.go
@@ -137,40 +134,41 @@ the registration point for additional YAML-selectable stages. The embedded
        j.Log.Printf("Obsolete: %d row(s) flagged.", n)
    }
    ```
-2. Add it to `RecipeStageRegistry`, before `return registry`. Keep
-   `DefaultStages` unchanged for a custom-only operation:
+2. Register it in `Ops` (`internal/modules/bom/steps.go`). `Needs` lists the
+   steps that must come earlier, and `After` lists steps that must come
+   earlier when they are present. Both are checked when the file loads.
 
    ```go
-   registry["obsolete"] = Stage{
-       Name: "obsolete",
-       Run: func(_ context.Context, j *Job) error { flagObsolete(j); return nil },
-   }
+   "flag_obsolete": {Compile: rowsStep(func(_ context.Context, j *Job) { flagObsolete(j) }), Needs: []string{"group_rows"}},
    ```
-   A stage that returns an error aborts the upload with that message; for
-   "optional" data (like SAP) log a warning and return nil instead.
-3. Update dependency validation in `internal/modules/bom/recipe.go` so the new
-   stage requires its inputs and later stages require it where necessary.
-   Update `default.yaml` if it should run by default, and add it to custom
-   recipes that need it. Test valid and invalid dependency arrangements.
+   A step with an argument compiles it in `Compile` (decode with
+   `workflow.Decode`), so a bad argument fails at startup. A step that returns
+   an error aborts the upload with that message. For optional data (like SAP),
+   log a warning and return nil instead.
+3. Use it: add `- flag_obsolete` to `workflows/bom.yaml`.
 4. Show it in the workbook: columns and colours live in `layout.go` (indexes,
    headers, widths) and `sheetbuilder.go` (values and styling).
 5. Test the function directly (see `bom_test.go`: build `[]*Row`, call, assert).
 
-**Always run the regression check after touching a stage**: `go test ./...`
-runs `TestOutputMatchesGolden`; for the SAP path and the original Node
-comparison use `tools/difftest`. If the output is *supposed* to change,
-regenerate `testdata/golden_random7_nosap.xlsx` deliberately and say why in the commit.
+Generic table steps live in `internal/workflow/table.go`, and they follow the
+same pattern via `tableStep`.
+
+**Always run the regression check after touching a step or `bom.yaml`**:
+`go test ./...` runs `TestOutputMatchesGolden`. If the output is *supposed* to
+change, regenerate `testdata/golden_random7_nosap.xlsx` deliberately and say
+why in the commit.
 
 ## 4. Change a business rule
 
 | Change | Where |
 | --- | --- |
-| Ban a vendor outright | `BannedUnconditional` in `vendorpolicy_default.go` |
-| Ban a brand except some parts | add a `BrandException` there (see the TDK entry; helpers `brandContainsAny`, `capsMustSatisfy`, `mpnStartsWith`) |
+| Ban a vendor outright | `banned` under `vendor_policy` in `workflows/bom.yaml` |
+| Ban a brand except some parts | add an `exceptions` entry there (`brand`, `allow`, `log`) |
+| Recognise the Priority upload by another name | `match` of the `priority` input |
 | Accept another header title in customer BOMs | `headerSynonyms` in `readers.go` |
 | MAIN/SUB selection logic | `chooseMain` in `selection.go` |
 | SAP batch size / retries | `api_batch_size`, `api_retries` in `config.json` |
-| Upload size limit | `MaxUploadMB` in `module.go` |
+| Upload size limit | `MaxUploadMB` in `internal/modules/workflows/module.go` |
 | Output retention | constants at the top of `internal/storage/outputstore.go` |
 
 ## 5. Conventions

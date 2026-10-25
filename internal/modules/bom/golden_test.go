@@ -17,9 +17,8 @@ import (
 
 // testdata/golden_random7_nosap.xlsx is the output of the pre-refactor
 // implementation for the same inputs (stubbed Material Master, SAP off). The
-// pipeline must reproduce every cell value of both sheets, so run this after
-// ANY change to a stage. (For the SAP path and the comparison against the
-// original Node service use tools/difftest.)
+// workflows/bom.yaml must reproduce every cell value of both sheets, so run
+// this after ANY change to a step or to the workflow file.
 func TestOutputMatchesGolden(t *testing.T) {
 	raw, err := os.ReadFile("../../../testdata/stub_random7.json")
 	if err != nil {
@@ -40,8 +39,8 @@ func TestOutputMatchesGolden(t *testing.T) {
 	}
 	cfg := &config.Config{DB: config.DB{Enabled: true}}
 	out := filepath.Join(t.TempDir(), "out.xlsx")
-	if err := NewPipeline(cfg, logx.Nop, Deps{Lookup: lookup}).Process(context.Background(),
-		"../../../testdata/bom_random7.xls", "../../../testdata/prio_random7.xls", out); err != nil {
+	inputs := map[string]string{"bom": "../../../testdata/bom_random7.xls", "priority": "../../../testdata/prio_random7.xls"}
+	if err := bomWorkflow(t, Deps{Lookup: lookup}).Run(context.Background(), cfg, logx.Nop, inputs, out); err != nil {
 		t.Fatal(err)
 	}
 	got, want := readAll(t, out), readAll(t, "../../../testdata/golden_random7_nosap.xlsx")
