@@ -29,9 +29,9 @@ type Deps struct {
 }
 
 // Ops are the BOM workflow steps (see workflows/bom.yaml). Needs/After
-// encode what each step reads from the earlier ones.
+// encode what each step reads from the earlier ones; each runs at most once.
 func Ops(d Deps) workflow.Registry {
-	return workflow.Registry{
+	ops := workflow.Registry{
 		"read_bom":      {Compile: inputStep("bom", readBOM)},
 		"read_priority": {Compile: inputStep("priority", readPriority), Needs: []string{"read_bom"}},
 		"group_rows":    {Compile: rowsStep(func(_ context.Context, j *Job) { ProcessGrouping(j.Rows) }), Needs: []string{"read_bom"}},
@@ -51,6 +51,11 @@ func Ops(d Deps) workflow.Registry {
 		},
 		"write_bom": {Compile: noArg(writeBOM), Needs: []string{"read_bom"}, Writes: true},
 	}
+	for name, op := range ops {
+		op.Once = true
+		ops[name] = op
+	}
+	return ops
 }
 
 func job(s *workflow.State) (*Job, error) {
@@ -62,8 +67,8 @@ func job(s *workflow.State) (*Job, error) {
 }
 
 // inputStep compiles "read_x" or "read_x: <input name>".
-func inputStep(def string, run func(s *workflow.State, path string) error) func(*yaml.Node) (workflow.Runner, error) {
-	return func(arg *yaml.Node) (workflow.Runner, error) {
+func inputStep(def string, run func(s *workflow.State, path string) error) func(*yaml.Node, *workflow.Scope) (workflow.Runner, error) {
+	return func(arg *yaml.Node, sc *workflow.Scope) (workflow.Runner, error) {
 		name := def
 		if arg != nil {
 			if arg.Kind != yaml.ScalarNode || arg.Value == "" {
@@ -71,18 +76,15 @@ func inputStep(def string, run func(s *workflow.State, path string) error) func(
 			}
 			name = arg.Value
 		}
-		return func(_ context.Context, s *workflow.State) error {
-			path, ok := s.Inputs[name]
-			if !ok {
-				return fmt.Errorf("unknown input %q", name)
-			}
-			return run(s, path)
-		}, nil
+		if err := sc.Input(name); err != nil {
+			return nil, err
+		}
+		return func(_ context.Context, s *workflow.State) error { return run(s, s.Inputs[name]) }, nil
 	}
 }
 
-func noArg(run workflow.Runner) func(*yaml.Node) (workflow.Runner, error) {
-	return func(arg *yaml.Node) (workflow.Runner, error) {
+func noArg(run workflow.Runner) func(*yaml.Node, *workflow.Scope) (workflow.Runner, error) {
+	return func(arg *yaml.Node, _ *workflow.Scope) (workflow.Runner, error) {
 		if arg != nil {
 			return nil, fmt.Errorf("takes no argument")
 		}
@@ -92,7 +94,7 @@ func noArg(run workflow.Runner) func(*yaml.Node) (workflow.Runner, error) {
 
 // rowsStep adapts a function of the Job that cannot fail (optional
 // enrichments log and carry on) to a step.
-func rowsStep(fn func(ctx context.Context, j *Job)) func(*yaml.Node) (workflow.Runner, error) {
+func rowsStep(fn func(ctx context.Context, j *Job)) func(*yaml.Node, *workflow.Scope) (workflow.Runner, error) {
 	return noArg(func(ctx context.Context, s *workflow.State) error {
 		j, err := job(s)
 		if err != nil {
@@ -133,10 +135,13 @@ func writeBOM(_ context.Context, s *workflow.State) error {
 	return nil
 }
 
-func compileVendorPolicy(arg *yaml.Node) (workflow.Runner, error) {
+func compileVendorPolicy(arg *yaml.Node, _ *workflow.Scope) (workflow.Runner, error) {
 	var spec VendorPolicySpec
 	if err := workflow.Decode(arg, &spec); err != nil {
 		return nil, err
+	}
+	if len(spec.Banned) == 0 && len(spec.Exceptions) == 0 {
+		return nil, fmt.Errorf("needs banned and/or exceptions")
 	}
 	policy, err := spec.Compile()
 	if err != nil {

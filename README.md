@@ -297,6 +297,9 @@ docs/EXTENDING.md      how to add a step type, a module or a custom endpoint
 ```
 
 ## Known differences
+* Upload order: an uploaded file whose name contains `prio` or `shortage` is always taken as the Priority file
+  (`match` in `workflows/bom.yaml`). Node also required the other file's name to contain `bom` or `.xls`. The two
+  rules differ only for files uploaded without an Excel extension.
 * Output is **cell/style identical, not byte identical** (different xlsx library: the XML differs, Excel renders the same).
 * Node's Zod "NOTE: unexpected field values" log lines are gone (static types make that check moot; output unaffected).
 * Unknown routes return plain `Cannot GET /x` instead of Express' HTML error page.

@@ -15,10 +15,10 @@ import (
 // writer, so tests need no output.sheets) to the table steps.
 func testReg(data map[string]*Table) Registry {
 	return TableOps().With(Registry{
-		"load": {Compile: func(arg *yaml.Node) (Runner, error) {
+		"load": {Compile: func(arg *yaml.Node, _ *Scope) (Runner, error) {
 			return func(_ context.Context, s *State) error { s.Cur = data[arg.Value].clone(); return nil }, nil
 		}},
-		"done": {Compile: func(*yaml.Node) (Runner, error) {
+		"done": {Compile: func(*yaml.Node, *Scope) (Runner, error) {
 			return func(context.Context, *State) error { return nil }, nil
 		}, Writes: true},
 	})
@@ -203,5 +203,51 @@ output:
 	}
 	if err := wf.Run(context.Background(), nil, nil, map[string]string{}, out); err == nil {
 		t.Error("missing input accepted")
+	}
+}
+
+func TestParseChecksNames(t *testing.T) {
+	const head = "name: T\ninput: {a: {}}\nsteps:\n"
+	for name, doc := range map[string]string{
+		"unknown from":     head + "  - from: b\n  - save: x\noutput: {sheets: {X: x}}\n",
+		"unknown sheet":    head + "  - from: a\n  - save: x\noutput: {sheets: {X: y}}\n",
+		"unknown join":     head + "  - from: a\n  - join: {with: y, on: [K]}\n  - save: x\noutput: {sheets: {X: x}}\n",
+		"save hides input": head + "  - from: a\n  - save: a\noutput: {sheets: {X: a}}\n",
+		"writer not last":  head + "  - done\n  - from: a\n",
+	} {
+		if _, err := Parse([]byte(doc), testReg(nil)); err == nil {
+			t.Errorf("%s: accepted", name)
+		}
+	}
+}
+
+func TestNumbersAreNotScientific(t *testing.T) {
+	big := &Table{Columns: []string{"Qty"}, Rows: [][]string{{"600000"}, {"400000"}, {"0.00001"}}}
+	got, err := apply(t, "  - set: {Tiny: 'num(\"Qty\") / 100000000000'}\n  - group: {sum: [Qty], min: [Tiny]}", map[string]*Table{"parts": big})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Rows[0][0] != "1000000.00001" || strings.ContainsAny(got.Rows[0][1], "eE") || !strings.HasPrefix(got.Rows[0][1], "0.0000000000000001") {
+		t.Errorf("got %v", got.Rows[0])
+	}
+}
+
+// One compiled workflow serves concurrent requests (run with -race).
+func TestConcurrentRuns(t *testing.T) {
+	wf, err := Parse([]byte("name: T\ninput: {parts: {}}\nsteps:\n  - from: parts\n  - filter: 'num(\"Quantity\") > 2'\n  - set: {ID2: 'col(\"ID\") + \"x\"'}\n  - save: s\noutput: {sheets: {S: s}}\n"), TableOps())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	errs := make(chan error, 8)
+	for i := 0; i < 8; i++ {
+		go func(i int) {
+			errs <- wf.Run(context.Background(), nil, nil, map[string]string{"parts": "testdata/parts.xls"}, filepath.Join(dir, strings.Repeat("o", i+1)+".xlsx"))
+		}(i)
+	}
+	for i := 0; i < 8; i++ {
+		if err := <-errs; err != nil {
+			t.Error(err)
+		}
 	}
 }

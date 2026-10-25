@@ -215,10 +215,14 @@ func TestBOMWorkflowSteps(t *testing.T) {
 
 func TestStepOrderIsChecked(t *testing.T) {
 	for name, steps := range map[string]string{
-		"needs":   "[read_bom, pcb_scope, write_bom]",
-		"after":   "[read_bom, read_priority, group_rows, pcb_scope, pcb_reformat, {vendor_policy: {}}, select_priority, material_master, write_bom]",
-		"no read": "[group_rows, write_bom]",
-		"arg":     "[read_bom, {group_rows: x}, write_bom]",
+		"needs":          "[read_bom, pcb_scope, write_bom]",
+		"after":          "[read_bom, read_priority, group_rows, pcb_scope, pcb_reformat, {vendor_policy: {banned: [X]}}, select_priority, material_master, write_bom]",
+		"no read":        "[group_rows, write_bom]",
+		"arg":            "[read_bom, {group_rows: x}, write_bom]",
+		"twice":          "[read_bom, read_bom, write_bom]",
+		"write not last": "[read_bom, write_bom, group_rows]",
+		"unknown input":  "[{read_bom: customer}, write_bom]",
+		"empty policy":   "[read_bom, group_rows, pcb_scope, pcb_reformat, vendor_policy, write_bom]",
 	} {
 		doc := "name: X\ninput: {bom: {}, priority: {}}\nsteps: " + steps + "\n"
 		if _, err := workflow.Parse([]byte(doc), Ops(Deps{})); err == nil {

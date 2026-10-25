@@ -62,12 +62,12 @@ type tableFn func(t *Table, s *State) (*Table, error)
 
 // tableStep wraps a compiler of table functions so every step gets a copy
 // (saved datasets never change) and a validated result.
-func tableStep(compile func(arg *yaml.Node) (tableFn, error)) func(*yaml.Node) (Runner, error) {
-	return func(arg *yaml.Node) (Runner, error) {
+func tableStep(compile func(arg *yaml.Node, sc *Scope) (tableFn, error)) func(*yaml.Node, *Scope) (Runner, error) {
+	return func(arg *yaml.Node, sc *Scope) (Runner, error) {
 		if arg == nil {
 			return nil, fmt.Errorf("needs an argument")
 		}
-		fn, err := compile(arg)
+		fn, err := compile(arg, sc)
 		if err != nil {
 			return nil, err
 		}
@@ -93,7 +93,7 @@ func tableStep(compile func(arg *yaml.Node) (tableFn, error)) func(*yaml.Node) (
 // from: input            first sheet of an uploaded file
 // from: input[Sheet]     a named sheet
 // from: dataset          a dataset saved earlier
-func compileFrom(arg *yaml.Node) (Runner, error) {
+func compileFrom(arg *yaml.Node, sc *Scope) (Runner, error) {
 	if arg == nil || arg.Kind != yaml.ScalarNode || strings.TrimSpace(arg.Value) == "" {
 		return nil, fmt.Errorf("names an input, input[Sheet] or a saved dataset")
 	}
@@ -103,6 +103,9 @@ func compileFrom(arg *yaml.Node) (Runner, error) {
 			return nil, fmt.Errorf("invalid source %q: use input[Sheet]", src)
 		}
 		src, sheetName = src[:i], src[i+1:len(src)-1]
+	}
+	if !sc.Inputs[src] && (sheetName != "" || !sc.Saved[src]) {
+		return nil, fmt.Errorf("unknown input or dataset %q", src)
 	}
 	return func(_ context.Context, s *State) error {
 		if t, ok := s.Tables[src]; ok && sheetName == "" {
@@ -163,15 +166,16 @@ func readTable(path, name string) (*Table, error) {
 	return t, t.validate()
 }
 
-func compileSave(arg *yaml.Node) (tableFn, error) {
+func compileSave(arg *yaml.Node, sc *Scope) (tableFn, error) {
 	name := strings.TrimSpace(arg.Value)
 	if arg.Kind != yaml.ScalarNode || name == "" {
 		return nil, fmt.Errorf("names the dataset to save")
 	}
+	if sc.Inputs[name] {
+		return nil, fmt.Errorf("dataset %q would hide the input of the same name", name)
+	}
+	sc.Saved[name] = true
 	return func(t *Table, s *State) (*Table, error) {
-		if _, clash := s.Inputs[name]; clash {
-			return nil, fmt.Errorf("dataset %q would hide the input of the same name", name)
-		}
 		s.Tables[name] = t.clone()
 		return t, nil
 	}, nil
@@ -180,7 +184,7 @@ func compileSave(arg *yaml.Node) (tableFn, error) {
 // ---- columns ----------------------------------------------------------------
 
 // select: {New: Source, ...} keeps only these columns, in this order.
-func compileSelect(arg *yaml.Node) (tableFn, error) {
+func compileSelect(arg *yaml.Node, sc *Scope) (tableFn, error) {
 	pairs, err := orderedPairs(arg)
 	if err != nil {
 		return nil, err
@@ -209,7 +213,7 @@ func compileSelect(arg *yaml.Node) (tableFn, error) {
 }
 
 // rename: {Old: New, ...} keeps every column.
-func compileRename(arg *yaml.Node) (tableFn, error) {
+func compileRename(arg *yaml.Node, sc *Scope) (tableFn, error) {
 	pairs, err := orderedPairs(arg)
 	if err != nil {
 		return nil, err
@@ -234,7 +238,7 @@ func compileRename(arg *yaml.Node) (tableFn, error) {
 }
 
 // fill: [Col, ...] forward-fills blank cells from the row above.
-func compileFill(arg *yaml.Node) (tableFn, error) {
+func compileFill(arg *yaml.Node, sc *Scope) (tableFn, error) {
 	names, err := columnList(arg)
 	if err != nil {
 		return nil, err
@@ -259,7 +263,7 @@ func compileFill(arg *yaml.Node) (tableFn, error) {
 }
 
 // dedupe: [Col, ...] keeps the first row of each key.
-func compileDedupe(arg *yaml.Node) (tableFn, error) {
+func compileDedupe(arg *yaml.Node, sc *Scope) (tableFn, error) {
 	names, err := columnList(arg)
 	if err != nil {
 		return nil, err
@@ -285,7 +289,7 @@ func compileDedupe(arg *yaml.Node) (tableFn, error) {
 // ---- expressions ------------------------------------------------------------
 
 // filter: '<expression>' keeps the rows where it is true.
-func compileFilter(arg *yaml.Node) (tableFn, error) {
+func compileFilter(arg *yaml.Node, sc *Scope) (tableFn, error) {
 	e, err := compileRowExpr(arg.Value, true)
 	if err != nil {
 		return nil, err
@@ -307,7 +311,7 @@ func compileFilter(arg *yaml.Node) (tableFn, error) {
 }
 
 // set: {Col: '<expression>', ...} computes columns in order; new ones are appended.
-func compileSet(arg *yaml.Node) (tableFn, error) {
+func compileSet(arg *yaml.Node, sc *Scope) (tableFn, error) {
 	pairs, err := orderedPairs(arg)
 	if err != nil {
 		return nil, err
@@ -348,7 +352,7 @@ var aggregates = []string{"sum", "count", "mean", "min", "max", "first", "last",
 
 // group: {by: [Key], sum: [Qty], first: [Desc], ...}. Without by, the whole
 // table becomes one row.
-func compileGroup(arg *yaml.Node) (tableFn, error) {
+func compileGroup(arg *yaml.Node, sc *Scope) (tableFn, error) {
 	var spec map[string][]string
 	if err := strictDecode(arg, &spec); err != nil {
 		return nil, err
@@ -477,7 +481,7 @@ func aggregate(t *Table, rows []int, n int, op string) (string, error) {
 }
 
 // sort: {by: [Col, ...], desc: false, numeric: false}; stable.
-func compileSort(arg *yaml.Node) (tableFn, error) {
+func compileSort(arg *yaml.Node, sc *Scope) (tableFn, error) {
 	var spec struct {
 		By      []string `yaml:"by"`
 		Desc    bool     `yaml:"desc"`
@@ -535,7 +539,7 @@ func compileSort(arg *yaml.Node) (tableFn, error) {
 // ---- other datasets ---------------------------------------------------------
 
 // join: {with: dataset, on: [Key], right_on: [Key], how: left|inner, normalize: false, suffix: _right}
-func compileJoin(arg *yaml.Node) (tableFn, error) {
+func compileJoin(arg *yaml.Node, sc *Scope) (tableFn, error) {
 	var spec struct {
 		With      string   `yaml:"with"`
 		On        []string `yaml:"on"`
@@ -549,6 +553,9 @@ func compileJoin(arg *yaml.Node) (tableFn, error) {
 	}
 	if spec.With == "" || len(spec.On) == 0 {
 		return nil, fmt.Errorf("needs with and on")
+	}
+	if !sc.Saved[spec.With] {
+		return nil, fmt.Errorf("unknown dataset %q (save it first)", spec.With)
 	}
 	if spec.RightOn == nil {
 		spec.RightOn = spec.On
@@ -610,10 +617,15 @@ func compileJoin(arg *yaml.Node) (tableFn, error) {
 }
 
 // append: [dataset, ...] adds their rows; columns are matched by name.
-func compileAppend(arg *yaml.Node) (tableFn, error) {
+func compileAppend(arg *yaml.Node, sc *Scope) (tableFn, error) {
 	names, err := columnList(arg)
 	if err != nil {
 		return nil, err
+	}
+	for _, name := range names {
+		if !sc.Saved[name] {
+			return nil, fmt.Errorf("unknown dataset %q (save it first)", name)
+		}
 	}
 	return func(t *Table, s *State) (*Table, error) {
 		for _, name := range names {
@@ -642,7 +654,7 @@ func compileAppend(arg *yaml.Node) (tableFn, error) {
 
 // compare: {with: baseline, by: [Key], columns: [..], normalize: false, status: status}
 // adds a status column: added, removed, changed or unchanged.
-func compileCompare(arg *yaml.Node) (tableFn, error) {
+func compileCompare(arg *yaml.Node, sc *Scope) (tableFn, error) {
 	var spec struct {
 		With      string   `yaml:"with"`
 		By        []string `yaml:"by"`
@@ -655,6 +667,9 @@ func compileCompare(arg *yaml.Node) (tableFn, error) {
 	}
 	if spec.With == "" || len(spec.By) == 0 {
 		return nil, fmt.Errorf("needs with and by")
+	}
+	if !sc.Saved[spec.With] {
+		return nil, fmt.Errorf("unknown dataset %q (save it first)", spec.With)
 	}
 	if spec.Status == "" {
 		spec.Status = "status"
@@ -741,7 +756,7 @@ func compileCompare(arg *yaml.Node) (tableFn, error) {
 }
 
 // style: {header: {bold, background, color}, auto_width, freeze_header, number_formats: {Col: "0.00"}}
-func compileStyle(arg *yaml.Node) (tableFn, error) {
+func compileStyle(arg *yaml.Node, sc *Scope) (tableFn, error) {
 	var st Style
 	if err := strictDecode(arg, &st); err != nil {
 		return nil, err
@@ -902,7 +917,7 @@ func number(v float64) (string, error) {
 	if math.IsNaN(v) || math.IsInf(v, 0) {
 		return "", fmt.Errorf("result is not a finite number")
 	}
-	return strconv.FormatFloat(v, 'g', -1, 64), nil
+	return strconv.FormatFloat(v, 'f', -1, 64), nil
 }
 
 func compareFloat(a, b float64) int {

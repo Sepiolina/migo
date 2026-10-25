@@ -126,6 +126,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stdout, "workflow checked; no output kept")
 		return 0
 	}
+	// CreateTemp makes the file 0600; give the result normal permissions.
+	if err := os.Chmod(tmp.Name(), 0o644); err != nil {
+		return fail(1, err)
+	}
 	if err := os.Rename(tmp.Name(), *out); err != nil {
 		return fail(1, err)
 	}

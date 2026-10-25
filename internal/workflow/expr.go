@@ -12,47 +12,27 @@ import (
 )
 
 // Row expressions (filter, set) are expr-lang (https://expr-lang.org) with
-// three helpers on top of its builtins (trim, upper, lower, replace,
-// startsWith, contains, matches, ...):
+// three helpers on top of its builtins (trim, upper, lower, replace, len) and
+// operators (startsWith, contains, matches, ...):
 //
 //	col("Part Number")   the cell as text
 //	num("Quantity")      the cell as a number (error if it is not one)
 //	norm(s)              trimmed upper case, as BOM matching does
-type rowExpr struct {
-	prog *vm.Program
-	cur  *rowCursor
-}
+type rowExpr struct{ prog *vm.Program }
 
-type rowCursor struct {
-	t   *Table
-	row []string
-	i   int
+// rowEnv is built per row, so one compiled workflow can serve concurrent
+// requests.
+type rowEnv struct {
+	Col  func(string) (string, error)  `expr:"col"`
+	Num  func(string) (float64, error) `expr:"num"`
+	Norm func(string) string           `expr:"norm"`
 }
 
 func compileRowExpr(src string, boolean bool) (*rowExpr, error) {
 	if strings.TrimSpace(src) == "" {
 		return nil, fmt.Errorf("expression must not be blank")
 	}
-	cur := &rowCursor{}
-	cell := func(name string) (string, error) {
-		n, err := cur.t.col(name)
-		if err != nil {
-			return "", fmt.Errorf("row %d: %w", cur.i+1, err)
-		}
-		return cur.row[n], nil
-	}
-	opts := []expr.Option{
-		expr.Env(map[string]any{}),
-		expr.Function("col", func(p ...any) (any, error) { return cell(p[0].(string)) }, new(func(string) string)),
-		expr.Function("num", func(p ...any) (any, error) {
-			v, err := cell(p[0].(string))
-			if err != nil {
-				return nil, err
-			}
-			return numeric(v, cur.i, p[0].(string))
-		}, new(func(string) float64)),
-		expr.Function("norm", func(p ...any) (any, error) { return jsx.Norm(p[0].(string)), nil }, new(func(string) string)),
-	}
+	opts := []expr.Option{expr.Env(rowEnv{})}
 	if boolean {
 		opts = append(opts, expr.AsBool())
 	}
@@ -60,12 +40,28 @@ func compileRowExpr(src string, boolean bool) (*rowExpr, error) {
 	if err != nil {
 		return nil, fmt.Errorf("expression %q: %w", src, err)
 	}
-	return &rowExpr{prog, cur}, nil
+	return &rowExpr{prog}, nil
 }
 
 func (e *rowExpr) eval(t *Table, row []string, i int) (any, error) {
-	e.cur.t, e.cur.row, e.cur.i = t, row, i
-	return expr.Run(e.prog, map[string]any{})
+	col := func(name string) (string, error) {
+		n, err := t.col(name)
+		if err != nil {
+			return "", fmt.Errorf("row %d: %w", i+1, err)
+		}
+		return row[n], nil
+	}
+	return expr.Run(e.prog, rowEnv{
+		Col: col,
+		Num: func(name string) (float64, error) {
+			v, err := col(name)
+			if err != nil {
+				return 0, err
+			}
+			return numeric(v, i, name)
+		},
+		Norm: jsx.Norm,
+	})
 }
 
 // toText renders an expression result as a cell value.

@@ -69,10 +69,26 @@ type Runner func(ctx context.Context, s *State) error
 // Op describes a step type. Compile receives the step's argument (nil when
 // the step is written as a bare name) and checks it before anything runs.
 type Op struct {
-	Compile func(arg *yaml.Node) (Runner, error)
+	Compile func(arg *yaml.Node, sc *Scope) (Runner, error)
 	Needs   []string // steps that must appear earlier
 	After   []string // steps that, when present, must appear earlier
-	Writes  bool     // the step writes the output workbook itself
+	Once    bool     // the step may appear only once
+	Writes  bool     // the step writes the output workbook; it must be last
+}
+
+// Scope is what a step compiler may check names against: the declared
+// inputs and the datasets saved by earlier steps.
+type Scope struct {
+	Inputs map[string]bool
+	Saved  map[string]bool
+}
+
+// Input checks that name is a declared input.
+func (sc *Scope) Input(name string) error {
+	if !sc.Inputs[name] {
+		return fmt.Errorf("unknown input %q", name)
+	}
+	return nil
 }
 
 // Registry is the set of step types a workflow may use.
@@ -138,6 +154,10 @@ func Parse(data []byte, reg Registry) (*Workflow, error) {
 	}
 	seen := map[string]int{}
 	writes := 0
+	sc := &Scope{Inputs: map[string]bool{}, Saved: map[string]bool{}}
+	for _, in := range wf.Inputs {
+		sc.Inputs[in.Name] = true
+	}
 	for i, n := range doc.Steps {
 		name, arg, err := splitStep(&n)
 		if err != nil {
@@ -146,6 +166,12 @@ func Parse(data []byte, reg Registry) (*Workflow, error) {
 		op, ok := reg[name]
 		if !ok {
 			return nil, fmt.Errorf("step %d: unknown step %q", i+1, name)
+		}
+		if _, dup := seen[name]; dup && op.Once {
+			return nil, fmt.Errorf("step %d (%s): may appear only once", i+1, name)
+		}
+		if op.Writes && i != len(doc.Steps)-1 {
+			return nil, fmt.Errorf("step %d (%s): writes the output, so it must be the last step", i+1, name)
 		}
 		for _, need := range op.Needs {
 			if _, ok := seen[need]; !ok {
@@ -159,7 +185,7 @@ func Parse(data []byte, reg Registry) (*Workflow, error) {
 				}
 			}
 		}
-		run, err := op.Compile(arg)
+		run, err := op.Compile(arg, sc)
 		if err != nil {
 			return nil, fmt.Errorf("step %d (%s): %w", i+1, name, err)
 		}
@@ -177,6 +203,11 @@ func Parse(data []byte, reg Registry) (*Workflow, error) {
 		return nil, fmt.Errorf("output.sheets cannot be combined with a step that writes the output")
 	case writes == 0 && len(wf.Sheets) == 0:
 		return nil, fmt.Errorf("output.sheets must name at least one sheet")
+	}
+	for _, sh := range wf.Sheets {
+		if !sc.Saved[sh.Dataset] {
+			return nil, fmt.Errorf("output sheet %q: no step saves dataset %q", sh.Name, sh.Dataset)
+		}
 	}
 	return wf, nil
 }
@@ -201,7 +232,9 @@ func (wf *Workflow) Run(ctx context.Context, cfg *config.Config, log logx.Logger
 			return err
 		}
 		if err := run(ctx, s); err != nil {
-			return fmt.Errorf("step %d (%s): %w", i+1, wf.Steps[i], err)
+			// The error text stays the step's own: it is the API's error message.
+			log.Printf("%s: step %d (%s) failed", wf.Name, i+1, wf.Steps[i])
+			return err
 		}
 	}
 	if len(wf.Sheets) == 0 {

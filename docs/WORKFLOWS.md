@@ -49,6 +49,8 @@ first or second.
 
 **Output.** A workflow either lists `output.sheets` or ends in a step that writes the workbook itself, such as `write_bom`.
 
+Everything is checked when the file loads: input and dataset names, step order and arguments, and expressions. A bad file stops startup; it never fails a request halfway.
+
 ## Table steps
 
 These work on the *current table*. `from` loads it and `save` stores a copy under a name.
@@ -88,7 +90,7 @@ them in single quotes in YAML. Inside `filter` and `set` you can use:
 
 ## BOM steps
 
-`workflows/bom.yaml` is the BOM processor. Its output is cell-for-cell
+`workflows/bom.yaml` is the BOM processor. Each BOM step appears at most once. Its output is cell-for-cell
 identical to the original service; `TestOutputMatchesGolden` checks this.
 
 | Step | Does | Needs earlier |
