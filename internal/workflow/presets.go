@@ -2,9 +2,10 @@ package workflow
 
 import (
 	"fmt"
-	"gopkg.in/yaml.v3"
 	"os"
 	"path/filepath"
+
+	"gopkg.in/yaml.v3"
 )
 
 var categoryOperation = map[string]string{"filters": "filter", "forward_fills": "forward_fill", "groups": "group", "aggregations": "aggregate", "mappings": "map", "styles": "style", "sorts": "sort", "transforms": "transform", "pipelines": "pipeline"}

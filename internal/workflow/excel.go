@@ -132,14 +132,17 @@ func renderWorkbook(ctx context.Context, cfg *Config, o Output, tables map[strin
 		return "", fmt.Errorf("no sheets configured")
 	}
 	// Keep one temporary sheet so deleting the sole template/default sheet works.
-	scratch := "__workflow_tmp__"
-	for {
+	scratch := ""
+	for i := 0; ; i++ {
+		scratch = fmt.Sprintf("_workflow_%d", i)
 		idx, _ := f.GetSheetIndex(scratch)
-		_, reserved := o.Sheets[scratch]
+		reserved := false
+		for name := range o.Sheets {
+			reserved = reserved || strings.EqualFold(name, scratch)
+		}
 		if idx < 0 && !reserved {
 			break
 		}
-		scratch += "_"
 	}
 	if _, err = f.NewSheet(scratch); err != nil {
 		return "", err
@@ -230,6 +233,11 @@ func writeTable(ctx context.Context, f *excelize.File, name string, t *Table) er
 			cell, err := excelize.CoordinatesToCellName(c+1, r+1)
 			if err != nil {
 				return err
+			}
+			// Excelize silently truncates overlong strings. Reject them instead of
+			// losing data produced by an aggregation or text transformation.
+			if utf8.RuneCountInString(v) > excelize.TotalCellChars {
+				return fmt.Errorf("cell %s exceeds XLSX limit of %d characters", cell, excelize.TotalCellChars)
 			}
 			// Number formats explicitly opt columns into numeric cells. Everything
 			// else stays text, preserving identifiers and literal leading '='.

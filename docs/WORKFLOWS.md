@@ -55,12 +55,17 @@ and nonblank; unused trailing blank headers are trimmed. Names are exact and
 case sensitive. Use `@A`, `@B`, through `@AA`, etc. for positional references;
 `A` means a literal header named `A`.
 
+`header_row` applies only to file/sheet sources; it is rejected on references
+to an earlier dataset.
+
 Input, output, and template paths resolve relative to the recipe file, even
 when the command runs elsewhere. Output is a list of workbooks, each with a
 `file`, optional literal `template` path, and a `sheets` mapping from Excel sheet
 names to datasets. Sheet names are processed in sorted order. Every process
 and workbook is prepared before files are published. Each file replacement is
 atomic; publication of multiple files is not a single transaction.
+Output directories must already exist. The bundled examples include an ignored
+`generated` directory for their results.
 
 YAML is strictly decoded: unknown properties, duplicate keys, invalid operation
 values, missing references, and preset cycles are errors. Each step contains
@@ -95,6 +100,9 @@ and `join`. `min` and `max` are numeric. `count` counts rows, including blanks;
 Arithmetic, numeric predicates, numeric sorting, and numeric aggregation reject
 blank, invalid, and nonfinite values rather than silently converting them to
 zero. Calculations also reject nonfinite results.
+All conditions in a filter are evaluated, even after another condition decides
+the match. To exclude blank quantities before a numeric comparison, use a
+separate `filter: {column: Quantity, blank: false}` step first.
 
 ## Presets and imports
 
@@ -149,6 +157,9 @@ including identifiers with leading zeros and strings starting with `=`.
 `style.number_formats` explicitly opts a column into numeric Excel cells:
 nonblank values must be finite numbers; blanks remain blank. Do not use it on
 identifier columns whose leading zeros matter.
+Cells longer than Excel's 32,767-character limit are rejected instead of
+silently truncated. Calculations use finite 64-bit floating-point numbers;
+they do not provide arbitrary-precision decimal arithmetic.
 
 For a template, set `template: report-template.xlsx` beside `file`. Untouched
 sheets retain their formulas and styles. An output sheet that matches an
