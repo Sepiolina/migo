@@ -29,6 +29,16 @@ choose PM2 as the process manager, see below).
 
 After any request, `uploads/` should contain nothing except `.gitkeep` (and `.keep.json` if a module uses keep).
 
+## Declarative spreadsheet workflows
+
+Run a generic Excel recipe with
+`go run ./cmd/bomrun -workflow examples/workflows/basic.yaml`.
+Add `-check` to process and render without publishing files. The bundled basic
+and preset examples use a synthetic workbook and need no external services.
+See [the workflow guide](docs/WORKFLOWS.md) for operations, presets, imports,
+templates, and a multi-workbook example. The existing BOM CLI and HTTP pipeline
+remain available.
+
 ## Testing on Windows
 Everything below is PowerShell, run from the project folder. None of it needs SQL Server, SAP or Node.
 

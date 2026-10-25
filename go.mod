@@ -6,6 +6,7 @@ require (
 	github.com/microsoft/go-mssqldb v1.7.2
 	github.com/richardlehane/mscfb v1.0.4
 	github.com/xuri/excelize/v2 v2.8.1
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
