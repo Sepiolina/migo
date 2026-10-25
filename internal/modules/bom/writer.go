@@ -7,7 +7,7 @@ import (
 // WriteOutput writes the two-sheet workbook ("BOM" + "debug") to outPath.
 func WriteOutput(rows []*Row, outPath string, policy *VendorPolicy) error {
 	if policy == nil {
-		policy = DefaultVendorPolicy
+		policy = &VendorPolicy{}
 	}
 	f := excelize.NewFile()
 	defer f.Close()

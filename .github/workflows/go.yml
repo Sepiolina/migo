@@ -30,8 +30,7 @@ jobs:
         run: go build ./...
       - name: Tests and race detection
         run: go test -race ./...
-      - name: Check documented examples
+      - name: Check workflow files
         run: |
-          go run ./cmd/bomrun -workflow examples/workflows/basic.yaml -check
-          go run ./cmd/bomrun -workflow examples/workflows/presets.yaml -check
-          go run ./cmd/bomrun -workflow examples/workflows/legacy-bom.yaml -check
+          go run ./cmd/migo -check -in bom=testdata/bom_basic.xlsx -in priority=testdata/prio_basic.xlsx workflows/bom.yaml
+          go run ./cmd/migo -check -in parts=examples/parts.xlsx examples/parts-summary.yaml

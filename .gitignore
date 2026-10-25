@@ -6,5 +6,4 @@ outputs/*
 *.log
 /miservice
 /miservice.exe
-/bomrun
-tools/difftest/work/
+/migo
