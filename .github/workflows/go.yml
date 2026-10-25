@@ -21,7 +21,9 @@ jobs:
           go-version: ${{ matrix.go }}
           cache: true
       - name: Formatting
-        run: test -z "$(gofmt -l $(git ls-files '*.go'))"
+        run: |
+          unformatted=$(gofmt -l $(git ls-files '*.go'))
+          test -z "$unformatted"
       - name: Vet
         run: go vet ./...
       - name: Build
