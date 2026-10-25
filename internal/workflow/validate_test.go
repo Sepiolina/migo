@@ -114,3 +114,19 @@ output:`, 1),
 		t.Fatal("nil config accepted")
 	}
 }
+
+func TestHeaderRowRequiresInputSheet(t *testing.T) {
+	c := mustParse(t, basicRecipe)
+	c.Process = append(c.Process, Process{From: "result", As: "derived", HeaderRow: 2})
+	if err := Validate(c); err == nil || !strings.Contains(err.Error(), "header_row is only valid for input sheet sources") {
+		t.Fatalf("dataset header_row validation: %v", err)
+	}
+	c.Process[1].HeaderRow = 0
+	if err := Validate(c); err != nil {
+		t.Fatalf("default dataset header_row: %v", err)
+	}
+	c.Process[0].HeaderRow = 2
+	if err := Validate(c); err != nil {
+		t.Fatalf("input sheet header_row: %v", err)
+	}
+}

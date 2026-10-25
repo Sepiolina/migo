@@ -310,6 +310,9 @@ func Validate(c *Config) error {
 		if _, ok := c.Input[p.As]; ok {
 			return fmt.Errorf("%s: dataset collides with input alias", ctx)
 		}
+		if alias == "" && p.HeaderRow != 0 {
+			return fmt.Errorf("%s: header_row is only valid for input sheet sources", ctx)
+		}
 		if p.HeaderRow < 0 {
 			return fmt.Errorf("%s: header_row must be positive", ctx)
 		}
