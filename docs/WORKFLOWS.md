@@ -1,9 +1,11 @@
 # Spreadsheet workflows
 
-`bomrun -workflow` runs an ordered YAML recipe over spreadsheet values. The
-existing BOM CLI flags and HTTP service keep their domain pipeline, including
-vendor policy and optional SQL/SAP enrichment. Generic workflows do not apply
-those rules automatically.
+`bomrun -workflow` supports two recipe engines. This guide describes generic
+table recipes over spreadsheet values. Recipes with `engine: bom` orchestrate
+the original Go BOM stages, including vendor policy and SQL/SAP enrichment;
+see [BOM_PIPELINES.md](BOM_PIPELINES.md) for the complete equivalent recipe,
+CLI options and HTTP configuration. Generic workflows do not apply those
+domain rules automatically.
 
 From the repository root:
 
@@ -188,5 +190,6 @@ To move a customization from Go into YAML, identify the generic projection,
 filtering, grouping, or reporting steps and express each as an ordered recipe
 step. Keep using the legacy BOM pipeline for find-number grouping, quantity
 repair, vendor/SAP decisions, and other domain rules: generic `group` only
-performs the requested key grouping and aggregate functions. No existing YAML
-configuration requires migration; workflow YAML is a separate opt-in interface.
+performs the requested key grouping and aggregate functions. Use an `engine: bom` recipe when you need those original domain stages in
+YAML; see [BOM_PIPELINES.md](BOM_PIPELINES.md). Generic and BOM recipes have
+different schemas and cannot mix their operations.

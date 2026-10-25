@@ -51,8 +51,15 @@ func (m *Module) upload(w http.ResponseWriter, r *http.Request) error {
 		Uploaded{Path: up.Files[1].Path, Name: up.Files[1].Name},
 	)
 	fileName := BuildOutputFilename(bomFile.Name, emp)
+	owner := emp
+	if m.profileID != "" {
+		// Separate filenames and retention from both the legacy endpoint and
+		// other recipes. The original route keeps its exact filename contract.
+		fileName = "pipeline_" + m.profileID + "_" + fileName
+		owner = "pipeline:" + m.profileID + ":" + emp
+	}
 
-	outPath, err := m.generate(r, bomFile.Path, prioFile.Path, fileName, emp)
+	outPath, err := m.generate(r, bomFile.Path, prioFile.Path, fileName, owner)
 	if err != nil {
 		return err
 	}
@@ -66,7 +73,7 @@ func (m *Module) upload(w http.ResponseWriter, r *http.Request) error {
 		Status:      "success",
 		Message:     "BOM processed successfully.",
 		FileName:    fileName,
-		DownloadURL: fmt.Sprintf("%s://%s/api/bom/download", scheme, r.Host),
+		DownloadURL: fmt.Sprintf("%s://%s%s/download", scheme, r.Host, m.routeBase),
 		Bam:         emp,
 	})
 }

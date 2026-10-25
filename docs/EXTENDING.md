@@ -112,8 +112,15 @@ return `pool.Close()` from your `Close`. Need SAP? `(&sap.Client{}).CallRFC(ctx,
 
 ## 3. Add a processing step to the BOM pipeline
 
-The pipeline is a list of named stages: `DefaultStages` in
-`internal/modules/bom/stages.go`.
+For selecting, disabling or reordering existing stages, edit a BOM YAML recipe
+and restart the service. [BOM_PIPELINES.md](BOM_PIPELINES.md) provides the full
+original-equivalent recipe, dependency constraints, CLI usage, and config for
+replacing the default route or adding `/api/pipelines/<id>/upload`.
+
+A new processing primitive requires Go. `RecipeStageRegistry` in
+`internal/modules/bom/recipe.go` imports the original `DefaultStages` and is
+the registration point for additional YAML-selectable stages. The embedded
+`internal/modules/bom/default.yaml` declares the default execution order.
 
 1. Write the logic as a plain function on rows, in its own file:
 
@@ -130,17 +137,24 @@ The pipeline is a list of named stages: `DefaultStages` in
        j.Log.Printf("Obsolete: %d row(s) flagged.", n)
    }
    ```
-2. Insert a stage where it belongs. The comments in `DefaultStages` say what
-   each stage needs from the ones before it:
+2. Add it to `RecipeStageRegistry`, before `return registry`. Keep
+   `DefaultStages` unchanged for a custom-only operation:
 
    ```go
-   {"obsolete", func(_ context.Context, j *Job) error { flagObsolete(j); return nil }},
+   registry["obsolete"] = Stage{
+       Name: "obsolete",
+       Run: func(_ context.Context, j *Job) error { flagObsolete(j); return nil },
+   }
    ```
    A stage that returns an error aborts the upload with that message; for
    "optional" data (like SAP) log a warning and return nil instead.
-3. Show it in the workbook: columns and colours live in `layout.go` (indexes,
+3. Update dependency validation in `internal/modules/bom/recipe.go` so the new
+   stage requires its inputs and later stages require it where necessary.
+   Update `default.yaml` if it should run by default, and add it to custom
+   recipes that need it. Test valid and invalid dependency arrangements.
+4. Show it in the workbook: columns and colours live in `layout.go` (indexes,
    headers, widths) and `sheetbuilder.go` (values and styling).
-4. Test the function directly (see `bom_test.go`: build `[]*Row`, call, assert).
+5. Test the function directly (see `bom_test.go`: build `[]*Row`, call, assert).
 
 **Always run the regression check after touching a stage**: `go test ./...`
 runs `TestOutputMatchesGolden`; for the SAP path and the original Node

@@ -31,13 +31,18 @@ After any request, `uploads/` should contain nothing except `.gitkeep` (and `.ke
 
 ## Declarative spreadsheet workflows
 
-Run a generic Excel recipe with
+The default BOM HTTP route executes the embedded YAML recipe through the
+original Go BOM stages, preserving its workbook behavior. To run that same
+pipeline from a file, configure an additional upload route, or change stage
+orchestration without editing Go, see [BOM pipelines](docs/BOM_PIPELINES.md).
+The guide includes the full equivalent YAML, CLI commands and server config.
+
+Generic table recipes also run through
 `go run ./cmd/bomrun -workflow examples/workflows/basic.yaml`.
-Add `-check` to process and render without publishing files. The bundled basic
+Add `-check` to execute and render without publishing files. The bundled basic
 and preset examples use a synthetic workbook and need no external services.
-See [the workflow guide](docs/WORKFLOWS.md) for operations, presets, imports,
-templates, and a multi-workbook example. The existing BOM CLI and HTTP pipeline
-remain available.
+See [the generic workflow guide](docs/WORKFLOWS.md) for operations, presets,
+imports, templates, and a multi-workbook example.
 
 ## Testing on Windows
 Everything below is PowerShell, run from the project folder. None of it needs SQL Server, SAP or Node.

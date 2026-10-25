@@ -34,3 +34,4 @@ jobs:
         run: |
           go run ./cmd/bomrun -workflow examples/workflows/basic.yaml -check
           go run ./cmd/bomrun -workflow examples/workflows/presets.yaml -check
+          go run ./cmd/bomrun -workflow examples/workflows/legacy-bom.yaml -check
