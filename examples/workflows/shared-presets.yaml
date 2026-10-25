@@ -1,0 +1,18 @@
+# Imported documents contain only imports and presets.
+presets:
+  filters:
+    positive: {column: Quantity, greater_than: 0}
+  aggregations:
+    quantities:
+      columns: {Quantity: sum, Description: first}
+  styles:
+    report:
+      header: {bold: true, background: "#D9EAF7"}
+      freeze_header: true
+      auto_width: true
+      number_formats: {Quantity: "0.00"}
+  pipelines:
+    clean:
+      do:
+        - transform: {columns: [Part Number], operation: trim}
+        - filter: {preset: positive}

@@ -1,0 +1,27 @@
+workflow: Summarize parts
+input:
+  parts: parts.xlsx
+process:
+  - from: parts["Parts"]
+    as: summary
+    do:
+      - transform:
+          columns: [Part Number]
+          operation: trim
+      - filter:
+          column: Quantity
+          greater_than: 0
+      - group:
+          by: [Part Number]
+          aggregate: {Quantity: sum, Description: first}
+      - sort:
+          by: [Part Number]
+          order: ascending
+      - style:
+          header: {bold: true, background: "#D9EAF7"}
+          auto_width: true
+          freeze_header: true
+          number_formats: {Quantity: "0.00"}
+output:
+  - file: generated/basic.xlsx
+    sheets: {Parts: summary}
