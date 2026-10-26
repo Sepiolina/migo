@@ -88,6 +88,14 @@ func (s *UploadStore) read() (keepRegistry, error) {
 	if json.Unmarshal(b, &r) != nil {
 		return keepRegistry{}, errRegistryCorrupt
 	}
+	for _, e := range r.Entries {
+		// Registry contents are persisted data, not trusted filesystem paths.
+		// Reject the whole registry so cleanup cannot delete outside Dir or
+		// mistake other registered files for temporary uploads.
+		if _, ok := s.local(filepath.Join(s.Dir, e.File)); !ok || filepath.IsAbs(e.File) || filepath.Base(e.File) != e.File {
+			return keepRegistry{}, errRegistryCorrupt
+		}
+	}
 	return r, nil
 }
 
