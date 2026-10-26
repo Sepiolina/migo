@@ -19,7 +19,13 @@ export function projectWorkflow(source: string): Graph {
   const doc = parseDocument(source);
   if (doc.errors.length)
     return { nodes: [], edges: [], error: doc.errors[0].message };
-  const value = doc.toJS() as { steps?: unknown[] } | null;
+  let value: { steps?: unknown[] } | null;
+  try {
+    // Production YAML rejects aliases; prevent cyclic objects in the preview too.
+    value = doc.toJS({ maxAliasCount: 0 });
+  } catch (error) {
+    return { nodes: [], edges: [], error: String(error) };
+  }
   if (!value || !Array.isArray(value.steps))
     return {
       nodes: [],

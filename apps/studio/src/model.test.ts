@@ -26,4 +26,11 @@ describe("ordered workflow projection", () => {
     expect(graph.error).toBeTruthy();
     expect(graph.nodes).toEqual([]);
   });
+  it("rejects recursive aliases without crashing the editor", () => {
+    const graph = projectWorkflow(
+      "steps: &steps\n - if: true\n   then: *steps",
+    );
+    expect(graph.error).toBeTruthy();
+    expect(graph.nodes).toEqual([]);
+  });
 });
