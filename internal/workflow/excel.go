@@ -173,6 +173,22 @@ func (c CellStyle) merge(o *CellStyle) CellStyle {
 	return c
 }
 
+// key identifies a style by value (for the per-sheet style cache).
+func (c CellStyle) key() string {
+	k := fmt.Sprintf("%q|%q|%q", c.Fill, c.Align, c.Format)
+	if c.Font != nil {
+		bold := "-"
+		if c.Font.Bold != nil {
+			bold = fmt.Sprint(*c.Font.Bold)
+		}
+		k += fmt.Sprintf("|font:%s,%v,%q", bold, c.Font.Size, c.Font.Color)
+	}
+	if c.Border != nil {
+		k += fmt.Sprintf("|border:%+v", *c.Border)
+	}
+	return k
+}
+
 func (c CellStyle) excel() *excelize.Style {
 	st := &excelize.Style{}
 	if c.Fill != "" {
@@ -382,14 +398,14 @@ func writeWorkbook(ctx context.Context, out string, sheets []*SheetSpec, s *Stat
 		if err != nil {
 			return err
 		}
-		if err := writeSheet(ctx, f, sh, t); err != nil {
+		if err := writeSheet(ctx, f, sh, t, s); err != nil {
 			return fmt.Errorf("output sheet %q: %w", sh.Name, err)
 		}
 	}
 	return f.SaveAs(out)
 }
 
-func writeSheet(ctx context.Context, f *excelize.File, sh *SheetSpec, t *Table) error {
+func writeSheet(ctx context.Context, f *excelize.File, sh *SheetSpec, t *Table, s *State) error {
 	cols := sh.Columns
 	if cols == nil {
 		for _, c := range t.Columns {
@@ -414,7 +430,7 @@ func writeSheet(ctx context.Context, f *excelize.File, sh *SheetSpec, t *Table) 
 	}
 	styles := map[string]int{}
 	styleID := func(c CellStyle) (int, error) {
-		k := fmt.Sprintf("%+v|%+v|%+v", c, c.Font, c.Border)
+		k := c.key()
 		if id, ok := styles[k]; ok {
 			return id, nil
 		}
@@ -465,7 +481,7 @@ func writeSheet(ctx context.Context, f *excelize.File, sh *SheetSpec, t *Table) 
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		env := rowEnv(t, i, nil)
+		env := rowEnv(t, i, s.vars())
 		row := make([]CellStyle, len(cols))
 		for c, col := range cols {
 			row[c] = base.merge(col.Style)

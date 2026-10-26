@@ -256,7 +256,7 @@ func compileTemplate(src string, columns bool, vars ...string) (*template, error
 			t.lits = append(t.lits, rest)
 			return t, nil
 		}
-		j := strings.IndexByte(rest[i:], '}')
+		j := closingBrace(rest[i:])
 		if j < 0 {
 			return nil, fmt.Errorf("template %q: unclosed {", src)
 		}
@@ -268,6 +268,34 @@ func compileTemplate(src string, columns bool, vars ...string) (*template, error
 		t.progs = append(t.progs, p)
 		rest = rest[i+j+1:]
 	}
+}
+
+// closingBrace returns the index of the } closing the { at s[0], skipping
+// nested braces and quoted strings; -1 if there is none.
+func closingBrace(s string) int {
+	depth := 0
+	var quote byte
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch {
+		case quote != 0:
+			if c == '\\' && quote != '`' {
+				i++
+			} else if c == quote {
+				quote = 0
+			}
+		case c == '"' || c == '\'' || c == '`':
+			quote = c
+		case c == '{':
+			depth++
+		case c == '}':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 func (t *template) render(env map[string]any) (string, error) {

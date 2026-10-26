@@ -116,6 +116,7 @@ as text.
     trim: true                # trim cells
     skip_blank: true          # drop rows whose read cells are all blank
     row_number: Row           # add the sheet row number as a column
+    empty: The file is empty. # fail with this message when the sheet has no cells
 ```
 
 ### Table steps

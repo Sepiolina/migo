@@ -313,6 +313,14 @@ func (s *State) tableEnv(extra map[string]any) map[string]any {
 
 func (s *State) config(key string) any { return s.rt.Cfg.Value(key) }
 
+// vars are the run's variables every expression sees besides its own.
+func (s *State) vars() map[string]any {
+	if s == nil {
+		return nil
+	}
+	return map[string]any{"config": s.config}
+}
+
 // - if: 'config("db_enabled")'
 //
 //	then: [steps]
@@ -401,7 +409,7 @@ func compileSplit(arg *yaml.Node, sc *scope) (Runner, error) {
 		}
 		yes, no := &Table{Columns: t.Columns}, &Table{Columns: t.Columns}
 		for i := range t.Rows {
-			ok, err := where.test(rowEnv(t, i, nil))
+			ok, err := where.test(rowEnv(t, i, s.vars()))
 			if err != nil {
 				return fmt.Errorf("row %d: %w", i+1, err)
 			}

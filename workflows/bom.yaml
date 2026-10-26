@@ -33,7 +33,7 @@ steps:
         fallback: {Level: A, PartNumber: B, PartType: C, Description: D, Rev: I, Qty: Z, UOM: AA, FindNum: AC, RefDes: AD, MfgName: AZ, MfrPN: BA}
       trim: true
       skip_blank: true
-  - fail: {when: 'len(rows) == 0', message: The selected BOM file is empty.}
+      empty: The selected BOM file is empty.
   - save: parts
 
   # ---- read the Priority workbook: Forth P/N (A) -> priority (M), from row 168
@@ -86,8 +86,9 @@ steps:
   # not followed by a letter or digit.
   - set:
       IsPCB: 'any([Description, EffDescription], {any(splitAny(norm(#), ",;:/|\\"), {trim(#) matches "^PCB([^A-Z0-9]|$)"})})'
-  - window:   # rows below the last PCB row are out of scope
-      set: {InScope: 'let lastPCB = findLastIndex(group, #.IsPCB) ?? -1; lastPCB < 0 || index <= lastPCB'}
+  # Rows below the last PCB row are out of scope.
+  - set: {LastPCB: 'IsPCB ? index : index == 0 ? -1 : prev("LastPCB")'}
+  - window: {set: {InScope: 'let end = last(group).LastPCB; end < 0 || index <= end'}}
   # In-scope PCB rows: the MPN becomes <MPN, else part number>_REV_<first word of rev>.
   - set:
       OrigMfrPN: MfrPN
@@ -192,14 +193,22 @@ steps:
               url: 'http://{config("sap_host")}:{config("sap_port")}/api/sap-rfc/call'
               method: POST
               each: 'sort(uniq(map(filter(rows, #.SapRow), #.ForthPN)))'
-              batch: 'let n = toNumber(config("api_batch_size"), 0); n > 0 ? n : 50'
-              retries: 'let n = toNumber(config("api_retries"), 0); n > 0 ? n : 3'
-              body: '{tcode: config("sap_tcode"), employee_id: "106049", DATA: concat([{WERKS: config("sap_werks")}], map(batch, ({MATNR: #})))}'
+              # whole numbers from config; 0, missing or invalid: the default
+              batch: 'let f = parseFloat(str(config("api_batch_size"))) ?? 0; f >= 1 && f < 1e9 ? int(f) : 50'
+              retries: 'let f = parseFloat(str(config("api_retries"))) ?? 0; f >= 1 && f < 1e9 ? int(f) : 3'
+              body: >-
+                let data = concat([{WERKS: config("sap_werks")}], map(batch, ({MATNR: #})));
+                config("sap_tcode") == nil
+                  ? {employee_id: "106049", DATA: data}
+                  : {tcode: config("sap_tcode"), employee_id: "106049", DATA: data}
+              # the answer is a list, {tables: [{rows: [...]}]}, or a list under DATA, data or rows
               rows: >-
                 type(response) == "array" ? response :
                 type(response) != "map" ? [] :
                 type(response.tables) == "array" ? flatten(map(response.tables, type(#) == "map" && type(#.rows) == "array" ? #.rows : [])) :
-                response.DATA ?? response.data ?? response.rows ?? []
+                type(response.DATA) == "array" ? response.DATA :
+                type(response.data) == "array" ? response.data :
+                type(response.rows) == "array" ? response.rows : []
               keys: lower
               columns: [matnr, mmsta, mstae, zblock, status, vname, lifnr, labst, stock]
               on_error: 'WARN: SAP batch {batch_number} failed after {retries} retries: {error}'

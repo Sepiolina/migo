@@ -109,7 +109,7 @@ func compileSQL(arg *yaml.Node, sc *scope) (Runner, error) {
 			if params[p[0]], err = compileExpr(p[1], false, tableVars...); err != nil {
 				return nil, fmt.Errorf("params.%s: %w", p[0], err)
 			}
-			if !strings.Contains(spec.Query, "@"+p[0]) {
+			if !usesParam(spec.Query, p[0]) {
 				return nil, fmt.Errorf("params.%s: the query does not use @%s", p[0], p[0])
 			}
 		}
@@ -149,7 +149,11 @@ func compileSQL(arg *yaml.Node, sc *scope) (Runner, error) {
 			}
 		}
 		if s.rt.SQL == nil {
-			return res.failed(s, fmt.Errorf("no database connection is configured"), map[string]any{})
+			if err := res.failed(s, fmt.Errorf("no database connection is configured"), map[string]any{}); err != nil {
+				return err
+			}
+			res.store(s, &Table{})
+			return nil
 		}
 		out := &Table{}
 		for _, b := range batches {
@@ -170,6 +174,15 @@ func compileSQL(arg *yaml.Node, sc *scope) (Runner, error) {
 }
 
 var paramRef = regexp.MustCompile(`@([A-Za-z_][A-Za-z0-9_]*)`)
+
+func usesParam(query, name string) bool {
+	for _, m := range paramRef.FindAllStringSubmatch(query, -1) {
+		if m[1] == name {
+			return true
+		}
+	}
+	return false
+}
 
 // bindParams turns @name references into positional @p1, @p2... parameters.
 func bindParams(query string, values map[string]any, listParam string, batch []any) (string, []any) {

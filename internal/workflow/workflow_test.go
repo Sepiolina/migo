@@ -340,3 +340,42 @@ func TestConcurrentRuns(t *testing.T) {
 		}
 	}
 }
+
+func TestReviewRegressions(t *testing.T) {
+	// config() in row expressions; pick marks rows outside where false;
+	// templates with nested braces and quoted braces.
+	steps := `  - from: parts
+  - set: {Flag: 'config("flag") ?? "none"'}
+  - pick: {where: 'ID == "002"', mark: M, rules: [{rows: 'true'}]}
+  - set: {NotM: '!M'}
+  - log: 'n={len(filter(rows, {#.ID == "001"}))} s={"}"}'
+  - save: out
+`
+	got, logs, err := run(t, doc(steps, ""), Runtime{Cfg: cfg(t, `{"flag": "on"}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := [][]string{{"ID", "Quantity", "Flag", "M", "NotM"}, {"001", "2", "on", "FALSE", "TRUE"}, {"002", "3", "on", "TRUE", "FALSE"}}; !reflect.DeepEqual(got["Out"], want) {
+		t.Errorf("got %q", got["Out"])
+	}
+	if len(logs) != 1 || logs[0] != "n=1 s=}" {
+		t.Errorf("logs %q", logs)
+	}
+	// sql without a connection: on_error logs and the step still saves its (empty) dataset.
+	steps = `  - from: parts
+  - sql: {query: 'SELECT a FROM t WHERE a IN (@ids)', params: {ids: 'map(rows, #.ID)'}, columns: [a], on_error: 'no db: {error}', save: s}
+  - join: {with: s, on: [ID], right_on: [a], take: {A: a}}
+  - save: out
+`
+	if _, logs, err := run(t, doc(steps, ""), Runtime{}); err != nil || len(logs) != 1 {
+		t.Errorf("err=%v logs=%q", err, logs)
+	}
+	// a parameter must be used by its whole name
+	if _, err := Parse([]byte(doc("  - from: parts\n  - sql: {query: 'SELECT @ids', params: {id: '1'}, save: s}\n  - save: out\n", ""))); err == nil {
+		t.Error("@ids accepted for param id")
+	}
+	// empty: fails with the message only when the sheet has no cells
+	if _, _, err := run(t, doc("  - from: {input: parts, sheet: Parts, empty: Nothing here}\n  - save: out\n", ""), Runtime{}); err != nil {
+		t.Errorf("non-empty sheet: %v", err)
+	}
+}

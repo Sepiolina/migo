@@ -151,13 +151,13 @@ func compileFilter(arg *yaml.Node, _ *scope) (tableFn, error) {
 	if err != nil {
 		return nil, err
 	}
-	return func(t *Table, _ *State) (*Table, error) {
+	return func(t *Table, s *State) (*Table, error) {
 		if err := p.check(t); err != nil {
 			return nil, err
 		}
 		var keep [][]any
 		for i := range t.Rows {
-			ok, err := p.test(rowEnv(t, i, nil))
+			ok, err := p.test(rowEnv(t, i, s.vars()))
 			if err != nil {
 				return nil, fmt.Errorf("row %d: %w", i+1, err)
 			}
@@ -184,14 +184,14 @@ func compileSet(arg *yaml.Node, _ *scope) (tableFn, error) {
 			return nil, fmt.Errorf("%s: %w", p[0], err)
 		}
 	}
-	return func(t *Table, _ *State) (*Table, error) {
+	return func(t *Table, s *State) (*Table, error) {
 		for k, p := range pairs {
 			dest := t.addColumn(p[0])
 			if err := progs[k].check(t); err != nil {
 				return nil, err
 			}
 			for i := range t.Rows {
-				v, err := progs[k].run(rowEnv(t, i, nil))
+				v, err := progs[k].run(rowEnv(t, i, s.vars()))
 				if err != nil {
 					return nil, fmt.Errorf("row %d column %q: %w", i+1, p[0], err)
 				}

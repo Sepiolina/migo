@@ -5,6 +5,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"miservice/internal/jsx"
 )
@@ -28,6 +29,8 @@ func cell(v any) any {
 		return float64(x)
 	case []byte:
 		return string(x)
+	case time.Time:
+		return x.Format("2006-01-02 15:04:05")
 	}
 	return jsx.String(v)
 }

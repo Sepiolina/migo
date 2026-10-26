@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -30,6 +31,7 @@ import (
 //	  trim: true                trim cells (JavaScript whitespace)
 //	  skip_blank: true          drop rows whose selected cells are all blank
 //	  row_number: Row           add the 1-based sheet row as a column
+//	  empty: "No data."         fail with this message when the sheet has no cells
 type fromSpec struct {
 	Input  string    `yaml:"input"`
 	Sheet  yaml.Node `yaml:"sheet"`
@@ -44,6 +46,7 @@ type fromSpec struct {
 	Trim      bool      `yaml:"trim"`
 	SkipBlank bool      `yaml:"skip_blank"`
 	RowNumber string    `yaml:"row_number"`
+	Empty     string    `yaml:"empty"`
 }
 
 type headerCol struct {
@@ -76,7 +79,7 @@ func compileFrom(arg *yaml.Node, sc *scope) (Runner, error) {
 		if !sc.inputs[src] {
 			return nil, fmt.Errorf("unknown input or dataset %q", src)
 		}
-		return readStep(src, sheetName, 0, nil, nil, 0, false, false, ""), nil
+		return readStep(readOpts{input: src, sheet: sheetName}), nil
 	}
 	var spec fromSpec
 	if err := strictDecode(arg, &spec); err != nil {
@@ -153,7 +156,8 @@ func compileFrom(arg *yaml.Node, sc *scope) (Runner, error) {
 	if spec.Header != nil {
 		search, min = spec.Header.Search, spec.Header.Min
 	}
-	return readStep(spec.Input, sheetName, sheetIndex, cols, fixed, spec.Start, spec.Trim, spec.SkipBlank, spec.RowNumber, search, min), nil
+	return readStep(readOpts{input: spec.Input, sheet: sheetName, index: sheetIndex, header: cols, fixed: fixed, start: spec.Start,
+		trim: spec.Trim, skipBlank: spec.SkipBlank, rowNumber: spec.RowNumber, search: search, min: min, empty: spec.Empty}), nil
 }
 
 func headerNames(cols []headerCol) []string {
@@ -176,9 +180,22 @@ func columnNumber(s string) (int, error) {
 	return n - 1, nil
 }
 
-func readStep(input, sheetName string, sheetIndex int, header, fixed []headerCol, start int, trim, skipBlank bool, rowNumber string, opts ...int) Runner {
+type readOpts struct {
+	input, sheet       string
+	index              int
+	header, fixed      []headerCol
+	start, search, min int
+	trim, skipBlank    bool
+	rowNumber, empty   string
+}
+
+func readStep(o readOpts) Runner {
+	input, header, fixed, start, trim, skipBlank, rowNumber := o.input, o.header, o.fixed, o.start, o.trim, o.skipBlank, o.rowNumber
 	return func(_ context.Context, s *State) error {
-		grid, name, err := readGrid(s.Inputs[input], sheetName, sheetIndex)
+		grid, name, err := readGrid(s.Inputs[input], o.sheet, o.index)
+		if o.empty != "" && (errors.Is(err, errNoSheets) || err == nil && len(grid) == 0) {
+			return errors.New(o.empty)
+		}
 		if err != nil {
 			return err
 		}
@@ -187,7 +204,7 @@ func readStep(input, sheetName string, sheetIndex int, header, fixed []headerCol
 		switch {
 		case header != nil:
 			cols = append([]headerCol(nil), header...)
-			row, matched := findHeader(grid, cols, opts[0], opts[1])
+			row, matched := findHeader(grid, cols, o.search, o.min)
 			if row >= 0 {
 				s.rt.Log.Printf("%s: header found at row %d (%d columns matched).", input, row+1, matched)
 				first = row + 1
@@ -276,6 +293,8 @@ func findHeader(grid [][]string, cols []headerCol, search, min int) (int, int) {
 	return -1, 0
 }
 
+var errNoSheets = errors.New("workbook has no sheets")
+
 func readGrid(path, name string, index int) ([][]string, string, error) {
 	wb, err := sheet.Open(path)
 	if err != nil {
@@ -283,6 +302,9 @@ func readGrid(path, name string, index int) ([][]string, string, error) {
 	}
 	defer wb.Close()
 	names := wb.SheetNames()
+	if len(names) == 0 {
+		return nil, "", errNoSheets
+	}
 	if name == "" {
 		if index >= len(names) {
 			return nil, "", fmt.Errorf("workbook has %d sheet(s), no sheet %d", len(names), index+1)

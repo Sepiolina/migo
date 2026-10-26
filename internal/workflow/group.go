@@ -10,7 +10,7 @@ import (
 
 // groups returns the rows of t matching where (all when nil), bucketed by
 // the by columns in first-seen order. Without by there is one group.
-func groups(t *Table, by []string, where *program) ([][]int, error) {
+func groups(s *State, t *Table, by []string, where *program) ([][]int, error) {
 	ix, err := t.cols(by)
 	if err != nil {
 		return nil, err
@@ -24,7 +24,7 @@ func groups(t *Table, by []string, where *program) ([][]int, error) {
 	pos := map[string]int{}
 	for i := range t.Rows {
 		if where != nil {
-			ok, err := where.test(rowEnv(t, i, nil))
+			ok, err := where.test(rowEnv(t, i, s.vars()))
 			if err != nil {
 				return nil, fmt.Errorf("row %d: %w", i+1, err)
 			}
@@ -97,7 +97,7 @@ func compileGroup(arg *yaml.Node, _ *scope) (tableFn, error) {
 				out.Columns = append(out.Columns, c)
 			}
 		}
-		gs, err := groups(t, spec["by"], nil)
+		gs, err := groups(nil, t, spec["by"], nil)
 		if err != nil {
 			return nil, err
 		}
@@ -194,8 +194,8 @@ func compileWindow(arg *yaml.Node, _ *scope) (tableFn, error) {
 			return nil, fmt.Errorf("%s: %w", p[0], err)
 		}
 	}
-	return func(t *Table, _ *State) (*Table, error) {
-		gs, err := groups(t, spec.By, where)
+	return func(t *Table, s *State) (*Table, error) {
+		gs, err := groups(s, t, spec.By, where)
 		if err != nil {
 			return nil, err
 		}
@@ -206,7 +206,7 @@ func compileWindow(arg *yaml.Node, _ *scope) (tableFn, error) {
 			}
 			vals := map[int]any{}
 			for _, g := range gs {
-				extra := map[string]any{"group": rowMaps(t, g), "size": len(g)}
+				extra := map[string]any{"group": rowMaps(t, g), "size": len(g), "config": s.config}
 				for pos, i := range g {
 					extra["index"] = pos
 					v, err := progs[k].run(rowEnv(t, i, extra))
@@ -290,12 +290,15 @@ func compilePick(arg *yaml.Node, _ *scope) (tableFn, error) {
 			}
 		}
 	}
-	return func(t *Table, _ *State) (*Table, error) {
-		gs, err := groups(t, spec.By, where)
+	return func(t *Table, s *State) (*Table, error) {
+		gs, err := groups(s, t, spec.By, where)
 		if err != nil {
 			return nil, err
 		}
 		mark := t.addColumn(spec.Mark)
+		for _, r := range t.Rows {
+			r[mark] = false
+		}
 		reasonCol := -1
 		if spec.Reason != "" {
 			reasonCol = t.addColumn(spec.Reason)
@@ -310,13 +313,10 @@ func compilePick(arg *yaml.Node, _ *scope) (tableFn, error) {
 			}
 		}
 		for _, g := range gs {
-			for _, i := range g {
-				t.Rows[i][mark] = false
-			}
 			for _, ru := range rules {
 				var cand []int
 				for _, i := range g {
-					ok, err := ru.rows.test(rowEnv(t, i, nil))
+					ok, err := ru.rows.test(rowEnv(t, i, s.vars()))
 					if err != nil {
 						return nil, fmt.Errorf("row %d: %w", i+1, err)
 					}
@@ -324,7 +324,7 @@ func compilePick(arg *yaml.Node, _ *scope) (tableFn, error) {
 						cand = append(cand, i)
 					}
 				}
-				env := map[string]any{"size": len(cand), "best": nil, "tied": 0}
+				env := map[string]any{"size": len(cand), "best": nil, "tied": 0, "config": s.config}
 				chosen := -1
 				if len(cand) > 0 {
 					chosen = cand[0]
@@ -332,7 +332,7 @@ func compilePick(arg *yaml.Node, _ *scope) (tableFn, error) {
 				if ru.best != nil && len(cand) > 0 {
 					best, tied := math.Inf(-1), 0
 					for _, i := range cand {
-						v, err := ru.best.run(rowEnv(t, i, nil))
+						v, err := ru.best.run(rowEnv(t, i, s.vars()))
 						if err != nil {
 							return nil, fmt.Errorf("row %d: %w", i+1, err)
 						}

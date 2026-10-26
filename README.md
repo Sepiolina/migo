@@ -304,10 +304,8 @@ docs/EXTENDING.md      how to add a step type, a module or a custom endpoint
   rules differ only for files uploaded without an Excel extension.
 * Output is **value identical**: every cell value matches the Node/former Go output. Colours, fonts and borders
   come from the `output` styles in `workflows/bom.yaml` and differ in detail (e.g. fonts, debug-cell borders).
-* A BOM whose first sheet has no BOM rows at all is rejected with "The selected BOM file is empty." (before:
-  only a sheet without any cells was; one with only blank rows gave an empty workbook).
-* The SAP request body is built in `bom.yaml`: keys are sent in alphabetical order, and `tcode` is sent as `null`
-  when `sap_tcode` is not configured (before: omitted). Log wording differs slightly (e.g. header detection).
+* The SAP request body is built in `bom.yaml`, so its JSON keys go out in alphabetical order. Log wording differs
+  slightly (e.g. header detection).
 * Node's Zod "NOTE: unexpected field values" log lines are gone (static types make that check moot; output unaffected).
 * Unknown routes return plain `Cannot GET /x` instead of Express' HTML error page.
 * Input must be a real .xlsx or Excel 97-2003 (BIFF8) .xls. Excel 5/95 .xls, password-protected files and
