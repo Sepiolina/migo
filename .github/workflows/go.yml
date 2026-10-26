@@ -33,4 +33,5 @@ jobs:
       - name: Check workflow files
         run: |
           go run ./cmd/migo -check -in bom=testdata/bom_basic.xlsx -in priority=testdata/prio_basic.xlsx workflows/bom.yaml
+          go run ./cmd/migo -check -cfg '{"db_enabled": true}' -sql-stub testdata/stub_master.json -in bom=testdata/bom_random7.xls -in priority=testdata/prio_random7.xls workflows/bom.yaml
           go run ./cmd/migo -check -in parts=examples/parts.xlsx examples/parts-summary.yaml

@@ -1,8 +1,8 @@
 # Extending miservice
 
-Most changes are a workflow file: a new upload/download endpoint, a new rule, a
-different step order. See [WORKFLOWS.md](WORKFLOWS.md). This page covers what
-needs Go: a new step type, a new module, or a custom endpoint.
+Processes, endpoints and business rules are workflow files, never Go: see
+[WORKFLOWS.md](WORKFLOWS.md). This page covers what needs Go: a new generic
+step type, a new module, or a custom endpoint.
 
 ## The map
 
@@ -14,14 +14,12 @@ internal/httpx           router, error responses, uploads, CORS/recover middlewa
 internal/config          config.json (typed shared keys + cfg.String/Int/Bool for your own)
 internal/storage         generated files: temp -> commit, per-owner limit, retention cleanup
 internal/jobs            Gate (limit concurrent heavy jobs), FreeMemory
-internal/clients/sap     SAP RFC gateway client (retries)
 internal/clients/sqlserver  shared lazy SQL Server pool
 internal/jsx, sheet      JS-exact number/trim semantics; .xls/.xlsx readers
-internal/workflow        workflow files: parser, step registry, table steps, expressions
+internal/workflow        the workflow engine: parser, steps, expressions, sql/rest, xlsx writer
 internal/modules/system  /api/health   <- smallest example of a module
 internal/modules/workflows  serves every workflow file at /api/<name>/{upload,download}
-internal/modules/bom     the BOM steps used by workflows/bom.yaml (see its doc.go)
-workflows/               built-in workflow files (embedded in the binary)
+workflows/               built-in workflow files (embedded in the binary); bom.yaml = the BOM process
 ```
 
 Rule of thumb: **handlers are thin** (parse -> call logic -> respond), logic
@@ -49,7 +47,7 @@ between features goes in `internal/<name>` rather than inside a module.
 2. Register it in the module's `Routes`:
 
    ```go
-   r.GET("/api/bom/status", m.status)     // GET (+HEAD)
+   r.GET("/api/reports/status", m.status) // GET (+HEAD)
    r.POST(...)  r.Any(...)                // POST only / every method
    ```
    Registering the same path twice panics at startup, so two features can never
@@ -112,66 +110,67 @@ New config keys need no change to `internal/config`:
 (add the keys to `config.example.json`).
 
 Need SQL Server? Take a pool: `sqlserver.New(sqlserver.Config{...})`, call `pool.DB()`,
-return `pool.Close()` from your `Close`. Need SAP? `(&sap.Client{}).CallRFC(ctx, endpoint, rows, retries)`.
+return `pool.Close()` from your `Close`. Calling an HTTP API from a process is a `rest` step, not module code.
 
-## 3. Add a step type
+## 3. Add a generic step type
 
-Reordering, removing or reconfiguring steps is a workflow file edit. A new
-kind of step needs Go.
+First check whether expressions already do it: `set` with `prev()`, `window`
+with `group`, and `pick` cover most row logic. A step type belongs in Go only
+when it is generic, meaning not tied to one process.
 
-1. Write the logic as a plain function, in its own file. For the BOM:
+1. Write the compiler in `internal/workflow` (table steps: `table.go` /
+   `group.go`). A table step decodes its argument with `strictDecode`,
+   compiles any expressions with `compileExpr`, and returns a `tableFn`:
 
    ```go
-   // internal/modules/bom/obsolete.go
-   func flagObsolete(j *Job) {
-       n := 0
-       for _, r := range j.Rows {
-           if r.InScope && strings.HasPrefix(r.EffectivePartType, "OBS") {
-               r.IsObsolete = true    // new field: add it to Row (row.go)
-               n++
-           }
+   // - upper: [Col, ...] upper-cases the listed columns.
+   func compileUpper(arg *yaml.Node, _ *scope) (tableFn, error) {
+       names, err := nameList(arg)
+       if err != nil {
+           return nil, err
        }
-       j.Log.Printf("Obsolete: %d row(s) flagged.", n)
+       return func(t *Table, _ *State) (*Table, error) {
+           ix, err := t.cols(names)
+           if err != nil {
+               return nil, err
+           }
+           for _, r := range t.Rows {
+               for _, n := range ix {
+                   r[n] = strings.ToUpper(text(r[n]))
+               }
+           }
+           return t, nil
+       }, nil
    }
    ```
-2. Register it in `Ops` (`internal/modules/bom/steps.go`). `Needs` lists the
-   steps that must come earlier, and `After` lists steps that must come
-   earlier when they are present. Both are checked when the file loads.
+2. Register it in `ops` (`workflow.go`): `"upper": tableStep(compileUpper)`.
+   Everything is compiled when a file loads, so check the argument there.
+3. Test it in `internal/workflow/workflow_test.go` (`TestTableSteps` runs a
+   small workflow on `testdata/parts.xls`), and document it in `docs/WORKFLOWS.md`.
 
-   ```go
-   "flag_obsolete": {Compile: rowsStep(func(_ context.Context, j *Job) { flagObsolete(j) }), Needs: []string{"group_rows"}},
-   ```
-   A step with an argument compiles it in `Compile` (decode with
-   `workflow.Decode`), so a bad argument fails at startup. A step that returns
-   an error aborts the upload with that message. For optional data (like SAP),
-   log a warning and return nil instead.
-3. Use it: add `- flag_obsolete` to `workflows/bom.yaml`.
-4. Show it in the workbook: columns and colours live in `layout.go` (indexes,
-   headers, widths) and `sheetbuilder.go` (values and styling).
-5. Test the function directly (see `bom_test.go`: build `[]*Row`, call, assert).
-
-Generic table steps live in `internal/workflow/table.go`, and they follow the
-same pattern via `tableStep`.
-
-**Always run the regression check after touching a step or `bom.yaml`**:
-`go test ./...` runs `TestOutputMatchesGolden`. If the output is *supposed* to
-change, regenerate `testdata/golden_random7_nosap.xlsx` deliberately and say
-why in the commit.
+**After touching the engine or `bom.yaml`, run `go test ./...`.** It includes
+`TestBOMMatchesGolden`. If the BOM output is *supposed* to change, regenerate
+`testdata/golden_random7_nosap.xlsx` deliberately and say why in the commit.
 
 ## 4. Change a business rule
 
+Every BOM rule is in `workflows/bom.yaml`:
+
+| Change | Where in `bom.yaml` |
+| --- | --- |
+| Accept another header title in customer BOMs | `header.columns` of the first `from` |
+| Recognise the Priority upload by another name | `match` of the `priority` input |
+| Ban a vendor, or a brand except some parts | `Exception`, `Exempt` and `Forbidden` in the CFT-001 `set` |
+| Material_Master query or which rows are looked up | the `sql` step and `Covered` |
+| SAP call, employee ID, fields | the `rest` step and the `sap` steps after it |
+| CFT-002 eligibility, MAIN conditions A-D, reasons | `Eligible` and the `pick` rules |
+| Output columns, widths, colours | `output.sheets` |
+
+Elsewhere:
+
 | Change | Where |
 | --- | --- |
-| Ban a vendor outright | `banned` under `vendor_policy` in `workflows/bom.yaml` |
-| Ban a brand except some parts | add an `exceptions` entry there (`brand`, `allow`, `log`) |
-| A new field for rule expressions | `rowEnv` / `envOf` in `internal/modules/bom/rules.go` |
-| Recognise the Priority upload by another name | `match` of the `priority` input |
-| Accept another header title in customer BOMs | `headerSynonyms` in `readers.go` |
-| Which rows count as ineligible for MAIN/SUB, and why | `ineligible` under `select_priority` in `workflows/bom.yaml` |
-| How MAIN is chosen (conditions A-D, reasons) | `main` rules under `select_priority` |
-| Material_Master query, covered rows, PCB retry suffix | `material_master` in `workflows/bom.yaml` |
-| Rows sent to SAP, employee ID, SAP answer keys | `sap_enrich` in `workflows/bom.yaml` |
-| SAP batch size / retries | `api_batch_size`, `api_retries` in `config.json` |
+| SAP / DB connection, batch size, retries | `config.json` (read with `config("...")`) |
 | Upload size limit | `MaxUploadMB` in `internal/modules/workflows/module.go` |
 | Output retention | constants at the top of `internal/storage/outputstore.go` |
 
@@ -181,6 +180,6 @@ why in the commit.
 * Anything that must behave like JavaScript (trim, number-to-string, parseFloat)
   goes through `internal/jsx`, not the Go standard library: output must stay
   cell-identical with the Node service.
-* Inject external systems (database, SAP, clock) as function values or small
-  structs so tests never need the real thing (`LookupFunc`, `sap.Client{HTTP, Sleep}`).
+* Inject external systems (database, HTTP, clock) as function values or small
+  structs so tests never need the real thing (`workflow.Runtime{SQL, HTTP, Sleep}`).
 * `gofmt` + `go vet ./...` + `go test ./...` before every commit.

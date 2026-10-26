@@ -1,19 +1,19 @@
-// Package workflow runs one YAML file per process. A workflow names its
-// uploaded inputs, an ordered list of steps and the workbook it produces:
+// Package workflow runs one YAML file per process: spreadsheet and file
+// wrangling with REST and SQL steps, branching and inline rules. Nothing about
+// a particular business process lives in Go; it is all in the file.
 //
 //	name: Parts summary
 //	input:
 //	  parts: {label: Parts}
 //	steps:
 //	  - from: parts[Parts]
-//	  - filter: 'num("Quantity") > 0'
+//	  - filter: 'num(Quantity) > 0'
 //	  - save: summary
 //	output:
 //	  sheets: {Parts: summary}
 //
-// Steps come from a Registry: TableOps for generic sheet work, plus any
-// domain steps a module registers (for example the BOM steps). Every step is
-// compiled when the file is loaded, so a typo fails at startup, not mid-request.
+// Every step and expression is compiled when the file is loaded, so a typo
+// fails at startup, not mid-request. docs/WORKFLOWS.md is the reference.
 package workflow
 
 import (
@@ -21,10 +21,12 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -35,10 +37,9 @@ import (
 // Workflow is a loaded, compiled workflow file.
 type Workflow struct {
 	Name   string
-	Inputs []Input  // upload order
-	Sheets []Sheet  // output.sheets, in declared order (empty when a step writes)
-	Steps  []string // step names, for logs and tests
-	run    []Runner
+	Inputs []Input // upload order
+	Sheets []*SheetSpec
+	steps  []step
 }
 
 // Input is one uploaded file. Match (a regexp on the uploaded filename) lets
@@ -49,70 +50,68 @@ type Input struct {
 	Match *regexp.Regexp
 }
 
-// Sheet maps an output sheet to a saved dataset.
-type Sheet struct{ Name, Dataset string }
+// Runtime is what a run may use outside the workflow file: configuration,
+// logging and the connections for sql and rest steps.
+type Runtime struct {
+	Cfg   *config.Config
+	Log   logx.Logger
+	SQL   SQLFunc      // nil: sql steps fail
+	HTTP  *http.Client // nil: a client with a 30 s timeout
+	Sleep func(time.Duration)
+}
+
+// SQLFunc runs query with positional parameters (@p1, @p2...) on the
+// connection named in the step and returns the result as a table.
+type SQLFunc func(ctx context.Context, connection, query string, args []any) (*Table, error)
 
 // State is what steps share during one run.
 type State struct {
-	Cfg    *config.Config
-	Log    logx.Logger
+	rt     Runtime
 	Inputs map[string]string // input name -> file path
-	Out    string            // output workbook path
 	Tables map[string]*Table // saved datasets
-	Cur    *Table            // the table the generic steps work on
-	Data   map[string]any    // domain state, keyed by module (e.g. "bom")
+	Cur    *Table            // the table the steps work on
 }
 
 // Runner executes one compiled step.
 type Runner func(ctx context.Context, s *State) error
 
-// Op describes a step type. Compile receives the step's argument (nil when
-// the step is written as a bare name) and checks it before anything runs.
-type Op struct {
-	Compile func(arg *yaml.Node, sc *Scope) (Runner, error)
-	Needs   []string // steps that must appear earlier
-	After   []string // steps that, when present, must appear earlier
-	Once    bool     // the step may appear only once
-	Writes  bool     // the step writes the output workbook; it must be last
+type step struct {
+	name string
+	line int
+	run  Runner
 }
 
-// Scope is what a step compiler may check names against: the declared
-// inputs and the datasets saved by earlier steps.
-type Scope struct {
-	Inputs map[string]bool
-	Saved  map[string]bool
+// scope is what compilers check names against.
+type scope struct {
+	inputs map[string]bool
+	saved  map[string]bool
 }
 
-// Input checks that name is a declared input.
-func (sc *Scope) Input(name string) error {
-	if !sc.Inputs[name] {
-		return fmt.Errorf("unknown input %q", name)
-	}
-	return nil
-}
+type compiler func(arg *yaml.Node, sc *scope) (Runner, error)
 
-// Registry is the set of step types a workflow may use.
-type Registry map[string]Op
+var ops map[string]compiler
 
-// With returns a registry holding r's steps plus more.
-func (r Registry) With(more Registry) Registry {
-	out := Registry{}
-	for k, v := range r {
-		out[k] = v
+func init() {
+	ops = map[string]compiler{
+		"from": compileFrom, "save": compileSave, "log": compileLog, "fail": compileFail,
+		"select": tableStep(compileSelect), "rename": tableStep(compileRename),
+		"filter": tableStep(compileFilter), "set": tableStep(compileSet),
+		"fill": tableStep(compileFill), "dedupe": tableStep(compileDedupe),
+		"group": tableStep(compileGroup), "sort": tableStep(compileSort),
+		"join": tableStep(compileJoin), "append": tableStep(compileAppend),
+		"compare": tableStep(compileCompare), "stack": tableStep(compileStack),
+		"window": tableStep(compileWindow), "pick": tableStep(compilePick),
+		"split": compileSplit, "sql": compileSQL, "rest": compileREST,
 	}
-	for k, v := range more {
-		out[k] = v
-	}
-	return out
 }
 
 // Load reads and compiles a workflow file.
-func Load(path string, reg Registry) (*Workflow, error) {
+func Load(path string) (*Workflow, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	wf, err := Parse(data, reg)
+	wf, err := Parse(data)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", filepath.Base(path), err)
 	}
@@ -120,9 +119,9 @@ func Load(path string, reg Registry) (*Workflow, error) {
 }
 
 type document struct {
-	Name   string      `yaml:"name"`
-	Input  yaml.Node   `yaml:"input"`
-	Steps  []yaml.Node `yaml:"steps"`
+	Name   string    `yaml:"name"`
+	Input  yaml.Node `yaml:"input"`
+	Steps  yaml.Node `yaml:"steps"`
 	Output struct {
 		Sheets yaml.Node `yaml:"sheets"`
 	} `yaml:"output"`
@@ -130,7 +129,7 @@ type document struct {
 
 // Parse compiles a workflow document. YAML aliases, merge keys, duplicate
 // keys and unknown fields are rejected so every file reads exactly as it runs.
-func Parse(data []byte, reg Registry) (*Workflow, error) {
+func Parse(data []byte) (*Workflow, error) {
 	root, err := readNode(data)
 	if err != nil {
 		return nil, err
@@ -146,101 +145,108 @@ func Parse(data []byte, reg Registry) (*Workflow, error) {
 	if wf.Inputs, err = parseInputs(&doc.Input); err != nil {
 		return nil, err
 	}
+	sc := &scope{inputs: map[string]bool{}, saved: map[string]bool{}}
+	for _, in := range wf.Inputs {
+		sc.inputs[in.Name] = true
+	}
+	if doc.Steps.Kind != yaml.SequenceNode || len(doc.Steps.Content) == 0 {
+		return nil, fmt.Errorf("steps must be a non-empty list")
+	}
+	if wf.steps, err = compileSteps(&doc.Steps, sc, ""); err != nil {
+		return nil, err
+	}
 	if wf.Sheets, err = parseSheets(&doc.Output.Sheets); err != nil {
 		return nil, err
 	}
-	if len(doc.Steps) == 0 {
-		return nil, fmt.Errorf("steps must not be empty")
-	}
-	seen := map[string]int{}
-	writes := 0
-	sc := &Scope{Inputs: map[string]bool{}, Saved: map[string]bool{}}
-	for _, in := range wf.Inputs {
-		sc.Inputs[in.Name] = true
-	}
-	for i, n := range doc.Steps {
-		name, arg, err := splitStep(&n)
-		if err != nil {
-			return nil, fmt.Errorf("step %d: %w", i+1, err)
-		}
-		op, ok := reg[name]
-		if !ok {
-			return nil, fmt.Errorf("step %d: unknown step %q", i+1, name)
-		}
-		if _, dup := seen[name]; dup && op.Once {
-			return nil, fmt.Errorf("step %d (%s): may appear only once", i+1, name)
-		}
-		if op.Writes && i != len(doc.Steps)-1 {
-			return nil, fmt.Errorf("step %d (%s): writes the output, so it must be the last step", i+1, name)
-		}
-		for _, need := range op.Needs {
-			if _, ok := seen[need]; !ok {
-				return nil, fmt.Errorf("step %d (%s): requires %s before it", i+1, name, need)
-			}
-		}
-		for _, after := range op.After {
-			for _, later := range doc.Steps[i+1:] {
-				if n, _, _ := splitStep(&later); n == after {
-					return nil, fmt.Errorf("step %d (%s): %s must come before it", i+1, name, after)
-				}
-			}
-		}
-		run, err := op.Compile(arg, sc)
-		if err != nil {
-			return nil, fmt.Errorf("step %d (%s): %w", i+1, name, err)
-		}
-		if op.Writes {
-			writes++
-		}
-		seen[name] = i
-		wf.Steps = append(wf.Steps, name)
-		wf.run = append(wf.run, run)
-	}
-	switch {
-	case writes > 1:
-		return nil, fmt.Errorf("only one step may write the output")
-	case writes == 1 && len(wf.Sheets) > 0:
-		return nil, fmt.Errorf("output.sheets cannot be combined with a step that writes the output")
-	case writes == 0 && len(wf.Sheets) == 0:
+	if len(wf.Sheets) == 0 {
 		return nil, fmt.Errorf("output.sheets must name at least one sheet")
 	}
 	for _, sh := range wf.Sheets {
-		if !sc.Saved[sh.Dataset] {
-			return nil, fmt.Errorf("output sheet %q: no step saves dataset %q", sh.Name, sh.Dataset)
+		if !sc.saved[sh.From] {
+			return nil, fmt.Errorf("output sheet %q: no step saves dataset %q", sh.Name, sh.From)
 		}
 	}
 	return wf, nil
 }
 
+// compileSteps compiles a step list; prefix names nested steps in errors.
+func compileSteps(list *yaml.Node, sc *scope, prefix string) ([]step, error) {
+	if list.Kind != yaml.SequenceNode {
+		return nil, fmt.Errorf("line %d: expects a list of steps", list.Line)
+	}
+	var out []step
+	for i, n := range list.Content {
+		where := fmt.Sprintf("%sstep %d", prefix, i+1)
+		name, run, err := compileStep(n, sc, where+".")
+		if err != nil {
+			if name != "" {
+				return nil, fmt.Errorf("%s (%s, line %d): %w", where, name, n.Line, err)
+			}
+			return nil, fmt.Errorf("%s (line %d): %w", where, n.Line, err)
+		}
+		out = append(out, step{name: name, line: n.Line, run: run})
+	}
+	return out, nil
+}
+
+// compileStep reads "- name", "- name: arg" or "- if: ... then: ... else: ...".
+func compileStep(n *yaml.Node, sc *scope, prefix string) (string, Runner, error) {
+	switch {
+	case n.Kind == yaml.ScalarNode && n.Value != "":
+		c, ok := ops[n.Value]
+		if !ok {
+			return n.Value, nil, fmt.Errorf("unknown step %q", n.Value)
+		}
+		run, err := c(nil, sc)
+		return n.Value, run, err
+	case n.Kind == yaml.MappingNode && field(n, "if") != nil:
+		run, err := compileIf(n, sc, prefix)
+		return "if", run, err
+	case n.Kind == yaml.MappingNode && len(n.Content) == 2:
+		name := n.Content[0].Value
+		c, ok := ops[name]
+		if !ok {
+			return name, nil, fmt.Errorf("unknown step %q", name)
+		}
+		run, err := c(n.Content[1], sc)
+		return name, run, err
+	}
+	return "", nil, fmt.Errorf("a step is a name, one 'name: argument' pair, or if/then/else")
+}
+
+func runSteps(ctx context.Context, s *State, steps []step) error {
+	for _, st := range steps {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := st.run(ctx, s); err != nil {
+			// The error text stays the step's own: it is the API's error message.
+			s.rt.Log.Printf("step %s (line %d) failed: %v", st.name, st.line, err)
+			return err
+		}
+	}
+	return nil
+}
+
 // Run executes the steps and writes the output workbook to out. inputs maps
 // every declared input name to a file path.
-func (wf *Workflow) Run(ctx context.Context, cfg *config.Config, log logx.Logger, inputs map[string]string, out string) error {
-	if cfg == nil {
-		cfg = &config.Config{}
+func (wf *Workflow) Run(ctx context.Context, rt Runtime, inputs map[string]string, out string) error {
+	if rt.Cfg == nil {
+		rt.Cfg = &config.Config{}
 	}
-	if log == nil {
-		log = logx.Nop
+	if rt.Log == nil {
+		rt.Log = logx.Nop
 	}
 	for _, in := range wf.Inputs {
 		if inputs[in.Name] == "" {
 			return fmt.Errorf("missing input %q", in.Name)
 		}
 	}
-	s := &State{Cfg: cfg, Log: log, Inputs: inputs, Out: out, Tables: map[string]*Table{}, Data: map[string]any{}}
-	for i, run := range wf.run {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if err := run(ctx, s); err != nil {
-			// The error text stays the step's own: it is the API's error message.
-			log.Printf("%s: step %d (%s) failed", wf.Name, i+1, wf.Steps[i])
-			return err
-		}
+	s := &State{rt: rt, Inputs: inputs, Tables: map[string]*Table{}}
+	if err := runSteps(ctx, s, wf.steps); err != nil {
+		return err
 	}
-	if len(wf.Sheets) == 0 {
-		return nil
-	}
-	return writeWorkbook(ctx, out, wf.Sheets, s.Tables)
+	return writeWorkbook(ctx, out, wf.Sheets, s)
 }
 
 // Assign pairs uploaded file names with the inputs: inputs with a Match
@@ -272,6 +278,236 @@ func (wf *Workflow) Assign(names []string) []int {
 	}
 	return pick
 }
+
+// ---- control steps ------------------------------------------------------------
+
+// tableEnv is the environment of if/log/fail and the rest/sql expressions.
+func (s *State) tableEnv(extra map[string]any) map[string]any {
+	env := map[string]any{
+		"config": s.config,
+		"table": func(name string) ([]any, error) {
+			t, err := s.dataset(name)
+			if err != nil {
+				return nil, err
+			}
+			return rowMaps(t, allRows(t)), nil
+		},
+		"sheets": func(input string) ([]any, error) {
+			names, err := sheetNames(s.Inputs[input])
+			out := make([]any, len(names))
+			for i, n := range names {
+				out[i] = n
+			}
+			return out, err
+		},
+		"rows": []any{},
+	}
+	if s.Cur != nil {
+		env["rows"] = rowMaps(s.Cur, allRows(s.Cur))
+	}
+	for k, v := range extra {
+		env[k] = v
+	}
+	return env
+}
+
+func (s *State) config(key string) any { return s.rt.Cfg.Value(key) }
+
+// vars are the run's variables every expression sees besides its own.
+func (s *State) vars() map[string]any {
+	if s == nil {
+		return nil
+	}
+	return map[string]any{"config": s.config}
+}
+
+// - if: 'config("db_enabled")'
+//
+//	then: [steps]
+//	else: [steps]
+func compileIf(n *yaml.Node, sc *scope, prefix string) (Runner, error) {
+	if err := onlyKeys(n, "if", "then", "else"); err != nil {
+		return nil, err
+	}
+	cond, err := compileExpr(field(n, "if").Value, false, tableVars...)
+	if err != nil {
+		return nil, err
+	}
+	if field(n, "then") == nil {
+		return nil, fmt.Errorf("if needs then")
+	}
+	then, err := compileSteps(field(n, "then"), sc, prefix+"then.")
+	if err != nil {
+		return nil, err
+	}
+	var els []step
+	if e := field(n, "else"); e != nil {
+		if els, err = compileSteps(e, sc, prefix+"else."); err != nil {
+			return nil, err
+		}
+	}
+	return func(ctx context.Context, s *State) error {
+		ok, err := cond.test(s.tableEnv(nil))
+		if err != nil {
+			return err
+		}
+		if ok {
+			return runSteps(ctx, s, then)
+		}
+		return runSteps(ctx, s, els)
+	}, nil
+}
+
+// onlyKeys rejects keys of mapping n other than the given ones.
+func onlyKeys(n *yaml.Node, keys ...string) error {
+	if n.Kind != yaml.MappingNode {
+		return fmt.Errorf("line %d: expects a mapping", n.Line)
+	}
+	for i := 0; i < len(n.Content); i += 2 {
+		if !contains(keys, n.Content[i].Value) {
+			return fmt.Errorf("line %d: unknown key %q (use %s)", n.Content[i].Line, n.Content[i].Value, strings.Join(keys, ", "))
+		}
+	}
+	return nil
+}
+
+// - split: {where: '<row condition>', then: [steps], else: [steps]}
+// Matching rows go through then, the others through else; the results are
+// appended (then first), with the union of their columns.
+func compileSplit(arg *yaml.Node, sc *scope) (Runner, error) {
+	if arg == nil {
+		return nil, fmt.Errorf("needs where, then and/or else")
+	}
+	if err := onlyKeys(arg, "where", "then", "else"); err != nil {
+		return nil, err
+	}
+	if field(arg, "where") == nil {
+		return nil, fmt.Errorf("needs where")
+	}
+	where, err := compileExpr(field(arg, "where").Value, true, rowVars...)
+	if err != nil {
+		return nil, err
+	}
+	var then, els []step
+	if n := field(arg, "then"); n != nil {
+		if then, err = compileSteps(n, sc, "split.then."); err != nil {
+			return nil, err
+		}
+	}
+	if n := field(arg, "else"); n != nil {
+		if els, err = compileSteps(n, sc, "split.else."); err != nil {
+			return nil, err
+		}
+	}
+	return func(ctx context.Context, s *State) error {
+		t, err := s.current()
+		if err != nil {
+			return err
+		}
+		if err := where.check(t); err != nil {
+			return err
+		}
+		yes, no := &Table{Columns: t.Columns}, &Table{Columns: t.Columns}
+		for i := range t.Rows {
+			ok, err := where.test(rowEnv(t, i, s.vars()))
+			if err != nil {
+				return fmt.Errorf("row %d: %w", i+1, err)
+			}
+			if ok {
+				yes.Rows = append(yes.Rows, t.Rows[i])
+			} else {
+				no.Rows = append(no.Rows, t.Rows[i])
+			}
+		}
+		var parts []*Table
+		for _, branch := range []struct {
+			t     *Table
+			steps []step
+		}{{yes.clone(), then}, {no.clone(), els}} {
+			s.Cur = branch.t
+			if err := runSteps(ctx, s, branch.steps); err != nil {
+				return err
+			}
+			parts = append(parts, s.Cur)
+		}
+		s.Cur = unionRows(parts...)
+		return nil
+	}, nil
+}
+
+// - log: "Loaded {len(rows)} rows"            (or {when: <condition>, message: ...})
+func compileLog(arg *yaml.Node, _ *scope) (Runner, error) {
+	when, msg, err := compileMessage(arg)
+	if err != nil {
+		return nil, err
+	}
+	return func(_ context.Context, s *State) error {
+		env := s.tableEnv(nil)
+		if when != nil {
+			if ok, err := when.test(env); err != nil || !ok {
+				return err
+			}
+		}
+		line, err := msg.render(env)
+		if err != nil {
+			return err
+		}
+		s.rt.Log.Print(line)
+		return nil
+	}, nil
+}
+
+// - fail: {when: '<condition>', message: "..."} stops the run with message.
+func compileFail(arg *yaml.Node, _ *scope) (Runner, error) {
+	when, msg, err := compileMessage(arg)
+	if err != nil {
+		return nil, err
+	}
+	return func(_ context.Context, s *State) error {
+		env := s.tableEnv(nil)
+		if when != nil {
+			if ok, err := when.test(env); err != nil || !ok {
+				return err
+			}
+		}
+		line, err := msg.render(env)
+		if err != nil {
+			return err
+		}
+		return fmt.Errorf("%s", line)
+	}, nil
+}
+
+func compileMessage(arg *yaml.Node) (*program, *template, error) {
+	if arg == nil {
+		return nil, nil, fmt.Errorf("needs a message")
+	}
+	var spec struct {
+		When    string `yaml:"when"`
+		Message string `yaml:"message"`
+	}
+	if arg.Kind == yaml.ScalarNode {
+		spec.Message = arg.Value
+	} else if err := strictDecode(arg, &spec); err != nil {
+		return nil, nil, err
+	}
+	if spec.Message == "" {
+		return nil, nil, fmt.Errorf("needs a message")
+	}
+	msg, err := compileTemplate(spec.Message, false, tableVars...)
+	if err != nil {
+		return nil, nil, err
+	}
+	var when *program
+	if spec.When != "" {
+		if when, err = compileExpr(spec.When, false, tableVars...); err != nil {
+			return nil, nil, err
+		}
+	}
+	return when, msg, nil
+}
+
+// ---- document helpers -----------------------------------------------------------
 
 var inputName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]*$`)
 
@@ -308,43 +544,16 @@ func parseInputs(n *yaml.Node) ([]Input, error) {
 	return out, nil
 }
 
-var sheetName = regexp.MustCompile(`^[^\[\]:*?/\\]{1,31}$`)
-
-func parseSheets(n *yaml.Node) ([]Sheet, error) {
-	if n.Kind == 0 {
-		return nil, nil
-	}
+func field(n *yaml.Node, k string) *yaml.Node {
 	if n.Kind != yaml.MappingNode {
-		return nil, fmt.Errorf("output.sheets must map sheet names to datasets")
+		return nil
 	}
-	var out []Sheet
-	seen := map[string]bool{}
 	for i := 0; i < len(n.Content); i += 2 {
-		name, ds := n.Content[i].Value, n.Content[i+1].Value
-		if !sheetName.MatchString(name) || strings.TrimSpace(name) != name {
-			return nil, fmt.Errorf("output sheet %q: invalid Excel sheet name", name)
+		if n.Content[i].Value == k {
+			return n.Content[i+1]
 		}
-		if seen[strings.ToLower(name)] {
-			return nil, fmt.Errorf("output sheet %q: duplicate (sheet names ignore case)", name)
-		}
-		seen[strings.ToLower(name)] = true
-		if n.Content[i+1].Kind != yaml.ScalarNode || ds == "" {
-			return nil, fmt.Errorf("output sheet %q: must name a saved dataset", name)
-		}
-		out = append(out, Sheet{name, ds})
 	}
-	return out, nil
-}
-
-// splitStep reads "- name" or "- name: arg".
-func splitStep(n *yaml.Node) (string, *yaml.Node, error) {
-	switch {
-	case n.Kind == yaml.ScalarNode && n.Value != "":
-		return n.Value, nil, nil
-	case n.Kind == yaml.MappingNode && len(n.Content) == 2:
-		return n.Content[0].Value, n.Content[1], nil
-	}
-	return "", nil, fmt.Errorf("line %d: a step is a name or a single 'name: argument' pair", n.Line)
+	return nil
 }
 
 func readNode(data []byte) (*yaml.Node, error) {
@@ -410,6 +619,3 @@ func strictDecode(n *yaml.Node, v any) error {
 	}
 	return nil
 }
-
-// Decode is strictDecode for step compilers in other packages.
-func Decode(arg *yaml.Node, v any) error { return strictDecode(arg, v) }

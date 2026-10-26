@@ -8,16 +8,24 @@ input:
 steps:
   - from: parts[Parts]
   - set:
-      Part Number: 'trim(col("Part Number"))'
-  - filter: 'col("Part Number") != "" && num("Quantity") > 0'
-  - group: {by: [Part Number], first: [Description], sum: [Quantity]}
-  - sort: {by: [Part Number]}
-  - style:
-      header: {bold: true, background: "#D9EAF7"}
-      auto_width: true
-      freeze_header: true
-      number_formats: {Quantity: "0"}
+      PartNumber: trim(col("Part Number"))
+  - filter: 'PartNumber != "" && num(Quantity) > 0'
+  - group: {by: [PartNumber], first: [Description], sum: [Quantity]}
+  - sort: {by: [PartNumber]}
+  - if: 'any(rows, #.Quantity >= 5)'
+    then:
+      - log: 'Large quantities: {join(map(filter(rows, #.Quantity >= 5), #.PartNumber), ", ")}'
   - save: summary
 
 output:
-  sheets: {Parts: summary}
+  sheets:
+    - name: Parts
+      from: summary
+      freeze: true
+      header: {fill: "#D9EAF7"}
+      columns:
+        - {header: Part Number, column: PartNumber, width: 16}
+        - {header: Description, width: 30}
+        - {header: Quantity, number_format: "0", width: 10}
+      styles:
+        - {when: Quantity >= 5, columns: [Quantity], font: {bold: true, color: "#C62828"}}
