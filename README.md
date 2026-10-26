@@ -27,6 +27,25 @@ removed by the root's retention cleanup.
 Deploy = copy the single binary + `config.json`. No Node, no node_modules (Node is only needed on the server if you
 choose PM2 as the process manager, see below).
 
+### Development commands
+
+Use Go 1.22 or newer. `make help` lists the available commands (GNU Make and a
+POSIX shell are required; on Windows use WSL or the PowerShell commands below).
+Run `make build` to build both the service and CLI, `make test` for vet and unit
+tests, and `make check` for the complete CI checks: formatting, vet, compilation,
+race tests, and all three example workflows. Race tests require a C compiler.
+Use `make fmt` to fix formatting before submitting changes.
+
+For local HTTP development, copy `config.example.json` to `config.json` if you
+have not already created it, then set `db_enabled` and `sap_enabled` to `false`.
+Run `make run`, or `make run CONFIG=/path/to/config.json` for a separate config.
+Uploads and outputs are stored beside that config. `PORT=3090 make run` changes
+the listening port. `make workflows` runs the examples without SQL Server or SAP.
+
+`internal/app/app.go` wires dependencies and modules; `internal/app/server.go`
+owns HTTP startup and shutdown. Feature modules implement the small interfaces
+in `internal/module`; see [Extending](docs/EXTENDING.md) for adding a feature.
+
 ### What is kept on disk
 | Folder | Contents | Lifetime |
 |---|---|---|
