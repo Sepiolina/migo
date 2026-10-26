@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"time"
 
 	"miservice/internal/config"
 	"miservice/internal/httpx"
@@ -63,41 +62,6 @@ func New(cfg *config.Config, log logx.Logger, factories []module.Factory) (*App,
 
 // Handler is the root HTTP handler (used by tests and by Run).
 func (a *App) Handler() http.Handler { return a.router.Handler() }
-
-// Run serves until ctx is cancelled, then shuts down gracefully.
-func (a *App) Run(ctx context.Context) error {
-	hs := &http.Server{
-		Addr:              fmt.Sprintf("0.0.0.0:%d", a.cfg.Port),
-		Handler:           a.Handler(),
-		ReadHeaderTimeout: 30 * time.Second,
-	}
-	ln, err := net.Listen("tcp", hs.Addr)
-	if err != nil {
-		a.closeModules()
-		return err
-	}
-	if err := a.start(ctx); err != nil {
-		a.closeModules()
-		return err
-	}
-	a.printBanner()
-
-	errc := make(chan error, 1)
-	go func() { errc <- hs.Serve(ln) }()
-	select {
-	case err := <-errc:
-		a.closeModules()
-		return err
-	case <-ctx.Done():
-	}
-	fmt.Println("\nclosing server gracefully...")
-	sctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	shutErr := hs.Shutdown(sctx)
-	a.closeModules()
-	fmt.Println("Server closed.")
-	return shutErr
-}
 
 // start launches background work: the output cleanup and any module Starter.
 func (a *App) start(ctx context.Context) error {

@@ -20,18 +20,5 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
           cache: true
-      - name: Formatting
-        run: |
-          unformatted=$(gofmt -l $(git ls-files '*.go'))
-          test -z "$unformatted"
-      - name: Vet
-        run: go vet ./...
-      - name: Build
-        run: go build ./...
-      - name: Tests and race detection
-        run: go test -race ./...
-      - name: Check workflow files
-        run: |
-          go run ./cmd/migo -check -in bom=testdata/bom_basic.xlsx -in priority=testdata/prio_basic.xlsx workflows/bom.yaml
-          go run ./cmd/migo -check -cfg '{"db_enabled": true}' -sql-stub testdata/stub_master.json -in bom=testdata/bom_random7.xls -in priority=testdata/prio_random7.xls workflows/bom.yaml
-          go run ./cmd/migo -check -in parts=examples/parts.xlsx examples/parts-summary.yaml
+      - name: Quality checks
+        run: make check
