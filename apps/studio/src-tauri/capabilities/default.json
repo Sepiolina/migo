@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "workspace-window",
+  "description": "Window lifecycle only; filesystem and process access remain behind validated Rust commands.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
