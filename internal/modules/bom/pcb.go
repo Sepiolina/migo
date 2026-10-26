@@ -69,18 +69,16 @@ func ReformatPcbMpn(origMpn, revToken string) string {
 	return orig + "_REV_" + rev
 }
 
-const sanminaSuffix = "_SANMINA"
-
-// WithSanminaSuffix: <customer_pn>_REV_<REV> -> ..._SANMINA (idempotent).
-func WithSanminaSuffix(mpn string) string {
+// withSuffix: <customer_pn>_REV_<REV> -> ..._SANMINA (idempotent).
+func withSuffix(mpn, suffix string) string {
 	m := jsx.Trim(mpn)
 	if m == "" {
 		return m
 	}
-	if strings.HasSuffix(jsx.Norm(m), sanminaSuffix) {
+	if strings.HasSuffix(jsx.Norm(m), jsx.Norm(suffix)) {
 		return m
 	}
-	return m + sanminaSuffix
+	return m + suffix
 }
 
 // reformatPcbRows mirrors mimi1.py's apply_pcb_modifications (see the long

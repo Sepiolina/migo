@@ -3,23 +3,129 @@ package bom
 import (
 	"fmt"
 	"sort"
+	"strconv"
+	"strings"
+
+	"github.com/expr-lang/expr"
+	"github.com/expr-lang/expr/vm"
 
 	"miservice/internal/jsx"
 	"miservice/internal/logx"
 )
+
+// SelectSpec is the select_priority (CFT-002) step argument:
+//
+//	ineligible:        # first match wins; reason goes to the debug sheet
+//	  - {when: level0, reason: Ineligible (Level 0)}
+//	duplicate_key: 'norm(forth_pn)'   # later rows with the same key are excluded ("" = never)
+//	main:              # first rule whose rows match picks MAIN
+//	  - rows: 'priority == 1'          # candidates this rule considers
+//	    when: 'count == 1'             # default 'count > 0'; also stock, tied
+//	    pick: top                      # top (first row) or most_stock (ties: first row)
+//	    reason: MAIN (Cond A: Single P1 match)
+//	    reason_tied: ...               # used instead when several rows share the top stock
+//
+// Reasons may use {stock}, {tied}, {count} and {vendor} (of the chosen row).
+// The other candidates become SUB1, SUB2... in file order.
+type SelectSpec struct {
+	Ineligible []struct {
+		When   string `yaml:"when"`
+		Reason string `yaml:"reason"`
+	} `yaml:"ineligible"`
+	DuplicateKey string `yaml:"duplicate_key"`
+	Main         []struct {
+		Rows       string `yaml:"rows"`
+		When       string `yaml:"when"`
+		Pick       string `yaml:"pick"`
+		Reason     string `yaml:"reason"`
+		ReasonTied string `yaml:"reason_tied"`
+	} `yaml:"main"`
+}
+
+// Cft002 is a compiled SelectSpec.
+type Cft002 struct {
+	ineligible []ineligibleRule
+	dupKey     textRule
+	main       []mainRule
+}
+
+type ineligibleRule struct {
+	when   rule
+	reason string
+}
+
+type mainRule struct {
+	rows               rule
+	when               *vm.Program
+	mostStock          bool
+	reason, reasonTied string
+}
+
+// groupEnv is what a main rule's when sees about the rows it matched.
+type groupEnv struct {
+	Count int     `expr:"count"` // rows matched
+	Stock float64 `expr:"stock"` // highest stock among them
+	Tied  int     `expr:"tied"`  // rows sharing that stock
+}
+
+func (s SelectSpec) compile() (*Cft002, error) {
+	c := &Cft002{}
+	for i, in := range s.Ineligible {
+		r, err := compileRule(in.When)
+		if err != nil {
+			return nil, fmt.Errorf("ineligible %d: %w", i+1, err)
+		}
+		if strings.TrimSpace(in.Reason) == "" {
+			return nil, fmt.Errorf("ineligible %d: needs a reason", i+1)
+		}
+		c.ineligible = append(c.ineligible, ineligibleRule{r, in.Reason})
+	}
+	var err error
+	if c.dupKey, err = compileText(s.DuplicateKey); err != nil {
+		return nil, fmt.Errorf("duplicate_key: %w", err)
+	}
+	if len(s.Main) == 0 {
+		return nil, fmt.Errorf("main needs at least one rule")
+	}
+	for i, m := range s.Main {
+		mr := mainRule{reason: m.Reason, reasonTied: m.ReasonTied}
+		if mr.rows, err = compileRule(m.Rows); err != nil {
+			return nil, fmt.Errorf("main %d rows: %w", i+1, err)
+		}
+		when := m.When
+		if when == "" {
+			when = "count > 0"
+		}
+		if mr.when, err = expr.Compile(when, expr.Env(groupEnv{}), expr.AsBool()); err != nil {
+			return nil, fmt.Errorf("main %d when: %q: %w", i+1, when, err)
+		}
+		switch m.Pick {
+		case "", "top":
+		case "most_stock":
+			mr.mostStock = true
+		default:
+			return nil, fmt.Errorf("main %d: pick must be top or most_stock", i+1)
+		}
+		if strings.TrimSpace(m.Reason) == "" {
+			return nil, fmt.Errorf("main %d: needs a reason", i+1)
+		}
+		c.main = append(c.main, mr)
+	}
+	return c, nil
+}
 
 // RunCft002 ports runCft002: MAIN / SUBn selection per BOM group.
 //
 // For every group of rows (one BOM.Find Num) it decides which eligible row is
 // the MAIN source and numbers the rest SUB1, SUB2... It also fills the Debug
 // columns that explain each decision.
-func RunCft002(rows []*Row, pmap PriorityMap, policy *VendorPolicy, log logx.Logger) {
+func RunCft002(rows []*Row, pmap PriorityMap, c *Cft002, policy *VendorPolicy, log logx.Logger) {
 	prepareDebugColumns(rows, pmap)
 
 	groups, ids := inScopeGroups(rows)
 	nMain := 0
 	for _, gid := range ids {
-		if selectMainAndSubs(groups[gid], policy) {
+		if c.selectMainAndSubs(groups[gid], policy) {
 			nMain++
 		}
 	}
@@ -92,8 +198,8 @@ func inScopeGroups(rows []*Row) (map[int][]*Row, []int) {
 }
 
 // selectMainAndSubs decides one group. It reports whether a MAIN was chosen.
-func selectMainAndSubs(grp []*Row, policy *VendorPolicy) bool {
-	markEligibility(grp, policy)
+func (c *Cft002) selectMainAndSubs(grp []*Row, policy *VendorPolicy) bool {
+	c.markEligibility(grp, policy)
 	eligible := filterRows(grp, func(r *Row) bool { return r.DebugEligible == "Eligible" })
 	if len(eligible) == 0 {
 		for _, r := range grp {
@@ -103,7 +209,7 @@ func selectMainAndSubs(grp []*Row, policy *VendorPolicy) bool {
 		return false
 	}
 
-	flagDuplicateForthPNs(eligible)
+	c.flagDuplicates(eligible, policy)
 	candidates := filterRows(eligible, func(r *Row) bool { return !r.IsDuplicateForthPN })
 	if len(candidates) == 0 {
 		for _, r := range eligible {
@@ -113,7 +219,14 @@ func selectMainAndSubs(grp []*Row, policy *VendorPolicy) bool {
 		return false
 	}
 
-	main, reason := chooseMain(candidates)
+	main, reason := c.chooseMain(candidates, policy)
+	if main == nil {
+		for _, r := range grp {
+			r.Priority = ""
+			r.DebugReason = r.DebugEligible
+		}
+		return false
+	}
 	main.Priority = "MAIN"
 	main.DebugReason = reason
 
@@ -133,93 +246,77 @@ func selectMainAndSubs(grp []*Row, policy *VendorPolicy) bool {
 	return true
 }
 
-// markEligibility sets DebugEligible: the first failing check names why a row
-// cannot be MAIN/SUB.
-func markEligibility(grp []*Row, policy *VendorPolicy) {
+// markEligibility sets DebugEligible: the first matching ineligible rule
+// names why a row cannot be MAIN/SUB.
+func (c *Cft002) markEligibility(grp []*Row, policy *VendorPolicy) {
 	for _, r := range grp {
-		switch {
-		case r.IsLevel0:
-			r.DebugEligible = "Ineligible (Level 0)"
-		case !r.HasIJK:
-			r.DebugEligible = "Ineligible (No I,J,K)"
-		case r.IsZ1:
-			r.DebugEligible = "Ineligible (Z1 Blocked)"
-		case r.IsForbidden && !IsExemptUnderPolicy(r, policy):
-			r.DebugEligible = "Ineligible (CFT-001 Forbidden)"
-		default:
-			r.DebugEligible = "Eligible"
+		r.DebugEligible = "Eligible"
+		env := envOf(r, policy)
+		for _, in := range c.ineligible {
+			if in.when.test(env) {
+				r.DebugEligible = in.reason
+				break
+			}
 		}
 	}
 }
 
-// flagDuplicateForthPNs: inside the group the top-most (lowest original
-// index) occurrence of a Forth P/N is real; later ones are flagged and
-// excluded from MAIN/SUB before selection.
-func flagDuplicateForthPNs(eligible []*Row) {
+// flagDuplicates: inside the group the top-most (lowest original index) row
+// of a duplicate key is real; later ones are flagged and excluded from
+// MAIN/SUB before selection. A blank key is never a duplicate.
+func (c *Cft002) flagDuplicates(eligible []*Row, policy *VendorPolicy) {
 	byIdx := append([]*Row(nil), eligible...)
 	sort.SliceStable(byIdx, func(i, j int) bool { return byIdx[i].OriginalIndex < byIdx[j].OriginalIndex })
 	seen := map[string]bool{}
 	for _, r := range byIdx {
 		r.IsDuplicateForthPN = false
-		fpn := jsx.Norm(r.ForthPN)
-		if fpn == "" || fpn == createPN {
+		k := c.dupKey.text(envOf(r, policy))
+		if k == "" {
 			continue
 		}
-		if seen[fpn] {
+		if seen[k] {
 			r.IsDuplicateForthPN = true
 		} else {
-			seen[fpn] = true
+			seen[k] = true
 		}
 	}
 }
 
-// chooseMain applies the selection rules in order and returns the winner with
-// the explanation shown in the Debug sheet:
-//
-//	A  exactly one P1 row                          -> that row
-//	B  several P1 rows                             -> most stock (vendors preferred)
-//	C  no P1 row                                   -> first row with a vendor,
-//	                                                  else most stock
-//	D  no P1, no vendor, no stock                  -> the top-most row
-//
-// Ties are always broken by the lowest original index ("top-most").
-func chooseMain(candidates []*Row) (*Row, string) {
-	p1 := filterRows(candidates, isPriorityOne)
-	switch {
-	case len(p1) == 1:
-		return p1[0], "MAIN (Cond A: Single P1 match)"
-	case len(p1) > 1:
-		return chooseAmongSeveralP1(p1)
-	}
-	return chooseWithoutP1(candidates)
-}
-
-func chooseAmongSeveralP1(p1 []*Row) (*Row, string) {
-	if withVendor := filterRows(p1, hasVendor); len(withVendor) > 0 {
-		maxS := maxStock(withVendor)
-		cand := withStock(withVendor, maxS)
-		main := topMost(cand)
-		vd := vendorLabel(main)
-		if len(cand) > 1 {
-			return main, fmt.Sprintf("MAIN (Cond B: Multiple P1 & Vendors -> Highest Stock: %s [%d tied, top-most: %s])", jsx.NumToString(maxS), len(cand), vd)
+// chooseMain applies the main rules in order: the first whose matched rows
+// pass its when picks MAIN. Ties are broken by the lowest original index
+// ("top-most"). It returns nil when no rule applies.
+func (c *Cft002) chooseMain(candidates []*Row, policy *VendorPolicy) (*Row, string) {
+	for _, m := range c.main {
+		var rows []*Row
+		for _, r := range candidates {
+			if m.rows.test(envOf(r, policy)) {
+				rows = append(rows, r)
+			}
 		}
-		return main, fmt.Sprintf("MAIN (Cond B: Multiple P1 & Vendors -> Highest Stock: %s [%s])", jsx.NumToString(maxS), vd)
+		g := groupEnv{Count: len(rows)}
+		var top []*Row
+		if len(rows) > 0 {
+			g.Stock = maxStock(rows)
+			top = withStock(rows, g.Stock)
+			g.Tied = len(top)
+		}
+		if ok, err := expr.Run(m.when, g); err != nil || !ok.(bool) || len(rows) == 0 {
+			continue
+		}
+		main := topMost(rows)
+		if m.mostStock {
+			main = topMost(top)
+		}
+		reason := m.reason
+		if m.reasonTied != "" && g.Tied > 1 {
+			reason = m.reasonTied
+		}
+		return main, strings.NewReplacer(
+			"{stock}", jsx.NumToString(g.Stock), "{tied}", strconv.Itoa(g.Tied),
+			"{count}", strconv.Itoa(g.Count), "{vendor}", vendorLabel(main),
+		).Replace(reason)
 	}
-	maxS := maxStock(p1)
-	cand := withStock(p1, maxS)
-	return topMost(cand), fmt.Sprintf("MAIN (Cond B: Multiple P1, No Vendor -> Highest Stock: %s [%d tied, top-most])", jsx.NumToString(maxS), len(cand))
-}
-
-func chooseWithoutP1(candidates []*Row) (*Row, string) {
-	if withVendor := filterRows(candidates, hasVendor); len(withVendor) > 0 {
-		main := topMost(withVendor)
-		return main, fmt.Sprintf("MAIN (Cond C: No P1 -> Vendor match [%s, top-most])", vendorLabel(main))
-	}
-	if maxS := maxStock(candidates); maxS > 0 {
-		cand := withStock(candidates, maxS)
-		return topMost(cand), fmt.Sprintf("MAIN (Cond C: No P1, No Vendor -> Highest Stock: %s [%d tied, top-most])", jsx.NumToString(maxS), len(cand))
-	}
-	return topMost(candidates), "MAIN (Cond D: No P1, No Vendor, No Stock -> Fallback top-most row)"
+	return nil, ""
 }
 
 // numberSubs labels every other candidate SUB1, SUB2... in file order.
@@ -233,16 +330,6 @@ func numberSubs(candidates []*Row, main *Row) {
 }
 
 // ---- small row predicates / reducers ---------------------------------------
-
-func isPriorityOne(r *Row) bool { return r.PriorityValue != nil && *r.PriorityValue == 1 }
-
-func hasVendor(r *Row) bool {
-	vn := jsx.Trim(r.VName)
-	if vn == "" {
-		vn = jsx.Trim(r.VendorCode)
-	}
-	return vn != "" && vn != "0" && vn != "None" && vn != "-"
-}
 
 // vendorLabel is the vendor name shown in a decision reason (name, else code).
 func vendorLabel(r *Row) string {

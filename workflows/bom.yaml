@@ -27,7 +27,56 @@ steps:
           allow: 'desc not startsWith "CAP" || mpn matches "(?s)^CL(.{6}|.{10})P"'
           log: "Samsung Exception: {count} Samsung MLCC (CL...P...) row(s) confirmed valid."
 
-  - material_master            # Forth P/N from SQL Server (db_enabled)
-  - sap_enrich                 # block status, vendor, stock (sap_enabled)
-  - select_priority            # CFT-002: MAIN / SUBn per group
+  # Forth P/N from Material_Master on SQL Server (db_enabled). A row it covers
+  # gets the MaterialNo of its MPN, or "CREATE P/N" when there is none (blank
+  # for forbidden rows). Rows matching retry.rows that miss are looked up
+  # again with the suffix. With the DB off, every covered row gets "CREATE P/N".
+  - material_master:
+      rows: 'in_scope && !level0 && has_ijk'
+      query: |
+        SELECT MaterialNo, ISNULL(ZBlock, '') AS ZBlock, Maker
+        FROM SAP_ForthFacDb.dbo.Material_Master
+        WHERE ZBlock <> 'D' AND Project = 'FNS - Finisar'
+          AND UPPER(LTRIM(RTRIM(Maker))) IN (@mpns)
+      retry: {rows: pcb, suffix: _SANMINA}
+
+  # Block status, vendor and stock from the SAP gateway (sap_enabled; host,
+  # tcode, werks in config.json). A Z1 status blocks the row.
+  - sap_enrich:
+      rows: 'in_scope && !level0 && has_ijk && (!forbidden || exempt) && forth_pn not in ["", "CREATE P/N"]'
+      employee_id: "106049"
+      fields:                  # SAP keys, in order of preference
+        status: [mmsta, mstae, zblock, status]
+        vendor_name: [vname]
+        vendor_code: [lifnr]
+        stock: [labst, stock]
+
+  # CFT-002: one MAIN per find-number group, the other candidates SUB1, SUB2...
+  - select_priority:
+      ineligible:              # first match wins; the reason shows on the debug sheet
+        - {when: level0, reason: Ineligible (Level 0)}
+        - {when: '!has_ijk', reason: "Ineligible (No I,J,K)"}
+        - {when: z1, reason: Ineligible (Z1 Blocked)}
+        - {when: forbidden && !exempt, reason: Ineligible (CFT-001 Forbidden)}
+      # A Forth P/N used twice in a group: only the top-most row stays a candidate.
+      duplicate_key: 'norm(forth_pn) == "CREATE P/N" ? "" : norm(forth_pn)'
+      main:                    # first rule with matching rows picks MAIN; ties go to the top-most row
+        - rows: priority == 1
+          when: count == 1
+          reason: "MAIN (Cond A: Single P1 match)"
+        - rows: 'priority == 1 && vendor not in ["", "0", "None", "-"]'
+          pick: most_stock
+          reason: "MAIN (Cond B: Multiple P1 & Vendors -> Highest Stock: {stock} [{vendor}])"
+          reason_tied: "MAIN (Cond B: Multiple P1 & Vendors -> Highest Stock: {stock} [{tied} tied, top-most: {vendor}])"
+        - rows: priority == 1
+          pick: most_stock
+          reason: "MAIN (Cond B: Multiple P1, No Vendor -> Highest Stock: {stock} [{tied} tied, top-most])"
+        - rows: 'vendor not in ["", "0", "None", "-"]'
+          reason: "MAIN (Cond C: No P1 -> Vendor match [{vendor}, top-most])"
+        - rows: 'true'
+          when: stock > 0
+          pick: most_stock
+          reason: "MAIN (Cond C: No P1, No Vendor -> Highest Stock: {stock} [{tied} tied, top-most])"
+        - rows: 'true'
+          reason: "MAIN (Cond D: No P1, No Vendor, No Stock -> Fallback top-most row)"
   - write_bom                  # BOM + debug sheets

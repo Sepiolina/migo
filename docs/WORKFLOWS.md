@@ -106,7 +106,26 @@ identical to the original service; `TestOutputMatchesGolden` checks this.
 | `select_priority` | CFT-002 MAIN / SUBn | `read_priority`, `pcb_scope`, `vendor_policy` (plus `material_master` and `sap_enrich` when present) |
 | `write_bom` | BOM + debug sheets | `read_bom` |
 
-`vendor_policy` holds every CFT-001 rule:
+The steps that make business decisions carry their rules as their argument;
+`workflows/bom.yaml` has the full set with comments.
+
+### Row fields
+
+Every BOM rule is an expression over one row and can read these fields:
+
+| Field | Meaning |
+| --- | --- |
+| `brand`, `mpn`, `desc` | manufacturer, MPN (leading punctuation removed), effective description; trimmed, upper case |
+| `in_scope`, `level0`, `has_ijk`, `pcb` | above the last PCB row; the assembly row; has manufacturer/MPN data; describes a PCB |
+| `forbidden`, `exempt` | CFT-001 verdict; allowed by a `vendor_policy` exception |
+| `z1` | blocked (Z1) by Material_Master or SAP |
+| `forth_pn` | the Forth P/N (`CREATE P/N` when none exists yet) |
+| `priority` | value from the Priority workbook, or `nil` |
+| `vendor`, `stock` | SAP vendor name (else vendor code), trimmed; SAP stock |
+
+`norm(s)` gives trimmed upper case.
+
+### `vendor_policy` (CFT-001)
 
 ```yaml
 - vendor_policy:
@@ -118,12 +137,69 @@ identical to the original service; `TestOutputMatchesGolden` checks this.
         log: "TDK Exception: {count} TDK CAP (CGA series) row(s) confirmed valid."
 ```
 
-The expressions can read these fields:
-- `brand`: the manufacturer;
-- `mpn`: the MPN without leading punctuation;
-- `desc`: the effective description.
+A row whose brand matches an exception is forbidden unless `allow` is true. Any other row is forbidden only if its brand is in `banned`.
 
-All three are trimmed and upper case. A row whose brand matches an exception is forbidden unless `allow` is true. Any other row is forbidden only if its brand is in `banned`.
+### `material_master`
+
+```yaml
+- material_master:
+    rows: 'in_scope && !level0 && has_ijk'   # rows that get a Forth P/N
+    query: |                                 # returns MaterialNo, ZBlock, Maker (the MPN)
+      SELECT MaterialNo, ISNULL(ZBlock, '') AS ZBlock, Maker
+      FROM SAP_ForthFacDb.dbo.Material_Master
+      WHERE ZBlock <> 'D' AND Project = 'FNS - Finisar'
+        AND UPPER(LTRIM(RTRIM(Maker))) IN (@mpns)
+    retry: {rows: pcb, suffix: _SANMINA}     # misses retried with the suffix
+```
+
+How the lookup works:
+- `@mpns` becomes the normalised MPNs, sent as SQL parameters in batches.
+- A covered row gets the matching MaterialNo. With no match it gets `CREATE P/N`, or a blank if the row is forbidden.
+- A ZBlock of `Z1` blocks the row.
+- With `db_enabled` off, or when the lookup fails, every covered row gets `CREATE P/N`. Forbidden and Z1 rows stay blank.
+
+### `sap_enrich`
+
+```yaml
+- sap_enrich:
+    rows: 'in_scope && !level0 && has_ijk && (!forbidden || exempt) && forth_pn not in ["", "CREATE P/N"]'
+    employee_id: "106049"
+    fields:                                  # SAP keys, in order of preference
+      status: [mmsta, mstae, zblock, status]
+      vendor_name: [vname]
+      vendor_code: [lifnr]
+      stock: [labst, stock]
+```
+
+How the fields are read:
+- The step asks SAP about the Forth P/Ns of the covered rows.
+- `status`, `vendor_name` and `vendor_code` each take the first non-empty key.
+- `stock` takes the first key that is present.
+- A `Z1` status blocks the row.
+
+Connection settings stay in `config.json`: `sap_enabled`, host, port, tcode, werks, `api_batch_size` and `api_retries`.
+
+### `select_priority` (CFT-002)
+
+```yaml
+- select_priority:
+    ineligible:                              # first match wins; reason goes to the debug sheet
+      - {when: level0, reason: Ineligible (Level 0)}
+    duplicate_key: 'norm(forth_pn) == "CREATE P/N" ? "" : norm(forth_pn)'
+    main:                                    # first rule that applies picks MAIN
+      - rows: priority == 1                  # the candidates this rule looks at
+        when: count == 1                     # default: count > 0
+        pick: top                            # top (default) or most_stock
+        reason: "MAIN (Cond A: Single P1 match)"
+```
+
+This runs once per find-number group:
+1. Rows matching an `ineligible` rule are left out.
+2. Among the eligible rows, a repeated `duplicate_key` keeps only its top-most row; a blank key never repeats.
+3. The `main` rules are tried in order. A rule applies when its `rows` match at least one candidate and its `when` holds. `when` can read `count` (rows matched), `stock` (their highest stock) and `tied` (rows sharing that stock).
+4. The rule picks the top-most row, or with `most_stock` the top-most of the highest-stock rows.
+5. Its `reason` (or `reason_tied` when `tied > 1`) goes to the debug sheet, and can use `{stock}`, `{tied}`, `{count}` and `{vendor}`.
+6. The other candidates become SUB1, SUB2… in file order.
 
 ## Run locally
 
