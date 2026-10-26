@@ -7,6 +7,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"miservice/internal/clients/sap"
+	"miservice/internal/clients/sqlserver"
 	"miservice/internal/config"
 	"miservice/internal/logx"
 	"miservice/internal/workflow"
@@ -21,9 +22,11 @@ type Job struct {
 	Priority PriorityMap
 }
 
-// Deps are the external systems the steps talk to. Both are optional: a nil
-// Lookup means "no database", a nil SAP uses the default HTTP client.
+// Deps are the external systems the steps talk to. All are optional: with
+// neither Lookup nor DB there is no database, a nil SAP uses the default HTTP
+// client. Lookup, when set, replaces the database (tests, migo -stubdb).
 type Deps struct {
+	DB     *sqlserver.Pool
 	Lookup LookupFunc
 	SAP    *sap.Client
 }
@@ -40,12 +43,18 @@ func Ops(d Deps) workflow.Registry {
 		"pcb_reformat":  {Compile: rowsStep(func(_ context.Context, j *Job) { reformatPcbRows(j.Rows, j.Log) }), Needs: []string{"pcb_scope"}},
 		"vendor_policy": {Compile: compileVendorPolicy, Needs: []string{"pcb_reformat"}},
 		// material_master needs the CFT-001 verdicts (IsForbidden).
-		"material_master": {Compile: rowsStep(func(ctx context.Context, j *Job) { lookupForthPNs(ctx, j, d.Lookup) }), Needs: []string{"vendor_policy"}},
+		"material_master": {
+			Compile: specStep(MasterSpec.compile, func(ctx context.Context, j *Job, m *master) { m.lookupForthPNs(ctx, j, d) }),
+			Needs:   []string{"vendor_policy"},
+		},
 		// sap_enrich needs the Forth P/Ns from material_master.
-		"sap_enrich": {Compile: rowsStep(func(ctx context.Context, j *Job) { enrichFromSAP(ctx, j, d.SAP) }), Needs: []string{"material_master"}},
+		"sap_enrich": {
+			Compile: specStep(SAPSpec.compile, func(ctx context.Context, j *Job, st *sapStep) { st.enrich(ctx, j, d.SAP) }),
+			Needs:   []string{"material_master"},
+		},
 		// CFT-002 needs priorities, vendors and stock from everything above.
 		"select_priority": {
-			Compile: rowsStep(func(_ context.Context, j *Job) { RunCft002(j.Rows, j.Priority, j.Policy, j.Log) }),
+			Compile: specStep(SelectSpec.compile, func(_ context.Context, j *Job, c *Cft002) { RunCft002(j.Rows, j.Priority, c, j.Policy, j.Log) }),
 			Needs:   []string{"read_priority", "pcb_scope", "vendor_policy"},
 			After:   []string{"material_master", "sap_enrich"},
 		},
@@ -103,6 +112,32 @@ func rowsStep(fn func(ctx context.Context, j *Job)) func(*yaml.Node, *workflow.S
 		fn(ctx, j)
 		return nil
 	})
+}
+
+// specStep compiles a step whose rules are its YAML argument (decoded into
+// S and compiled to C at load time) and runs fn with them.
+func specStep[S any, C any](compile func(S) (C, error), fn func(ctx context.Context, j *Job, c C)) func(*yaml.Node, *workflow.Scope) (workflow.Runner, error) {
+	return func(arg *yaml.Node, _ *workflow.Scope) (workflow.Runner, error) {
+		if arg == nil {
+			return nil, fmt.Errorf("needs its rules as an argument")
+		}
+		var spec S
+		if err := workflow.Decode(arg, &spec); err != nil {
+			return nil, err
+		}
+		c, err := compile(spec)
+		if err != nil {
+			return nil, err
+		}
+		return func(ctx context.Context, s *workflow.State) error {
+			j, err := job(s)
+			if err != nil {
+				return err
+			}
+			fn(ctx, j, c)
+			return nil
+		}, nil
+	}
 }
 
 func readBOM(s *workflow.State, path string) error {

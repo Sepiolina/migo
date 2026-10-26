@@ -49,7 +49,7 @@ output:
   sheets: {Parts: summary}
 ```
 Drop a file into `<config dir>/workflows/` and restart to add an endpoint, or to replace a built-in one with the
-same name. Steps, expressions and the BOM steps (including the CFT-001 vendor rules in `bom.yaml`) are described in
+same name. Steps, expressions and the BOM steps (whose rules, CFT-001, Material_Master, SAP and CFT-002, live in `bom.yaml`) are described in
 [docs/WORKFLOWS.md](docs/WORKFLOWS.md). Run any workflow without HTTP:
 ```
 go run ./cmd/migo -in bom=testdata/bom_basic.xlsx -in priority=testdata/prio_basic.xlsx -out out.xlsx workflows/bom.yaml

@@ -66,7 +66,7 @@ func New(s module.Services) (module.Module, error) {
 		User: s.Config.DB.User, Password: s.Config.DB.Password, Database: s.Config.DB.Name,
 		TLSMin: s.Config.DB.TLSMin,
 	})
-	reg := workflow.TableOps().With(bom.Ops(bom.Deps{Lookup: bom.NewMasterDB(db).Lookup, SAP: &sap.Client{}}))
+	reg := workflow.TableOps().With(bom.Ops(bom.Deps{DB: db, SAP: &sap.Client{}}))
 	files, err := workflowFiles(filepath.Join(s.Config.Dir, "workflows"))
 	if err != nil {
 		_ = db.Close()

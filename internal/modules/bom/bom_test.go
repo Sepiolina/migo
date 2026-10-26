@@ -122,7 +122,7 @@ func TestCft002Duplicates(t *testing.T) {
 	one := 1.0
 	c.PriorityValue = &one
 	rows := []*Row{a, b, c, d}
-	RunCft002(rows, PriorityMap{"F1": &one}, &VendorPolicy{}, logx.Nop)
+	RunCft002(rows, PriorityMap{"F1": &one}, defaultCft002(t), &VendorPolicy{}, logx.Nop)
 	if !c.IsDuplicateForthPN || a.IsDuplicateForthPN || d.IsDuplicateForthPN {
 		t.Error("duplicate flags")
 	}
@@ -138,7 +138,7 @@ func TestCft002StockTieBreak(t *testing.T) {
 	r1, r2 := cftRow(1, "F1"), cftRow(2, "F2")
 	r1.Stock, r2.Stock = 10, 10
 	r1.VName, r2.VName = "V1", "V2"
-	RunCft002([]*Row{r1, r2}, PriorityMap{}, &VendorPolicy{}, logx.Nop)
+	RunCft002([]*Row{r1, r2}, PriorityMap{}, defaultCft002(t), &VendorPolicy{}, logx.Nop)
 	if r1.Priority != "MAIN" || r2.Priority != "SUB1" || r1.DebugReason != "MAIN (Cond C: No P1 -> Vendor match [V1, top-most])" {
 		t.Errorf("%q %q %q", r1.Priority, r2.Priority, r1.DebugReason)
 	}
@@ -164,7 +164,7 @@ func TestDBLookupPcbSanmina(t *testing.T) {
 		return map[string]Match{}, nil
 	}
 	rows := pcbRows()
-	lookupForthPNs(context.Background(), jobWith(rows, true, logx.Nop), lookup)
+	defaultMaster(t).lookupForthPNs(context.Background(), jobWith(rows, true, logx.Nop), Deps{Lookup: lookup})
 	if len(calls) != 2 || rows[0].ForthPN != "F9" || rows[0].MfrPN != "PCB-1_REV_B_SANMINA" || !rows[0].IsZ1 {
 		t.Errorf("calls=%v row=%+v", calls, rows[0])
 	}
@@ -178,7 +178,7 @@ func TestDBLookupFailureFallsBack(t *testing.T) {
 	}
 	rows[1].IsForbidden = true
 	lookup := func(context.Context, []string) (map[string]Match, error) { return nil, errors.New("boom") }
-	lookupForthPNs(context.Background(), jobWith(rows, true, func(s string) { logged = s }), lookup)
+	defaultMaster(t).lookupForthPNs(context.Background(), jobWith(rows, true, func(s string) { logged = s }), Deps{Lookup: lookup})
 	if rows[0].ForthPN != "CREATE P/N" || rows[1].ForthPN != "" || logged == "" {
 		t.Errorf("%q %q %q", rows[0].ForthPN, rows[1].ForthPN, logged)
 	}
@@ -187,10 +187,10 @@ func TestDBLookupFailureFallsBack(t *testing.T) {
 func TestDBDisabledUsesFallback(t *testing.T) {
 	rows := []*Row{row("RES", "M", "x")}
 	rows[0].HasIJK = true
-	lookupForthPNs(context.Background(), jobWith(rows, false, logx.Nop), func(context.Context, []string) (map[string]Match, error) {
+	defaultMaster(t).lookupForthPNs(context.Background(), jobWith(rows, false, logx.Nop), Deps{Lookup: func(context.Context, []string) (map[string]Match, error) {
 		t.Fatal("lookup must not run when the DB is disabled")
 		return nil, nil
-	})
+	}})
 	if rows[0].ForthPN != "CREATE P/N" {
 		t.Error("fallback")
 	}
@@ -261,8 +261,8 @@ func bomWorkflow(t *testing.T, d Deps) *workflow.Workflow {
 	return wf
 }
 
-// defaultPolicy is the vendor_policy of workflows/bom.yaml.
-func defaultPolicy(t *testing.T) *VendorPolicy {
+// bomStep decodes the argument of step name in workflows/bom.yaml into spec.
+func bomStep(t *testing.T, name string, spec any) {
 	t.Helper()
 	data, err := fs.ReadFile(builtin.FS, "bom.yaml")
 	if err != nil {
@@ -275,21 +275,44 @@ func defaultPolicy(t *testing.T) *VendorPolicy {
 		t.Fatal(err)
 	}
 	for _, st := range doc.Steps {
-		if st.Kind == yaml.MappingNode && st.Content[0].Value == "vendor_policy" {
-			n := st.Content[1]
-			var spec VendorPolicySpec
-			if err := n.Decode(&spec); err != nil {
+		if st.Kind == yaml.MappingNode && st.Content[0].Value == name {
+			if err := workflow.Decode(st.Content[1], spec); err != nil {
 				t.Fatal(err)
 			}
-			p, err := spec.Compile()
-			if err != nil {
-				t.Fatal(err)
-			}
-			return p
+			return
 		}
 	}
-	t.Fatal("bom.yaml has no vendor_policy step")
-	return nil
+	t.Fatalf("bom.yaml has no %s step", name)
+}
+
+// must returns v, failing the test on err.
+func must[T any](t *testing.T) func(T, error) T {
+	return func(v T, err error) T {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+}
+
+// defaultPolicy, defaultCft002 and defaultMaster are the rules of workflows/bom.yaml.
+func defaultPolicy(t *testing.T) *VendorPolicy {
+	var spec VendorPolicySpec
+	bomStep(t, "vendor_policy", &spec)
+	return must[*VendorPolicy](t)(spec.Compile())
+}
+
+func defaultCft002(t *testing.T) *Cft002 {
+	var spec SelectSpec
+	bomStep(t, "select_priority", &spec)
+	return must[*Cft002](t)(spec.compile())
+}
+
+func defaultMaster(t *testing.T) *master {
+	var spec MasterSpec
+	bomStep(t, "material_master", &spec)
+	return must[*master](t)(spec.compile())
 }
 
 // The CFT-001 rules moved from Go into workflows/bom.yaml. These are the old

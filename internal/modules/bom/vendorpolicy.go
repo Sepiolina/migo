@@ -5,9 +5,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/expr-lang/expr"
-	"github.com/expr-lang/expr/vm"
-
 	"miservice/internal/jsx"
 	"miservice/internal/logx"
 )
@@ -21,8 +18,8 @@ import (
 //	    allow: 'desc not startsWith "CAP" || ...'   # true = the row is allowed
 //	    log: "TDK Exception: {count} row(s) confirmed valid."
 //
-// Expressions see brand (normalised manufacturer), mpn (normalised MPN
-// without leading punctuation) and desc (normalised effective description).
+// Expressions see the row fields of rowEnv (rules.go); here brand, mpn and
+// desc are the useful ones.
 type VendorPolicySpec struct {
 	Banned     []string          `yaml:"banned"`
 	Exceptions []VendorException `yaml:"exceptions"`
@@ -36,19 +33,12 @@ type VendorException struct {
 	Log   string `yaml:"log"`
 }
 
-// policyEnv is what vendor policy expressions can read.
-type policyEnv struct {
-	Brand string `expr:"brand"`
-	MPN   string `expr:"mpn"`
-	Desc  string `expr:"desc"`
-}
-
 // BrandException is a brand that is banned unless a per-row condition holds.
 type BrandException struct {
 	Name  string // key in the result counts
 	Log   string // logged when count > 0; "{count}" is replaced
-	brand *vm.Program
-	allow *vm.Program
+	brand rule
+	allow rule
 }
 
 // VendorPolicy is the compiled CFT-001 policy.
@@ -66,36 +56,15 @@ func (s VendorPolicySpec) Compile() (*VendorPolicy, error) {
 		}
 		ex := BrandException{Name: e.Name, Log: e.Log}
 		var err error
-		if ex.brand, err = expr.Compile(e.Brand, expr.Env(policyEnv{}), expr.AsBool()); err != nil {
+		if ex.brand, err = compileRule(e.Brand); err != nil {
 			return nil, fmt.Errorf("exception %s brand: %w", e.Name, err)
 		}
-		if ex.allow, err = expr.Compile(e.Allow, expr.Env(policyEnv{}), expr.AsBool()); err != nil {
+		if ex.allow, err = compileRule(e.Allow); err != nil {
 			return nil, fmt.Errorf("exception %s allow: %w", e.Name, err)
 		}
 		p.BrandExceptions = append(p.BrandExceptions, ex)
 	}
 	return p, nil
-}
-
-func envOf(r *Row) policyEnv {
-	d := r.EffectiveDescription
-	if d == "" {
-		d = r.Description
-	}
-	return policyEnv{Brand: jsx.Norm(r.MfgName), MPN: stripLeadingNonAlnum(jsx.Norm(r.MfrPN)), Desc: jsx.Norm(d)}
-}
-
-// test runs a compiled boolean expression. Compile typed the environment and
-// the result, so evaluation cannot fail.
-func test(p *vm.Program, env policyEnv) bool {
-	v, err := expr.Run(p, env)
-	return err == nil && v.(bool)
-}
-
-func stripLeadingNonAlnum(s string) string {
-	return strings.TrimLeftFunc(s, func(r rune) bool {
-		return !(r >= 'A' && r <= 'Z' || r >= '0' && r <= '9')
-	})
 }
 
 // VendorPolicyResult is what runVendorPolicy returns for logging.
@@ -104,9 +73,9 @@ type VendorPolicyResult struct {
 	ExemptCount map[string]int
 }
 
-func (p *VendorPolicy) matchingException(env policyEnv) *BrandException {
+func (p *VendorPolicy) matchingException(env rowEnv) *BrandException {
 	for i := range p.BrandExceptions {
-		if test(p.BrandExceptions[i].brand, env) {
+		if p.BrandExceptions[i].brand.test(env) {
 			return &p.BrandExceptions[i]
 		}
 	}
@@ -128,9 +97,9 @@ func RunVendorPolicy(rows []*Row, p *VendorPolicy) VendorPolicyResult {
 			r.IsForbidden = false
 			continue
 		}
-		env := envOf(r)
+		env := envOf(r, nil)
 		if rule := p.matchingException(env); rule != nil {
-			exempt := test(rule.allow, env)
+			exempt := rule.allow.test(env)
 			r.IsForbidden = !exempt
 			if exempt {
 				res.ExemptCount[rule.Name]++
@@ -147,9 +116,9 @@ func RunVendorPolicy(rows []*Row, p *VendorPolicy) VendorPolicyResult {
 
 // IsExemptUnderPolicy ports ruleEngine.isExemptUnderPolicy.
 func IsExemptUnderPolicy(r *Row, p *VendorPolicy) bool {
-	env := envOf(r)
+	env := envOf(r, nil)
 	if rule := p.matchingException(env); rule != nil {
-		return test(rule.allow, env)
+		return rule.allow.test(env)
 	}
 	return false
 }

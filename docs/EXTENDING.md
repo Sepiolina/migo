@@ -164,9 +164,13 @@ why in the commit.
 | --- | --- |
 | Ban a vendor outright | `banned` under `vendor_policy` in `workflows/bom.yaml` |
 | Ban a brand except some parts | add an `exceptions` entry there (`brand`, `allow`, `log`) |
+| A new field for rule expressions | `rowEnv` / `envOf` in `internal/modules/bom/rules.go` |
 | Recognise the Priority upload by another name | `match` of the `priority` input |
 | Accept another header title in customer BOMs | `headerSynonyms` in `readers.go` |
-| MAIN/SUB selection logic | `chooseMain` in `selection.go` |
+| Which rows count as ineligible for MAIN/SUB, and why | `ineligible` under `select_priority` in `workflows/bom.yaml` |
+| How MAIN is chosen (conditions A-D, reasons) | `main` rules under `select_priority` |
+| Material_Master query, covered rows, PCB retry suffix | `material_master` in `workflows/bom.yaml` |
+| Rows sent to SAP, employee ID, SAP answer keys | `sap_enrich` in `workflows/bom.yaml` |
 | SAP batch size / retries | `api_batch_size`, `api_retries` in `config.json` |
 | Upload size limit | `MaxUploadMB` in `internal/modules/workflows/module.go` |
 | Output retention | constants at the top of `internal/storage/outputstore.go` |
