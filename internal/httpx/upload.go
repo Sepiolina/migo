@@ -1,8 +1,6 @@
 package httpx
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -58,12 +56,6 @@ func (u *Upload) Cleanup() {
 	}
 }
 
-func randHex(n int) string {
-	b := make([]byte, n)
-	_, _ = rand.Read(b)
-	return hex.EncodeToString(b)
-}
-
 // ParseUpload reads a multipart/form-data request. Behaviour is multer's:
 //   - a non-multipart request yields an empty Upload, not an error;
 //   - more than MaxFiles files, or a file under another field name, is
@@ -97,7 +89,10 @@ func ParseUpload(r *http.Request, opt UploadOptions) (*Upload, error) {
 		name, fn := part.FormName(), part.FileName()
 		cd := part.Header.Get("Content-Disposition")
 		if fn == "" && cd != "" && !hasFilenameParam(cd) {
-			b, _ := io.ReadAll(io.LimitReader(part, int64(maxField)+1))
+			b, err := io.ReadAll(io.LimitReader(part, int64(maxField)+1))
+			if err != nil {
+				return fail(Status(http.StatusBadRequest, err))
+			}
 			if len(b) > maxField {
 				return fail(errors.New("Field value too long"))
 			}
@@ -105,7 +100,9 @@ func ParseUpload(r *http.Request, opt UploadOptions) (*Upload, error) {
 			continue
 		}
 		if fn == "" { // empty file input
-			_, _ = io.Copy(io.Discard, part)
+			if _, err := io.Copy(io.Discard, part); err != nil {
+				return fail(Status(http.StatusBadRequest, err))
+			}
 			continue
 		}
 		if name != opt.FieldName || len(up.Files) >= opt.MaxFiles {
@@ -119,16 +116,16 @@ func ParseUpload(r *http.Request, opt UploadOptions) (*Upload, error) {
 
 // store writes one file part to disk, enforcing the size limit.
 func (u *Upload) store(part io.Reader, clientName string, opt UploadOptions) error {
-	dst := filepath.Join(opt.Dir, randHex(16))
-	out, err := os.Create(dst)
+	// CreateTemp reserves a unique file atomically and uses private permissions.
+	out, err := os.CreateTemp(opt.Dir, "upload-*")
 	if err != nil {
 		return err
 	}
 	limit := int64(opt.MaxFileMB) << 20
 	n, err := io.Copy(out, io.LimitReader(part, limit+1))
-	out.Close()
+	err = errors.Join(err, out.Close())
 	// Recorded before the checks so Cleanup also removes a rejected file.
-	u.Files = append(u.Files, UploadedFile{Path: dst, Name: filepath.Base(strings.ReplaceAll(clientName, `\`, "/"))})
+	u.Files = append(u.Files, UploadedFile{Path: out.Name(), Name: filepath.Base(strings.ReplaceAll(clientName, `\`, "/"))})
 	if err != nil {
 		return err
 	}
