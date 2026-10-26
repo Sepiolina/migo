@@ -110,7 +110,7 @@ func (e *endpoint) generate(r *http.Request, inputs map[string]string, fileName,
 	defer e.gate.Release()
 
 	tmp := e.store.NewTempPath()
-	if err := e.wf.Run(r.Context(), e.cfg, e.log, inputs, tmp); err != nil {
+	if err := e.wf.Run(r.Context(), e.rt, inputs, tmp); err != nil {
 		e.store.Discard(tmp)
 		return "", err
 	}

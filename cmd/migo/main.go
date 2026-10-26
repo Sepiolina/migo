@@ -3,7 +3,7 @@
 //	migo -in bom=Customer.xlsx -in priority=Prio.xlsx -out out.xlsx workflows/bom.yaml
 //
 // -check runs everything but keeps no output. -cfg takes config.json keys as
-// JSON ("{}" skips DB and SAP); -stubdb stands in for Material_Master.
+// JSON ("{}" skips DB and SAP); -sql-stub stands in for the database.
 package main
 
 import (
@@ -18,10 +18,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"miservice/internal/clients/sap"
+	"miservice/internal/clients/sqlserver"
 	"miservice/internal/config"
-	"miservice/internal/jsx"
-	"miservice/internal/modules/bom"
+	"miservice/internal/modules/workflows"
 	"miservice/internal/workflow"
 )
 
@@ -54,9 +53,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	out := flags.String("out", "", "output .xlsx (required unless -check)")
 	check := flags.Bool("check", false, "run the workflow but keep no output")
 	cfgJSON := flags.String("cfg", "{}", "runtime config as JSON (keys like config.json)")
-	stub := flags.String("stubdb", "", "JSON file standing in for Material_Master")
+	stub := flags.String("sql-stub", "", `JSON table every sql step returns: {"columns": [...], "rows": [[...]]}`)
 	flags.Usage = func() {
-		fmt.Fprintln(stderr, "usage: migo [-in name=path ...] [-out file.xlsx | -check] [-cfg json] [-stubdb file] workflow.yaml")
+		fmt.Fprintln(stderr, "usage: migo [-in name=path ...] [-out file.xlsx | -check] [-cfg json] [-sql-stub file] workflow.yaml")
 		flags.PrintDefaults()
 	}
 	// Accept flags before and after the workflow path.
@@ -83,11 +82,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if (*out == "") == !*check {
 		return fail(2, fmt.Errorf("give either -out or -check"))
 	}
-	cfg, deps, err := loadConfig(*cfgJSON, *stub)
+	rt, closeDB, err := runtime(*cfgJSON, *stub, func(s string) { fmt.Fprintln(stdout, "LOG:", s) })
 	if err != nil {
 		return fail(2, err)
 	}
-	wf, err := workflow.Load(positional[0], workflow.TableOps().With(bom.Ops(deps)))
+	defer closeDB()
+	wf, err := workflow.Load(positional[0])
 	if err != nil {
 		return fail(2, err)
 	}
@@ -118,8 +118,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	}
 	tmp.Close()
 	defer os.Remove(tmp.Name())
-	log := func(s string) { fmt.Fprintln(stdout, "LOG:", s) }
-	if err := wf.Run(ctx, cfg, log, inputs, tmp.Name()); err != nil {
+	if err := wf.Run(ctx, rt, inputs, tmp.Name()); err != nil {
 		return fail(1, err)
 	}
 	if *check {
@@ -148,39 +147,39 @@ func samePath(a, b string) bool {
 	return aa == bb
 }
 
-func loadConfig(cfgJSON, stub string) (*config.Config, bom.Deps, error) {
+// runtime builds the run's configuration and connections. With stub, every
+// sql step returns the table in that JSON file ({"columns": [...], "rows":
+// [[...]]}); otherwise sql steps use the db_* settings of the config.
+func runtime(cfgJSON, stub string, log func(string)) (workflow.Runtime, func(), error) {
+	rt := workflow.Runtime{Log: log}
 	tmp, err := os.CreateTemp("", "cfg*.json")
 	if err != nil {
-		return nil, bom.Deps{}, err
+		return rt, nil, err
 	}
 	defer os.Remove(tmp.Name())
 	_, writeErr := tmp.WriteString(cfgJSON)
 	if err := errors.Join(writeErr, tmp.Close()); err != nil {
-		return nil, bom.Deps{}, err
+		return rt, nil, err
 	}
-	cfg, err := config.Load(tmp.Name())
-	if err != nil {
-		return nil, bom.Deps{}, err
+	if rt.Cfg, err = config.Load(tmp.Name()); err != nil {
+		return rt, nil, err
 	}
-	deps := bom.Deps{SAP: &sap.Client{}}
 	if stub != "" {
 		b, err := os.ReadFile(stub)
 		if err != nil {
-			return nil, bom.Deps{}, err
+			return rt, nil, err
 		}
-		var m map[string]struct{ MaterialNo, ZBlock string }
-		if err := json.Unmarshal(b, &m); err != nil {
-			return nil, bom.Deps{}, err
+		var t workflow.Table
+		if err := json.Unmarshal(b, &t); err != nil {
+			return rt, nil, fmt.Errorf("%s: %w", stub, err)
 		}
-		deps.Lookup = func(_ context.Context, mpns []string) (map[string]bom.Match, error) {
-			res := map[string]bom.Match{}
-			for _, x := range mpns {
-				if v, ok := m[jsx.Norm(x)]; ok {
-					res[jsx.Norm(x)] = bom.Match{MaterialNo: v.MaterialNo, ZBlock: v.ZBlock}
-				}
-			}
-			return res, nil
-		}
+		rt.SQL = func(context.Context, string, string, []any) (*workflow.Table, error) { return &t, nil }
+		return rt, func() {}, nil
 	}
-	return cfg, deps, nil
+	db := sqlserver.New(sqlserver.Config{
+		Server: rt.Cfg.DB.Server, Port: rt.Cfg.DB.Port, User: rt.Cfg.DB.User,
+		Password: rt.Cfg.DB.Password, Database: rt.Cfg.DB.Name, TLSMin: rt.Cfg.DB.TLSMin,
+	})
+	rt.SQL = workflows.SQL(db)
+	return rt, func() { _ = db.Close() }, nil
 }

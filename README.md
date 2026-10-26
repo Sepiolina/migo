@@ -1,9 +1,10 @@
 # migo / miservice (Go)
 
 A Go microservice where every process is one YAML file in `workflows/`. Each file is its own
-endpoint pair, maps its uploaded inputs to one output workbook, and keeps its rules inline.
-`workflows/bom.yaml` is the BOM processor, ported from the Node/Express service with the same
-endpoints, JSON and workbook output.
+endpoint pair, maps its uploaded inputs to one output workbook, and holds every rule inline.
+The engine is generic: sheet wrangling, SQL, REST, branching and expressions. No process
+is coded in Go. `workflows/bom.yaml` is the BOM processor, ported from the Node/Express
+service with the same endpoints, JSON and workbook values.
 
 ```
 POST /api/<name>/upload     multipart: files (one per workflow input, any order), bam (employee number)
@@ -42,15 +43,18 @@ input:
   parts: {label: Parts list}
 steps:
   - from: parts[Parts]
-  - filter: 'num("Quantity") > 0'
-  - group: {by: [Part Number], sum: [Quantity]}
+  - filter: num(Quantity) > 0
+  - if: 'any(rows, num(#.Quantity) > 100)'
+    then:
+      - log: Large order
+  - group: {by: [ID], sum: [Quantity]}
   - save: summary
 output:
   sheets: {Parts: summary}
 ```
 Drop a file into `<config dir>/workflows/` and restart to add an endpoint, or to replace a built-in one with the
-same name. Steps, expressions and the BOM steps (whose rules, CFT-001, Material_Master, SAP and CFT-002, live in `bom.yaml`) are described in
-[docs/WORKFLOWS.md](docs/WORKFLOWS.md). Run any workflow without HTTP:
+same name. Steps (`from`, `set`, `window`, `pick`, `join`, `sql`, `rest`, `if`, `split`...), expressions
+and styled output are described in [docs/WORKFLOWS.md](docs/WORKFLOWS.md). Run any workflow without HTTP:
 ```
 go run ./cmd/migo -in bom=testdata/bom_basic.xlsx -in priority=testdata/prio_basic.xlsx -out out.xlsx workflows/bom.yaml
 ```
@@ -70,8 +74,8 @@ go vet ./...
 go test ./...
 ```
 These use the files in `testdata/` with a stubbed Material_Master and a fake SAP server, so they run anywhere. To see
-one package in detail: `go test -v ./internal/storage/` (retention, uploads keep registry), `./internal/modules/bom/`
-(BOM steps, golden workbook), `./internal/modules/workflows/` (upload endpoints end to end), `./internal/sheet/` (.xls and .xlsx readers). Add `-race` if you have a
+one package in detail: `go test -v ./internal/storage/` (retention, uploads keep registry), `./internal/workflow/`
+(engine, BOM golden workbook), `./internal/modules/workflows/` (upload endpoints end to end), `./internal/sheet/` (.xls and .xlsx readers). Add `-race` if you have a
 C toolchain installed; it is optional. If an antivirus quarantines the test binaries, exclude `%TEMP%\go-build*`.
 
 **3. Run the service locally**
@@ -107,8 +111,8 @@ Error cases worth trying: one file only (400 "Expected 2 files"), `bam=../x` (40
 go build -o migo.exe ./cmd/migo
 .\migo.exe -in "bom=C:\data\Customer BOM.xlsx" -in "priority=C:\data\Priority.xlsx" -out out.xlsx workflows\bom.yaml
 ```
-`-cfg` takes config.json keys as JSON; the default `{}` skips DB and SAP. Use `-stubdb file.json` to stand in for
-Material_Master, and `-check` to run without keeping the output.
+`-cfg` takes config.json keys as JSON; the default `{}` skips DB and SAP. Use `-sql-stub testdata/stub_master.json`
+to stand in for the database, and `-check` to run without keeping the output.
 Ubuntu is the production OS, so also run `go test ./...` on the Ubuntu machine (or WSL2 Ubuntu) once before a release.
 
 **6. Cross-build the Ubuntu binary from Windows**
@@ -276,18 +280,16 @@ logs with `journalctl -u miservice -f`. Use one supervisor or the other, never b
 ```
 workflows/             built-in workflow files (embedded); bom.yaml = the BOM processor
 cmd/miservice          server entrypoint (flags + app.Run)
-cmd/migo               run a workflow file on local files without HTTP (-check; -stubdb for tests)
+cmd/migo               run a workflow file on local files without HTTP (-check; -sql-stub for tests)
 internal/app           wiring; modules.go is the list of modules the service runs
 internal/module        what a module is (Module / Starter / Closer / Services)
-internal/workflow      workflow files: strict parser, step registry, table steps, expressions, xlsx writer
+internal/workflow      the engine: strict parser, steps, expressions, sql/rest, branching, styled xlsx writer
 internal/modules/workflows  serves each workflow at /api/<name>/{upload,download}
-internal/modules/bom        the BOM steps (read, group, PCB, CFT-001, Material_Master, SAP, CFT-002, write)
 internal/modules/system     GET /api/health (the smallest example module)
 internal/httpx         router, error responses, multipart upload, CORS + panic-recovery middleware
 internal/config        config.json (typed shared keys; cfg.String/Int/Bool for a module's own keys)
 internal/storage       generated files: atomic commit, newest-N per owner, retention cleanup
 internal/jobs          concurrency gate for heavy jobs, memory release
-internal/clients/sap        SAP RFC gateway client (batching is the caller's, retries are here)
 internal/clients/sqlserver  shared lazy SQL Server pool
 internal/jsx           JavaScript-exact trim / Number toString / parseFloat
 internal/sheet         .xlsx streaming reader + BIFF8 .xls reader (typed cells, SheetJS range semantics)
@@ -300,7 +302,12 @@ docs/EXTENDING.md      how to add a step type, a module or a custom endpoint
 * Upload order: an uploaded file whose name contains `prio` or `shortage` is always taken as the Priority file
   (`match` in `workflows/bom.yaml`). Node also required the other file's name to contain `bom` or `.xls`. The two
   rules differ only for files uploaded without an Excel extension.
-* Output is **cell/style identical, not byte identical** (different xlsx library: the XML differs, Excel renders the same).
+* Output is **value identical**: every cell value matches the Node/former Go output. Colours, fonts and borders
+  come from the `output` styles in `workflows/bom.yaml` and differ in detail (e.g. fonts, debug-cell borders).
+* A BOM whose first sheet has no BOM rows at all is rejected with "The selected BOM file is empty." (before:
+  only a sheet without any cells was; one with only blank rows gave an empty workbook).
+* The SAP request body is built in `bom.yaml`: keys are sent in alphabetical order, and `tcode` is sent as `null`
+  when `sap_tcode` is not configured (before: omitted). Log wording differs slightly (e.g. header detection).
 * Node's Zod "NOTE: unexpected field values" log lines are gone (static types make that check moot; output unaffected).
 * Unknown routes return plain `Cannot GET /x` instead of Express' HTML error page.
 * Input must be a real .xlsx or Excel 97-2003 (BIFF8) .xls. Excel 5/95 .xls, password-protected files and

@@ -4,6 +4,7 @@
 package sqlserver
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net/url"
@@ -17,13 +18,7 @@ import (
 // can use the index on a VARCHAR column.
 type VarChar = mssql.VarChar
 
-const (
-	idleCloseAfter = 5 * time.Minute // pool connections close after 5 min unused
-
-	// MaxParams is how many "@pN" parameters one query may safely carry:
-	// SQL Server's ceiling is about 2,100.
-	MaxParams = 1900
-)
+const idleCloseAfter = 5 * time.Minute // pool connections close after 5 min unused
 
 // Config is the connection setting (the "db_*" keys of config.json).
 type Config struct {
@@ -94,16 +89,47 @@ func (p *Pool) Close() error {
 	return err
 }
 
-// Chunk splits values into slices of at most size elements, for queries with
-// an IN (...) list longer than MaxParams.
-func Chunk(values []string, size int) [][]string {
-	var out [][]string
-	for i := 0; i < len(values); i += size {
-		end := i + size
-		if end > len(values) {
-			end = len(values)
-		}
-		out = append(out, values[i:end])
+// Query runs query with positional parameters (@p1, @p2...) and returns the
+// column names and rows. Text parameters are sent as VARCHAR; values come
+// back as string, int64, float64, bool, time.Time or nil.
+func (p *Pool) Query(ctx context.Context, query string, args []any) ([]string, [][]any, error) {
+	db, err := p.DB()
+	if err != nil {
+		return nil, nil, err
 	}
-	return out
+	params := make([]any, len(args))
+	for i, a := range args {
+		if s, ok := a.(string); ok {
+			params[i] = VarChar(s)
+		} else {
+			params[i] = a
+		}
+	}
+	rs, err := db.QueryContext(ctx, query, params...)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer rs.Close()
+	cols, err := rs.Columns()
+	if err != nil {
+		return nil, nil, err
+	}
+	var rows [][]any
+	for rs.Next() {
+		vals := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rs.Scan(ptrs...); err != nil {
+			return nil, nil, err
+		}
+		for i, v := range vals {
+			if b, ok := v.([]byte); ok {
+				vals[i] = string(b)
+			}
+		}
+		rows = append(rows, vals)
+	}
+	return cols, rows, rs.Err()
 }

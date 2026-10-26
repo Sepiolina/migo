@@ -1,8 +1,8 @@
 // Package config loads config.json with the same loose typing the Node
 // service tolerated (numbers given as strings, JS truthiness for flags).
 //
-// Settings every module shares (port, directories, the SQL Server and SAP
-// connections) are typed fields. A module that needs its OWN keys does not
+// Settings every module shares (port, directories, the SQL Server
+// connection) are typed fields. A module that needs its OWN keys does not
 // have to touch this file: read them with cfg.String / cfg.Int / cfg.Bool.
 package config
 
@@ -26,8 +26,7 @@ type Config struct {
 	// live beside it (as they sit in the project root for the Node service).
 	Dir string
 
-	DB  DB
-	SAP SAP
+	DB DB
 
 	raw map[string]any // every key as decoded, for module-specific settings
 }
@@ -43,15 +42,12 @@ type DB struct {
 	TLSMin   string // "db_tls_min": lowest TLS version, default "1.0"
 }
 
-// SAP is the SAP RFC gateway connection ("sap_*" and "api_*" keys).
-type SAP struct {
-	Enabled   bool
-	Host      string
-	Port      string
-	Tcode     any // passed through to SAP unchanged (string or number)
-	Werks     any
-	BatchSize int // api_batch_size (0 = module default)
-	Retries   int // api_retries    (0 = module default)
+// Value is the raw value of a config.json key (nil when absent).
+func (c *Config) Value(key string) any {
+	if c == nil {
+		return nil
+	}
+	return c.raw[key]
 }
 
 // Bool reads any config.json key with JS truthiness.
@@ -120,15 +116,6 @@ func Load(path string) (*Config, error) {
 		Password: c.String("db_password"),
 		Name:     c.String("db_name"),
 		TLSMin:   c.String("db_tls_min"),
-	}
-	c.SAP = SAP{
-		Enabled:   c.Bool("sap_enabled"),
-		Host:      c.String("sap_host"),
-		Port:      c.String("sap_port"),
-		Tcode:     m["sap_tcode"],
-		Werks:     m["sap_werks"],
-		BatchSize: c.Int("api_batch_size"),
-		Retries:   c.Int("api_retries"),
 	}
 	c.Port = parseInt(os.Getenv("PORT"))
 	if c.Port == 0 {

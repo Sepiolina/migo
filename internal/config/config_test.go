@@ -20,7 +20,7 @@ func TestLoadTypedAndModuleKeys(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Port != 3081 || !c.DB.Enabled || c.DB.Port != 1433 || c.SAP.Port != "5000" || c.SAP.BatchSize != 7 || c.SAP.Enabled {
+	if c.Port != 3081 || !c.DB.Enabled || c.DB.Port != 1433 || c.String("sap_port") != "5000" || c.Int("api_batch_size") != 7 || c.Bool("sap_enabled") {
 		t.Errorf("%+v", c)
 	}
 	// keys no one declared are still reachable for a new module

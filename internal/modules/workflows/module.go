@@ -19,14 +19,11 @@ import (
 	"strings"
 	"sync"
 
-	"miservice/internal/clients/sap"
 	"miservice/internal/clients/sqlserver"
-	"miservice/internal/config"
 	"miservice/internal/httpx"
 	"miservice/internal/jobs"
 	"miservice/internal/logx"
 	"miservice/internal/module"
-	"miservice/internal/modules/bom"
 	"miservice/internal/storage"
 	"miservice/internal/workflow"
 	builtin "miservice/workflows"
@@ -46,7 +43,7 @@ type Module struct {
 type endpoint struct {
 	name      string
 	wf        *workflow.Workflow
-	cfg       *config.Config
+	rt        workflow.Runtime
 	store     *storage.OutputStore
 	gate      *jobs.Gate
 	log       logx.Logger
@@ -66,13 +63,13 @@ func New(s module.Services) (module.Module, error) {
 		User: s.Config.DB.User, Password: s.Config.DB.Password, Database: s.Config.DB.Name,
 		TLSMin: s.Config.DB.TLSMin,
 	})
-	reg := workflow.TableOps().With(bom.Ops(bom.Deps{DB: db, SAP: &sap.Client{}}))
 	files, err := workflowFiles(filepath.Join(s.Config.Dir, "workflows"))
 	if err != nil {
 		_ = db.Close()
 		return nil, err
 	}
 	m := &Module{db: db, log: s.Log}
+	rt := workflow.Runtime{Cfg: s.Config, Log: s.Log, SQL: SQL(db)}
 	names := make([]string, 0, len(files))
 	for name := range files {
 		names = append(names, name)
@@ -83,7 +80,7 @@ func New(s module.Services) (module.Module, error) {
 			_ = db.Close()
 			return nil, fmt.Errorf("workflow file %q: name it with lowercase letters, digits and hyphens (1-40 characters)", name+".yaml")
 		}
-		wf, err := workflow.Parse(files[name], reg)
+		wf, err := workflow.Parse(files[name])
 		if err != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("workflow %s.yaml: %w", name, err)
@@ -94,11 +91,26 @@ func New(s module.Services) (module.Module, error) {
 			return nil, fmt.Errorf("workflow %s output store: %w", name, err)
 		}
 		m.endpoints = append(m.endpoints, &endpoint{
-			name: name, wf: wf, cfg: s.Config, store: store, gate: s.Gate, log: s.Log,
+			name: name, wf: wf, rt: rt, store: store, gate: s.Gate, log: s.Log,
 			uploadDir: s.UploadDir, uploads: s.Uploads,
 		})
 	}
 	return m, nil
+}
+
+// SQL runs sql steps on the shared SQL Server pool (connection "db", the
+// db_* keys of config.json).
+func SQL(db *sqlserver.Pool) workflow.SQLFunc {
+	return func(ctx context.Context, connection, query string, args []any) (*workflow.Table, error) {
+		if connection != "db" {
+			return nil, fmt.Errorf("unknown connection %q (configured: db)", connection)
+		}
+		cols, rows, err := db.Query(ctx, query, args)
+		if err != nil {
+			return nil, err
+		}
+		return &workflow.Table{Columns: cols, Rows: rows}, nil
+	}
 }
 
 // workflowFiles returns name -> YAML for the built-ins plus dir (if present).

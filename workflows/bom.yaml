@@ -1,3 +1,7 @@
+# BOM processor: a customer BOM plus a Priority workbook in, the annotated
+# BOM (BOM + debug sheets) out. Every rule is in this file; the steps are the
+# generic ones described in docs/WORKFLOWS.md.
+#
 # POST /api/bom/upload   files: Customer BOM + Priority (any order), bam: employee number
 # GET  /api/bom/download latest result of this workflow
 name: BOM
@@ -6,77 +10,364 @@ input:
   priority: {label: Priority, match: "(?i)prio|shortage"}
 
 steps:
-  - read_bom: bom
-  - read_priority: priority
-  - group_rows                 # forward fill, find-num groups, quantity fix
-  - pcb_scope
-  - pcb_reformat
+  # ---- read the customer BOM ------------------------------------------------
+  # First sheet. The header row is the first of the top 15 rows where at least
+  # 4 columns carry a known title; otherwise the standard layout applies.
+  - from:
+      input: bom
+      header:
+        search: 15
+        min: 4
+        columns:
+          Level: [level, lvl, item level]
+          PartNumber: [part number, part no, item number, internal pn, p/n]
+          PartType: [part type, type, category]
+          Description: [description, desc, part description]
+          Rev: [rev, revision, item rev]
+          Qty: [bom.qty, qty, quantity, bom qty]
+          UOM: [bom.uom, uom, unit of measure, unit]
+          FindNum: [bom.find num, find num, find no, find, line item, item]
+          RefDes: [bom.ref des, ref des, reference designator, designator, refdes]
+          MfgName: [manufacturers.mfg name, mfg name, manufacturer, mfr name, maker, vendor]
+          MfrPN: [manufacturers.mfr. part number, manufacturers.mfr part number, mfr part number, mfr. part number, mpn, mfr pn]
+        fallback: {Level: A, PartNumber: B, PartType: C, Description: D, Rev: I, Qty: Z, UOM: AA, FindNum: AC, RefDes: AD, MfgName: AZ, MfrPN: BA}
+      trim: true
+      skip_blank: true
+  - fail: {when: 'len(rows) == 0', message: The selected BOM file is empty.}
+  - save: parts
 
-  # CFT-001: forbidden vendors. A row whose brand matches an exception is
-  # banned unless `allow` is true. Expressions see brand, mpn and desc
-  # (normalised: trimmed, upper case; mpn without leading punctuation).
-  - vendor_policy:
-      banned: [YAGEO CORPORATION, WALSIN TECHNOLOGY CORPORATION, KDS]
-      exceptions:
-        - name: TDK
-          brand: 'brand matches "\\bTDK\\b" || brand startsWith "TDK"'
-          allow: 'desc not startsWith "CAP" || mpn startsWith "CGA"'
-          log: "TDK Exception: {count} TDK CAP (CGA series) row(s) confirmed valid."
-        - name: SAMSUNG
-          brand: 'brand contains "SAMSUNG" || brand contains "SEMCO"'
-          allow: 'desc not startsWith "CAP" || mpn matches "(?s)^CL(.{6}|.{10})P"'
-          log: "Samsung Exception: {count} Samsung MLCC (CL...P...) row(s) confirmed valid."
+  # ---- read the Priority workbook: Forth P/N (A) -> priority (M), from row 168
+  - fail:
+      when: '"Shortage" not in sheets("priority")'
+      message: Priority workbook has no sheet named "Shortage"
+  - from: {input: priority, sheet: Shortage, columns: {ForthPN: A, Value: M}, start: 168}
+  - set:
+      Key: norm(ForthPN)
+      # 1, 1.0, 01, P1 mean P1; otherwise the number (0 and non-numbers: none)
+      P: 'norm(Value) in ["1", "1.0", "01", "P1", "01.0"] ? 1 : (parseFloat(Value) == 0 ? nil : parseFloat(Value))'
+  - filter: Key != ""
+  - dedupe: {by: [Key], keep: last}
+  - log: Loaded {len(rows)} Priority entries.
+  - save: priorities
 
-  # Forth P/N from Material_Master on SQL Server (db_enabled). A row it covers
-  # gets the MaterialNo of its MPN, or "CREATE P/N" when there is none (blank
-  # for forbidden rows). Rows matching retry.rows that miss are looked up
-  # again with the suffix. With the DB off, every covered row gets "CREATE P/N".
-  - material_master:
-      rows: 'in_scope && !level0 && has_ijk'
-      query: |
-        SELECT MaterialNo, ISNULL(ZBlock, '') AS ZBlock, Maker
-        FROM SAP_ForthFacDb.dbo.Material_Master
-        WHERE ZBlock <> 'D' AND Project = 'FNS - Finisar'
-          AND UPPER(LTRIM(RTRIM(Maker))) IN (@mpns)
-      retry: {rows: pcb, suffix: _SANMINA}
+  # ---- groups ---------------------------------------------------------------
+  - from: parts
+  - set:
+      HasAG: '!blank(Level) || !blank(PartNumber) || !blank(PartType) || !blank(Description) || !blank(Rev) || !blank(Qty) || !blank(UOM)'
+      HasIJK: '!blank(RefDes) || !blank(MfgName) || !blank(MfrPN)'
+      Level0: index == 0 && Level == "0"
+      # Effective values: the row's own, else carried down from above.
+      EffLevel: Level
+      EffPartNumber: PartNumber
+      EffPartType: PartType
+      EffDescription: Description
+      EffRev: Rev
+      EffQty: Qty
+      EffUOM: UOM
+      EffFindNum: FindNum
+  - fill: [EffLevel, EffPartNumber, EffPartType, EffDescription, EffRev, EffQty, EffUOM, EffFindNum]
+  # A new group starts when the find number changes (or, before any find
+  # number, on every row with A-G data).
+  - set:
+      GroupID: 'index == 0 ? 1 : prev("GroupID") + (EffFindNum != "" ? (prev("EffFindNum") != EffFindNum ? 1 : 0) : (HasAG ? 1 : 0))'
+  - window:
+      by: [EffFindNum]
+      set:
+        # a blank ref des takes the first one of its find number
+        EffRefDes: 'RefDes != "" ? RefDes : first(filter(group, #.RefDes != ""))?.RefDes ?? ""'
+        # a zero quantity becomes the find number's largest, or 1
+        EffQty: >-
+          toNumber(EffQty, 0) != 0 ? EffQty :
+          (let m = max(map(group, toNumber(#.EffQty, 0)));
+           m > 0 ? first(filter(group, toNumber(#.EffQty, 0) == m)).EffQty : "1")
 
-  # Block status, vendor and stock from the SAP gateway (sap_enabled; host,
-  # tcode, werks in config.json). A Z1 status blocks the row.
-  - sap_enrich:
-      rows: 'in_scope && !level0 && has_ijk && (!forbidden || exempt) && forth_pn not in ["", "CREATE P/N"]'
-      employee_id: "106049"
-      fields:                  # SAP keys, in order of preference
-        status: [mmsta, mstae, zblock, status]
-        vendor_name: [vname]
-        vendor_code: [lifnr]
-        stock: [labst, stock]
+  # ---- PCB scope and reformat --------------------------------------------------
+  # A PCB row: a description piece (split at , ; : / | \) starting with "PCB"
+  # not followed by a letter or digit.
+  - set:
+      IsPCB: 'any([Description, EffDescription], {any(splitAny(norm(#), ",;:/|\\"), {trim(#) matches "^PCB([^A-Z0-9]|$)"})})'
+  - window:   # rows below the last PCB row are out of scope
+      set: {InScope: 'let lastPCB = findLastIndex(group, #.IsPCB) ?? -1; lastPCB < 0 || index <= lastPCB'}
+  # In-scope PCB rows: the MPN becomes <MPN, else part number>_REV_<first word of rev>.
+  - set:
+      OrigMfrPN: MfrPN
+      RevToken: 'first(fields(Rev != "" ? Rev : EffRev)) ?? ""'
+      NewMfrPN: >-
+        let base = MfrPN != "" ? MfrPN : (PartNumber != "" ? PartNumber : EffPartNumber ?? "");
+        InScope && IsPCB && base != "" && RevToken != ""
+          ? (base contains "_REV_" + RevToken ? base : base + "_REV_" + RevToken)
+          : MfrPN
+  - log:
+      when: 'any(rows, #.NewMfrPN != #.MfrPN)'
+      message: 'Reformatted Column K for {len(filter(rows, #.NewMfrPN != #.MfrPN))} PCB row(s).'
+  - set:
+      HasIJK: HasIJK || NewMfrPN != MfrPN
+      MfrPN: NewMfrPN
 
-  # CFT-002: one MAIN per find-number group, the other candidates SUB1, SUB2...
-  - select_priority:
-      ineligible:              # first match wins; the reason shows on the debug sheet
-        - {when: level0, reason: Ineligible (Level 0)}
-        - {when: '!has_ijk', reason: "Ineligible (No I,J,K)"}
-        - {when: z1, reason: Ineligible (Z1 Blocked)}
-        - {when: forbidden && !exempt, reason: Ineligible (CFT-001 Forbidden)}
+  # ---- CFT-001: forbidden vendors ----------------------------------------------
+  - set:
+      Brand: norm(MfgName)
+      MPNKey: 'replaceRe(norm(MfrPN), "^[^A-Z0-9]+", "")'
+      Desc: 'norm(blank(EffDescription) ? Description : EffDescription)'
+      # Brands that are banned unless the row is allowed:
+      Exception: >-
+        Brand matches "\\bTDK\\b" || Brand startsWith "TDK" ? "TDK" :
+        Brand contains "SAMSUNG" || Brand contains "SEMCO" ? "SAMSUNG" : ""
+      Exempt: >-
+        Exception == "TDK" ? (Desc not startsWith "CAP" || MPNKey startsWith "CGA") :
+        Exception == "SAMSUNG" ? (Desc not startsWith "CAP" || MPNKey matches "(?s)^CL(.{6}|.{10})P") :
+        false
+      Forbidden: >-
+        InScope && (Exception != "" ? !Exempt :
+          Brand in ["YAGEO CORPORATION", "WALSIN TECHNOLOGY CORPORATION", "KDS"])
+  - log:
+      when: 'any(rows, #.InScope && #.Exception == "TDK" && #.Exempt)'
+      message: 'TDK Exception: {len(filter(rows, #.InScope && #.Exception == "TDK" && #.Exempt))} TDK CAP (CGA series) row(s) confirmed valid.'
+  - log:
+      when: 'any(rows, #.InScope && #.Exception == "SAMSUNG" && #.Exempt)'
+      message: 'Samsung Exception: {len(filter(rows, #.InScope && #.Exception == "SAMSUNG" && #.Exempt))} Samsung MLCC (CL...P...) row(s) confirmed valid.'
+  - log: 'CFT-001: {len(filter(rows, #.Forbidden))} row(s) flagged as forbidden.'
+
+  # ---- Forth P/N from Material_Master (SQL Server) ------------------------------
+  # Rows looked up: in scope, not level 0, with I-K data. PCB rows that miss
+  # are tried again with _SANMINA appended.
+  - set:
+      Covered: InScope && !Level0 && HasIJK
+      LookupKey: norm(MfrPN)
+      RetryMfrPN: 'MfrPN == "" || norm(MfrPN) endsWith "_SANMINA" ? MfrPN : MfrPN + "_SANMINA"'
+      RetryKey: 'IsPCB ? norm(RetryMfrPN) : ""'
+  - if: truthy(config("db_enabled"))
+    then:
+      - sql:
+          connection: db
+          query: |
+            SELECT MaterialNo, ISNULL(ZBlock, '') AS ZBlock, Maker
+            FROM SAP_ForthFacDb.dbo.Material_Master
+            WHERE ZBlock <> 'D' AND Project = 'FNS - Finisar'
+              AND UPPER(LTRIM(RTRIM(Maker))) IN (@mpns)
+          params:
+            mpns: >-
+              uniq(concat(
+                map(filter(rows, #.Covered && #.MfrPN != ""), #.LookupKey),
+                map(filter(rows, #.Covered && #.MfrPN != "" && #.RetryKey != ""), #.RetryKey)))
+          columns: [MaterialNo, ZBlock, Maker]
+          on_error: 'WARNING: MSSQL connection/lookup failed ({error}) -- skipping DB lookup and using fallback Forth P/N.'
+          save: master
+      - save: parts
+      - from: master
+      - filter: '!blank(Maker)'
+      - dedupe: {by: [Maker], keep: first, normalize: true}
+      - save: master
+      - from: parts
+      - join: {with: master, on: [LookupKey], right_on: [Maker], normalize: true, take: {HitMaker: Maker, HitNo: MaterialNo, HitZ: ZBlock}}
+      - join: {with: master, on: [RetryKey], right_on: [Maker], normalize: true, take: {RetryMaker: Maker, RetryNo: MaterialNo, RetryZ: ZBlock}}
+    else:   # no database: nothing is found, every looked-up row asks for a new P/N
+      - set: {HitMaker: nil, HitNo: nil, HitZ: nil, RetryMaker: nil, RetryNo: nil, RetryZ: nil}
+  - set:
+      Lookup: Covered && MfrPN != ""
+      UseRetry: Lookup && HitMaker == nil && IsPCB && RetryMaker != nil
+      Found: Lookup && (HitMaker != nil || UseRetry)
+      ForthPN: >-
+        !Covered ? "" :
+        MfrPN == "" ? (Forbidden ? "" : "CREATE P/N") :
+        (let pn = Found ? str(UseRetry ? RetryNo : HitNo) : "CREATE P/N";
+         Forbidden && pn == "CREATE P/N" ? "" : pn)
+      BlockStatus: 'Lookup && Found ? str(UseRetry ? RetryZ : HitZ) : ""'
+      Z1: norm(BlockStatus) == "Z1"
+      MfrPN: 'UseRetry ? RetryMfrPN : MfrPN'
+      VName: '""'
+      VendorCode: '""'
+      Stock: '0'
+
+  # ---- block status, vendor and stock from SAP (REST) -----------------------------
+  - if: truthy(config("sap_enabled"))
+    then:
+      - set:
+          SapRow: 'InScope && !Level0 && HasIJK && (!Forbidden || Exempt) && ForthPN not in ["", "CREATE P/N"]'
+      - if: '!any(rows, #.SapRow)'
+        then:
+          - log: 'SAP enrichment: no eligible Forth P/N rows to query.'
+        else:
+          - rest:
+              url: 'http://{config("sap_host")}:{config("sap_port")}/api/sap-rfc/call'
+              method: POST
+              each: 'sort(uniq(map(filter(rows, #.SapRow), #.ForthPN)))'
+              batch: 'let n = toNumber(config("api_batch_size"), 0); n > 0 ? n : 50'
+              retries: 'let n = toNumber(config("api_retries"), 0); n > 0 ? n : 3'
+              body: '{tcode: config("sap_tcode"), employee_id: "106049", DATA: concat([{WERKS: config("sap_werks")}], map(batch, ({MATNR: #})))}'
+              rows: >-
+                type(response) == "array" ? response :
+                type(response) != "map" ? [] :
+                type(response.tables) == "array" ? flatten(map(response.tables, type(#) == "map" && type(#.rows) == "array" ? #.rows : [])) :
+                response.DATA ?? response.data ?? response.rows ?? []
+              keys: lower
+              columns: [matnr, mmsta, mstae, zblock, status, vname, lifnr, labst, stock]
+              on_error: 'WARN: SAP batch {batch_number} failed after {retries} retries: {error}'
+              save: sap
+          - save: parts
+          # One answer per material number, with and without leading zeros (the last answer wins).
+          - from: sap
+          - filter: truthy(matnr)
+          - set:
+              K1: norm(str(matnr))
+              K2: 'norm(replaceRe(trim(str(matnr)), "^0+", ""))'
+              SapStatus: 'trim(str(coalesce(mmsta, mstae, zblock, status) ?? ""))'
+              SapVName: 'truthy(vname) ? trim(str(vname)) : ""'
+              SapVCode: 'truthy(lifnr) ? trim(str(lifnr)) : ""'
+              SapStock: toNumber(labst ?? stock, 0)
+          - stack: {columns: [K1, K2], into: Key}
+          - dedupe: {by: [Key], keep: last}
+          - save: sap
+          - from: parts
+          - set:
+              PN1: norm(ForthPN)
+              PN2: 'norm(replaceRe(norm(ForthPN), "^0+", ""))'
+          - join: {with: sap, on: [PN1], right_on: [Key], take: {A_Hit: Key, A_Status: SapStatus, A_VName: SapVName, A_VCode: SapVCode, A_Stock: SapStock}}
+          - join: {with: sap, on: [PN2], right_on: [Key], take: {B_Hit: Key, B_Status: SapStatus, B_VName: SapVName, B_VCode: SapVCode, B_Stock: SapStock}}
+          - set:   # rows found in SAP take its status, vendor and stock; Z1 blocks
+              SapHit: SapRow && (A_Hit != nil || B_Hit != nil)
+              SapStatus: 'A_Hit != nil ? A_Status : B_Status'
+              SapZ1: 'SapHit && norm(SapStatus != "" ? SapStatus : BlockStatus) == "Z1"'
+              BlockStatus: 'SapZ1 ? "Z1" : SapHit && SapStatus != "" ? SapStatus : BlockStatus'
+              Z1: Z1 || SapZ1
+              ForthPN: 'SapZ1 && ForthPN == "CREATE P/N" ? "" : ForthPN'
+              VName: 'SapHit ? (A_Hit != nil ? A_VName : B_VName) : VName'
+              VendorCode: 'SapHit ? (A_Hit != nil ? A_VCode : B_VCode) : VendorCode'
+              Stock: 'SapHit ? (A_Hit != nil ? A_Stock : B_Stock) : Stock'
+          - log: 'SAP enrichment: matched {len(filter(rows, #.SapHit))} / {len(filter(rows, #.SapRow))} rows.'
+
+  # ---- CFT-002: one MAIN per group, the other candidates SUB1, SUB2... ---------------
+  - set:
+      PKey: norm(ForthPN)
+  - join: {with: priorities, on: [PKey], right_on: [Key], take: {PV: P}}
+  - set:
+      PriorityValue: 'InScope ? PV : nil'
+      Eligible: >-
+        !InScope ? "Ineligible (Below PCB Scope)" :
+        Level0 ? "Ineligible (Level 0)" :
+        !HasIJK ? "Ineligible (No I,J,K)" :
+        Z1 ? "Ineligible (Z1 Blocked)" :
+        Forbidden && !Exempt ? "Ineligible (CFT-001 Forbidden)" :
+        "Eligible"
+      HasVendor: 'let v = trim(VName) != "" ? trim(VName) : trim(VendorCode); v not in ["", "0", "None", "-"]'
+      VendorLabel: 'VName != "" ? VName : VendorCode'
       # A Forth P/N used twice in a group: only the top-most row stays a candidate.
-      duplicate_key: 'norm(forth_pn) == "CREATE P/N" ? "" : norm(forth_pn)'
-      main:                    # first rule with matching rows picks MAIN; ties go to the top-most row
-        - rows: priority == 1
-          when: count == 1
-          reason: "MAIN (Cond A: Single P1 match)"
-        - rows: 'priority == 1 && vendor not in ["", "0", "None", "-"]'
-          pick: most_stock
-          reason: "MAIN (Cond B: Multiple P1 & Vendors -> Highest Stock: {stock} [{vendor}])"
-          reason_tied: "MAIN (Cond B: Multiple P1 & Vendors -> Highest Stock: {stock} [{tied} tied, top-most: {vendor}])"
-        - rows: priority == 1
-          pick: most_stock
-          reason: "MAIN (Cond B: Multiple P1, No Vendor -> Highest Stock: {stock} [{tied} tied, top-most])"
-        - rows: 'vendor not in ["", "0", "None", "-"]'
-          reason: "MAIN (Cond C: No P1 -> Vendor match [{vendor}, top-most])"
+      DupKey: 'norm(ForthPN) == "CREATE P/N" ? "" : norm(ForthPN)'
+      Dup: 'false'
+  - window:
+      by: [GroupID, DupKey]
+      where: Eligible == "Eligible"
+      set: {Dup: DupKey != "" && index > 0}
+  - set:
+      Candidate: Eligible == "Eligible" && !Dup
+  - pick:
+      by: [GroupID]
+      where: Candidate
+      mark: Main
+      reason: Reason
+      rules:   # the first rule with matching rows decides; ties go to the top-most row
+        - rows: PriorityValue == 1
+          when: size == 1
+          reason: 'MAIN (Cond A: Single P1 match)'
+        - rows: PriorityValue == 1 && HasVendor
+          best: Stock
+          reason: 'MAIN (Cond B: Multiple P1 & Vendors -> Highest Stock: {best} [{tied > 1 ? str(tied) + " tied, top-most: " : ""}{chosen.VendorLabel}])'
+        - rows: PriorityValue == 1
+          best: Stock
+          reason: 'MAIN (Cond B: Multiple P1, No Vendor -> Highest Stock: {best} [{tied} tied, top-most])'
+        - rows: HasVendor
+          reason: 'MAIN (Cond C: No P1 -> Vendor match [{chosen.VendorLabel}, top-most])'
         - rows: 'true'
-          when: stock > 0
-          pick: most_stock
-          reason: "MAIN (Cond C: No P1, No Vendor -> Highest Stock: {stock} [{tied} tied, top-most])"
+          best: Stock
+          when: best > 0
+          reason: 'MAIN (Cond C: No P1, No Vendor -> Highest Stock: {best} [{tied} tied, top-most])'
         - rows: 'true'
-          reason: "MAIN (Cond D: No P1, No Vendor, No Stock -> Fallback top-most row)"
-  - write_bom                  # BOM + debug sheets
+          reason: 'MAIN (Cond D: No P1, No Vendor, No Stock -> Fallback top-most row)'
+  - set:
+      Priority: 'Main == true ? "MAIN" : ""'
+  - window:
+      by: [GroupID]
+      where: Candidate && Main != true
+      set:
+        Priority: '"SUB" + str(index + 1)'
+        Reason: '"SUB" + str(index + 1) + " (Alternate in group)"'
+  - set:
+      Reason: >-
+        !InScope ? "Out of Scope" :
+        Eligible != "Eligible" ? Eligible :
+        Dup ? "Duplicate Forth P/N (excluded from MAIN/SUB)" : Reason
+  - log: 'CFT-002: assigned MAIN to {len(filter(rows, #.Main == true))} group(s).'
+  - window:   # the last row of each group gets a thick bottom border
+      by: [GroupID]
+      where: InScope
+      set: {GroupEnd: index == size - 1}
+  - save: result
+
+output:
+  sheets:
+    - name: BOM
+      from: result
+      freeze: true
+      header_height: 28
+      style: {align: center}
+      header: {bold: true, font: {size: 10}}
+      columns:
+        - {header: Level, column: EffLevel, width: 6}
+        - {header: Part Number, column: EffPartNumber, width: 14}
+        - {header: Part Type, column: EffPartType, width: 10}
+        - {header: Description, column: EffDescription, width: 34}
+        - {header: Rev, column: EffRev, width: 14}
+        - {header: BOM.Qty, column: EffQty, width: 8}
+        - {header: BOM.UOM, column: EffUOM, width: 8}
+        - {header: BOM.Find Num, column: EffFindNum, width: 12}
+        - {header: BOM.Ref Des, column: EffRefDes, width: 12}
+        - {header: Manufacturers.Mfg Name, id: mfg, column: MfgName, width: 24}
+        - {header: Manufacturers.Mfr. Part Number, id: mpn, value: 'InScope ? MfrPN : OrigMfrPN', width: 20}
+        - {header: "", id: sep, value: '""', width: 4}
+        - {header: Block Status, id: block, value: 'InScope ? (Z1 ? "Z1" : BlockStatus == "FORBIDDEN" ? "" : BlockStatus) : ""', width: 12}
+        - header: Forth P/N
+          id: forth
+          width: 16
+          value: >-
+            !InScope || !HasIJK || Level0 ? "" :
+            (Forbidden || Z1) && !Exempt && ForthPN == "CREATE P/N" ? "" : ForthPN
+        - {header: Priority, id: prio, value: 'InScope && HasIJK && !Level0 ? Priority : ""', width: 10}
+      styles:
+        - {when: InScope, columns: [sep], fill: "#000000"}
+        - {when: InScope && Level0, columns: [Level, Part Number, Part Type, Description, Rev, BOM.Qty, BOM.UOM, BOM.Find Num, BOM.Ref Des, mfg, mpn, sep, block, forth, prio], fill: "#FFFF00"}
+        - {when: 'InScope && HasIJK && !Level0 && ForthPN == "CREATE P/N" && !((Forbidden || Z1) && !Exempt)', columns: [forth], fill: "#FFFF00"}
+        - {when: InScope && (Forbidden || Z1) && !Exempt, columns: [mfg, mpn], fill: "#FF0000", font: {color: "#FFFFFF", bold: true}}
+        - {when: 'InScope && Priority == "MAIN"', columns: [prio], fill: "#0070C0", font: {color: "#FFFFFF", bold: true}}
+        - {when: 'InScope && Priority startsWith "SUB"', columns: [prio], fill: "#2E7D32", font: {color: "#FFFFFF", bold: true}}
+        - {when: InScope && Dup, columns: [prio], fill: "#000000", font: {color: "#FFFFFF", bold: true}}
+        - {when: GroupEnd == true, columns: [Level, Part Number, Part Type, Description, Rev, BOM.Qty, BOM.UOM, BOM.Find Num, BOM.Ref Des, mfg, mpn, sep, block, forth, prio], border: {bottom: thick}}
+
+    - name: debug
+      like: BOM
+      columns:
+        - {header: "", id: s1, value: '""', width: 2}
+        - {header: "", id: s2, value: '""', width: 2}
+        - {header: "", id: s3, value: '""', width: 2}
+        - {header: "", id: s4, value: '""', width: 2}
+        - header: "Debug: Priority (P1)"
+          id: p1
+          width: 16
+          header_style: {fill: "#2C3E50", font: {color: "#FFFFFF", bold: true}}
+          value: '!InScope ? "-" : PriorityValue == 1 ? "P1 (1.0)" : PriorityValue != nil ? "Val (" + str(PriorityValue) + ")" : "None"'
+        - {header: "Debug: SAP Vendor Name", id: vname, value: '!InScope ? "-" : trim(VName) != "" ? trim(VName) : "No Vendor"', width: 28, header_style: {fill: "#2C3E50", font: {color: "#FFFFFF", bold: true}}}
+        - {header: "Debug: SAP Vendor Code", id: vcode, value: '!InScope ? "-" : trim(VendorCode) != "" ? trim(VendorCode) : "-"', width: 16, header_style: {fill: "#2C3E50", font: {color: "#FFFFFF", bold: true}}}
+        - {header: "Debug: SAP Stock Qty", id: stock, value: 'InScope ? Stock : "-"', number_format: "#,##0", width: 16, header_style: {fill: "#2C3E50", font: {color: "#FFFFFF", bold: true}}}
+        - {header: "Debug: Forth Material No", id: dforth, value: 'InScope ? ForthPN : OrigMfrPN', width: 20, header_style: {fill: "#2C3E50", font: {color: "#FFFFFF", bold: true}}}
+        - {header: "Debug: Eligibility Status", id: elig, column: Eligible, width: 24, header_style: {fill: "#2C3E50", font: {color: "#FFFFFF", bold: true}}}
+        - {header: "Debug: Decision Reason", id: reason, column: Reason, width: 48, header_style: {fill: "#2C3E50", font: {color: "#FFFFFF", bold: true}}}
+        - {header: "Debug: Group ID", id: gid, value: 'InScope ? str(GroupID) : "-"', width: 12, header_style: {fill: "#2C3E50", font: {color: "#FFFFFF", bold: true}}}
+      styles:
+        - {columns: [p1, vname, vcode, stock, dforth, elig, reason, gid], font: {size: 9, color: "#212121"}, border: {left: thin, right: thin, top: thin, bottom: thin, color: "#E0E0E0"}}
+        - {when: GroupEnd == true, columns: [p1, vname, vcode, stock, dforth, elig, reason, gid], border: {bottom: thick, color: "#000000"}}
+        - {when: 'Eligible == "Eligible"', columns: [elig], fill: "#E8F5E9", font: {bold: true, color: "#2E7D32"}}
+        - {when: 'Eligible contains "Ineligible" && Eligible not contains "Scope"', columns: [elig], fill: "#FFEBEE", font: {bold: true, color: "#C62828"}}
+        - {when: '!InScope', columns: [elig], fill: "#F5F5F5", font: {color: "#757575"}}
+        - {when: 'Reason startsWith "MAIN"', columns: [reason], fill: "#E3F2FD", font: {bold: true, color: "#1565C0"}}
+        - {when: 'Reason startsWith "SUB"', columns: [reason], fill: "#F1F8E9", font: {color: "#33691E"}}
+        - {when: 'InScope && PriorityValue == 1', columns: [p1], fill: "#FFF8E1", font: {bold: true, color: "#E65100"}}
+        - {when: 'InScope && Stock > 0', columns: [stock], font: {bold: true, color: "#1565C0"}}
