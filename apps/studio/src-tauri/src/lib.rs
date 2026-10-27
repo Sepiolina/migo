@@ -480,6 +480,42 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_credential_store_round_trip() {
+        struct Cleanup(keyring::Entry);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = self.0.delete_credential();
+            }
+        }
+        let unique = format!(
+            "test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock before epoch")
+                .as_nanos()
+        );
+        let service = "org.mai.studio.tests";
+        let entry = keyring::Entry::new(service, &unique)
+            .expect("Windows Credential Manager entry unavailable");
+        let _cleanup = Cleanup(entry);
+        let secret = b"synthetic-credential-store-round-trip";
+        _cleanup
+            .0
+            .set_secret(secret)
+            .expect("Windows Credential Manager failed to store test credential");
+        let fresh = keyring::Entry::new(service, &unique)
+            .expect("Windows Credential Manager entry unavailable on reopen");
+        assert_eq!(
+            fresh
+                .get_secret()
+                .expect("Windows Credential Manager failed to retrieve test credential"),
+            secret
+        );
+    }
+
     #[test]
     fn signing_identity_uses_go_ed25519_keypair_format() {
         use ed25519_dalek::{Signer, Verifier};
@@ -502,14 +538,15 @@ mod tests {
     #[test]
     fn build_inputs_are_scoped_to_selected_workspace() {
         let root = tempfile::tempdir().unwrap();
+        let canonical_root = root.path().canonicalize().unwrap();
         std::fs::write(root.path().join("config.yaml"), b"config").unwrap();
-        assert!(check_build_path(root.path(), &json!("config.yaml")).is_ok());
-        assert!(check_build_path(root.path(), &json!("../config.yaml")).is_err());
-        assert!(check_build_path(root.path(), &json!("/etc/passwd")).is_err());
+        assert!(check_build_path(&canonical_root, &json!("config.yaml")).is_ok());
+        assert!(check_build_path(&canonical_root, &json!("../config.yaml")).is_err());
+        assert!(check_build_path(&canonical_root, &json!("/etc/passwd")).is_err());
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink("/etc/passwd", root.path().join("link")).unwrap();
-            assert!(check_build_path(root.path(), &json!("link")).is_err());
+            assert!(check_build_path(&canonical_root, &json!("link")).is_err());
         }
     }
     #[test]
