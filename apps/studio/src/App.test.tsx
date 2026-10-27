@@ -80,9 +80,11 @@ afterEach(cleanup);
 async function openInspector() {
   const user = userEvent.setup();
   render(<App />);
+  await user.click(screen.getByRole("button", { name: "Project & inputs" }));
   await user.click(screen.getByRole("button", { name: /Open workspace/ }));
   await waitFor(() => expect(screen.getByText("/project")).toBeTruthy());
   await user.click(screen.getByRole("button", { name: "Select step.0" }));
+  await user.click(screen.getByRole("button", { name: "Advanced YAML" }));
   return user;
 }
 
@@ -146,14 +148,12 @@ describe("unapplied argument protection", () => {
       (screen.getByLabelText("Step argument") as HTMLTextAreaElement).value,
     ).toBe("invalid: [");
 
-    await user.click(screen.getByRole("button", { name: "Apply argument" }));
+    await user.click(screen.getByRole("button", { name: "Apply changes" }));
     expect(screen.getByRole("alert")).toBeTruthy();
     expect(
       (screen.getByLabelText("Step argument") as HTMLTextAreaElement).value,
     ).toBe("invalid: [");
-    await user.click(
-      screen.getByRole("button", { name: "Discard argument draft" }),
-    );
+    await user.click(screen.getByRole("button", { name: "Discard changes" }));
     expect(screen.queryByRole("alert")).toBeNull();
     expect(
       (
@@ -169,9 +169,9 @@ describe("unapplied argument protection", () => {
     fireEvent.change(screen.getByLabelText("Step argument"), {
       target: { value: '"changed[Sheet]"' },
     });
-    await user.click(screen.getByRole("button", { name: "Apply argument" }));
+    await user.click(screen.getByRole("button", { name: "Apply changes" }));
     expect(
-      screen.queryByRole("button", { name: "Discard argument draft" }),
+      screen.queryByRole("button", { name: "Discard changes" }),
     ).toBeNull();
     await user.click(screen.getByRole("button", { name: /Save workflow/ }));
     await waitFor(() =>
@@ -194,5 +194,44 @@ describe("unapplied argument protection", () => {
     );
     expect(preventDefault).toHaveBeenCalledOnce();
     expect(native.destroy).toHaveBeenCalledOnce();
+  });
+});
+
+describe("optional Excel workspace", () => {
+  it("starts collapsed and preserves edited workflow source through open, expand, dock, and close", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    expect(
+      screen.queryByRole("complementary", { name: "Project and inputs" }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("region", { name: "Excel data panel" }),
+    ).toBeNull();
+    await user.click(screen.getByRole("button", { name: "YAML source" }));
+    const source = screen.getByLabelText(
+      "Workflow YAML source",
+    ) as HTMLTextAreaElement;
+    const edited = `# retain my workflow comment\n${source.value}`;
+    fireEvent.change(source, { target: { value: edited } });
+    await user.click(screen.getByRole("button", { name: "Excel data" }));
+    expect(
+      screen.getByRole("region", { name: "Excel data panel" }),
+    ).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Expand data" }));
+    expect(screen.getByRole("button", { name: "Dock panel" })).toBeTruthy();
+    expect(
+      (screen.getByLabelText("Workflow YAML source") as HTMLTextAreaElement)
+        .value,
+    ).toBe(edited);
+    await user.click(screen.getByRole("button", { name: "Dock panel" }));
+    await user.click(screen.getByRole("button", { name: "Close Excel data" }));
+    expect(
+      screen.queryByRole("region", { name: "Excel data panel" }),
+    ).toBeNull();
+    expect(
+      (screen.getByLabelText("Workflow YAML source") as HTMLTextAreaElement)
+        .value,
+    ).toBe(edited);
+    expect(native.invoke).not.toHaveBeenCalled();
   });
 });

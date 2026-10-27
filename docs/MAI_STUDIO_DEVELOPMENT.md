@@ -9,9 +9,13 @@ roadmap is in [the implementation plan](MAI_DEV_TOOL_IMPLEMENTATION_PLAN.md).
 The runner validates YAML, inspects Excel input workbooks, and runs workflows
 offline to generate inspectable XLSX artifacts. The desktop shell provides
 workspace workflow discovery, revision-checked saves, source-backed graph
-visualization, top-level step editing and ordering, undo/redo, input bindings, and
-result inspection. Nested authoring and unsupported step forms use the YAML
-source editor.
+visualization, a searchable node library, guided top-level step settings with an
+Advanced YAML fallback, step ordering, undo/redo, input bindings, and result
+inspection. The horizontal canvas is the default view. Project controls and the
+read-only Excel data panel open on demand; the data panel supports input/output
+selection, expansion, paging, and full cell-value inspection. Nested authoring and
+unsupported step forms use the YAML source editor.
+
 Intermediate traces, live connections, cancellation controls, and the secure Linux
 release wizard remain subsequent milestones. The production service and its HTTP
 contract are unchanged. See the [user guide](MAI_STUDIO_USER_GUIDE.md) for the
@@ -56,7 +60,10 @@ coverage without access to company services.
 
 React renders workflow documents and displays native results. Tauri authorizes
 workspace access and supervises the sidecar. Go owns validation, workbook reading,
-and execution. Do not reimplement expression evaluation in TypeScript or Rust.
+and execution. Do not reimplement expression evaluation in TypeScript or Rust. Guided forms
+edit YAML arguments; Go remains responsible for validation and execution. The
+canvas projects ordered YAML steps and branches. It does not support arbitrary
+wire editing or drag-to-reorder execution.
 Protocol responses use version 1 and preserve request IDs; unsupported commands,
 paths, and versions must fail explicitly. Offline means all external SQL/HTTP
 operations are unavailable, including unconditional steps.
@@ -76,11 +83,12 @@ npm run desktop:dev
 If Go is not on PATH, set `MAI_GO` to the Go executable. `npm run desktop:build`
 builds the desktop distribution, not the planned Linux service deployment ZIP.
 
-Choose the repository folder as the workspace. The initial document contains the
+Open **Project & inputs** and choose the repository folder as the workspace. The
+initial document contains the
 parts-summary example; you can also paste `examples/parts-summary.yaml` into the
-source editor. Validate, bind `parts` to `examples/parts.xlsx`, then run. Inspect
-the generated artifact under
-`.studio/runs/` or select another sheet in its preview. The first preview displays
+source editor. Validate, bind `parts` to `examples/parts.xlsx`, then run. Open
+**Excel data** to inspect the generated artifact, select input/output workbooks,
+or page through another sheet. Artifacts are stored under `.studio/runs/`. The first preview displays
 cell values only; styles, formula metadata, and full Excel visual fidelity remain
 roadmap work. Generated workbooks themselves come from the production writer.
 
