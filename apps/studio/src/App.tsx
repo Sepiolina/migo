@@ -1,9 +1,13 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ReactFlow, Background, Controls, MiniMap } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import "./style.css";
 import { example, projectWorkflow } from "./model";
+import { changeSteps, topLevelCount } from "./authoring";
+import { useDocument } from "./useDocument";
+import { StepInspector } from "./StepInspector";
 import {
   isDesktop,
   request,
@@ -12,8 +16,18 @@ import {
   type RunResult,
 } from "./api";
 export default function App() {
-  const [source, setSource] = useState(example),
-    [workspace, setWorkspace] = useState(""),
+  const document = useDocument(example);
+  const { source, setSource } = document;
+  const [selected, setSelected] = useState<string>();
+  const [argumentDraft, setArgumentDraft] = useState<string>();
+  const hasDraft = argumentDraft !== undefined;
+  const [workflowPaths, setWorkflowPaths] = useState<string[]>([]);
+  const [workflowPath, setWorkflowPath] = useState("");
+  const [openPath, setOpenPath] = useState("examples/parts-summary.yaml");
+  const [savePath, setSavePath] = useState("workflows/summary.yaml");
+  const [revision, setRevision] = useState<string | null>(null);
+  const [pendingDiscard, setPendingDiscard] = useState<() => void>();
+  const [workspace, setWorkspace] = useState(""),
     [tab, setTab] = useState("graph");
   const [validation, setValidation] = useState<Validation>(),
     [bindings, setBindings] = useState<Record<string, string>>({
@@ -29,6 +43,46 @@ export default function App() {
     ),
     [runIdentity, setRunIdentity] = useState(""),
     [validatedSource, setValidatedSource] = useState("");
+  const unsavedRef = useRef(false);
+  unsavedRef.current = document.dirty || hasDraft;
+  useEffect(() => {
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (unsavedRef.current) {
+        event.preventDefault();
+        event.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", beforeUnload);
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    if (isDesktop()) {
+      const currentWindow = getCurrentWindow();
+      void currentWindow
+        .onCloseRequested((event) => {
+          if (!unsavedRef.current) return;
+          event.preventDefault();
+          setPendingDiscard(() => () => {
+            void currentWindow.destroy().catch((error) => {
+              setError(true);
+              setMessage(String(error));
+            });
+          });
+        })
+        .then((stop) => {
+          if (disposed) stop();
+          else unlisten = stop;
+        })
+        .catch((error) => {
+          setError(true);
+          setMessage(String(error));
+        });
+    }
+    return () => {
+      disposed = true;
+      unlisten?.();
+      window.removeEventListener("beforeunload", beforeUnload);
+    };
+  }, []);
   const currentIdentity = JSON.stringify({ source, workspace, bindings });
   const graph = useMemo(() => projectWorkflow(source), [source]);
   async function task(label: string, action: () => Promise<void>) {
@@ -53,6 +107,16 @@ export default function App() {
         return;
       }
       setWorkspace(selected.path);
+      document.load(example);
+      setArgumentDraft(undefined);
+      setWorkflowPath("");
+      setRevision(null);
+      setWorkflowPaths([]);
+      setValidation(undefined);
+      setValidatedSource("");
+      setSelected(undefined);
+      const listing = await invoke<{ paths: string[] }>("list_workflows");
+      setWorkflowPaths(listing.paths);
       setArtifact(undefined);
       setInspection(undefined);
       setMessage(
@@ -60,7 +124,126 @@ export default function App() {
       );
     });
   }
+  function discardGuard(action: () => void) {
+    if (document.dirty || hasDraft) setPendingDiscard(() => action);
+    else action();
+  }
+  async function loadWorkflow(path: string) {
+    if (!path) return;
+    await task("Loading workflow", async () => {
+      const loaded = await invoke<{
+        path: string;
+        source: string;
+        revision: string;
+      }>("read_workflow", { path });
+      document.load(loaded.source);
+      setArgumentDraft(undefined);
+      setWorkflowPath(loaded.path);
+      setSavePath(loaded.path);
+      setRevision(loaded.revision);
+      setSelected(undefined);
+      setValidation(undefined);
+      setValidatedSource("");
+      setMessage(`Loaded ${loaded.path}.`);
+    });
+  }
+  async function saveWorkflow() {
+    if (hasDraft) {
+      setMessage("Apply or discard the argument draft before saving.");
+      return;
+    }
+    await task("Saving workflow", async () => {
+      const saved = await invoke<{
+        path: string;
+        source: string;
+        revision: string;
+      }>("save_workflow", {
+        path: savePath,
+        source,
+        expectedRevision: savePath === workflowPath ? revision : null,
+      });
+      document.markSaved(saved.source);
+      setWorkflowPath(saved.path);
+      setSavePath(saved.path);
+      setRevision(saved.revision);
+      setWorkflowPaths((paths) =>
+        Array.from(new Set([...paths, saved.path])).sort(),
+      );
+      setMessage(`Saved ${saved.path}.`);
+    });
+  }
+  const count = topLevelCount(source);
+  const selectedIndex =
+    selected && /^step\.\d+$/.test(selected)
+      ? Number(selected.split(".")[1])
+      : undefined;
+  function mutateSteps(action: "add" | "delete" | "up" | "down") {
+    if (hasDraft) return;
+    try {
+      setSource(changeSteps(source, action, selectedIndex));
+      if (action === "add") setSelected(`step.${count}`);
+      else if (action === "delete") setSelected(undefined);
+      else if (selectedIndex !== undefined)
+        setSelected(`step.${selectedIndex + (action === "up" ? -1 : 1)}`);
+    } catch (e) {
+      setError(true);
+      setMessage(String(e));
+    }
+  }
+  useEffect(() => {
+    const keyboard = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement;
+      const typing =
+        ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName) ||
+        target.isContentEditable;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        if (isDesktop() && workspace && !busy && savePath) void saveWorkflow();
+      } else if (
+        !typing &&
+        !busy &&
+        !hasDraft &&
+        (event.ctrlKey || event.metaKey) &&
+        ["z", "y"].includes(event.key.toLowerCase())
+      ) {
+        event.preventDefault();
+        if (event.key.toLowerCase() === "y" || event.shiftKey) document.redo();
+        else document.undo();
+      } else if (
+        !typing &&
+        !busy &&
+        !hasDraft &&
+        event.altKey &&
+        event.key === "Insert"
+      ) {
+        event.preventDefault();
+        mutateSteps("add");
+      } else if (!typing && !busy && !hasDraft && selectedIndex !== undefined) {
+        if (event.key === "Delete" || event.key === "Backspace") {
+          event.preventDefault();
+          mutateSteps("delete");
+        } else if (
+          event.altKey &&
+          event.key === "ArrowUp" &&
+          selectedIndex > 0
+        ) {
+          event.preventDefault();
+          mutateSteps("up");
+        } else if (
+          event.altKey &&
+          event.key === "ArrowDown" &&
+          selectedIndex < count - 1
+        ) {
+          event.preventDefault();
+          mutateSteps("down");
+        }
+      }
+    };
+    window.addEventListener("keydown", keyboard);
+    return () => window.removeEventListener("keydown", keyboard);
+  });
   async function validate() {
+    if (hasDraft) return;
     await task("Validating", async () => {
       const result = await request<Validation>("validate", {
         workspace,
@@ -74,6 +257,7 @@ export default function App() {
     });
   }
   async function run() {
+    if (hasDraft) return;
     await task("Running workflow", async () => {
       const result = await request<RunResult>("run", {
         workspace,
@@ -116,12 +300,12 @@ export default function App() {
         </div>
         <div className="toolbar">
           <span className="mode">● Offline fixtures</span>
-          <button disabled={!ready} onClick={validate}>
+          <button disabled={!ready || hasDraft} onClick={validate}>
             ✓ Validate
           </button>
           <button
             className="primary"
-            disabled={!ready || !!graph.error}
+            disabled={!ready || !!graph.error || hasDraft}
             onClick={run}
           >
             ▶ Run workflow
@@ -140,11 +324,62 @@ export default function App() {
           <button
             className="folder"
             disabled={!isDesktop() || !!busy}
-            onClick={choose}
+            onClick={() => discardGuard(() => void choose())}
           >
             ▣ {workspace ? "Change workspace" : "Open workspace"}
           </button>
           <p className="path">{workspace || "Choose a local project folder"}</p>
+          <hr />
+          <div className="eyebrow">WORKFLOWS</div>
+          <select
+            aria-label="Open workflow"
+            disabled={!ready}
+            value={workflowPath}
+            onChange={(event) => {
+              const path = event.target.value;
+              discardGuard(() => void loadWorkflow(path));
+            }}
+          >
+            <option value="">Open a workflow…</option>
+            {workflowPaths.map((path) => (
+              <option key={path} value={path}>
+                {path}
+              </option>
+            ))}
+          </select>
+          <p className="hint">
+            Browse workflows/ or open a workspace-relative YAML path.
+          </p>
+          <label>
+            Open path
+            <input
+              aria-label="Workflow open path"
+              disabled={!!busy}
+              value={openPath}
+              onChange={(event) => setOpenPath(event.target.value)}
+            />
+          </label>
+          <button
+            disabled={!ready || !openPath.trim()}
+            onClick={() => discardGuard(() => void loadWorkflow(openPath))}
+          >
+            Open workflow path
+          </button>
+          <label>
+            Save path
+            <input
+              aria-label="Workflow save path"
+              disabled={!!busy}
+              value={savePath}
+              onChange={(event) => setSavePath(event.target.value)}
+            />
+          </label>
+          <button
+            disabled={!ready || !savePath.trim() || hasDraft}
+            onClick={saveWorkflow}
+          >
+            Save workflow{document.dirty || hasDraft ? " •" : ""}
+          </button>
           <hr />
           <div className="eyebrow">INPUT FILES</div>
           <p className="hint">
@@ -186,7 +421,10 @@ export default function App() {
         </aside>
         <section className="workspace">
           <div className="documentbar">
-            <strong>◇ {validation?.name ?? "Parts summary"}</strong>
+            <strong>
+              ◇ {workflowPath || validation?.name || "Untitled workflow"}
+              {document.dirty || hasDraft ? " • Unsaved" : ""}
+            </strong>
             <span className="state">
               {validatedSource === source
                 ? "✓ Validated"
@@ -202,40 +440,126 @@ export default function App() {
             </button>
             <button
               className={tab === "source" ? "active" : ""}
+              disabled={hasDraft}
               onClick={() => setTab("source")}
             >
               YAML source
             </button>
             <span>Ordered execution · {graph.nodes.length} steps</span>
           </nav>
+          {hasDraft && (
+            <div className="notice" role="status">
+              Unapplied argument draft. Apply or discard it in the inspector
+              before saving, running, changing steps, switching views, or
+              undoing.
+            </div>
+          )}
+          <div className="authoring-toolbar">
+            <button
+              disabled={!document.canUndo || !!busy || hasDraft}
+              onClick={document.undo}
+              title="Ctrl/Cmd+Z outside text fields"
+            >
+              Undo
+            </button>
+            <button
+              disabled={!document.canRedo || !!busy || hasDraft}
+              onClick={document.redo}
+              title="Ctrl/Cmd+Shift+Z outside text fields"
+            >
+              Redo
+            </button>
+            <button
+              disabled={!!graph.error || !!busy || hasDraft}
+              onClick={() => mutateSteps("add")}
+              title="Alt+Insert"
+            >
+              Add step
+            </button>
+            <button
+              disabled={
+                selectedIndex === undefined ||
+                selectedIndex === 0 ||
+                !!busy ||
+                hasDraft
+              }
+              onClick={() => mutateSteps("up")}
+              title="Alt+↑"
+            >
+              Move up
+            </button>
+            <button
+              disabled={
+                selectedIndex === undefined ||
+                selectedIndex >= count - 1 ||
+                !!busy ||
+                hasDraft
+              }
+              onClick={() => mutateSteps("down")}
+              title="Alt+↓"
+            >
+              Move down
+            </button>
+            <button
+              disabled={selectedIndex === undefined || !!busy || hasDraft}
+              onClick={() => mutateSteps("delete")}
+              title="Delete"
+            >
+              Delete step
+            </button>
+          </div>
           <div className="editor">
             {tab === "graph" ? (
-              <>
-                <ReactFlow
-                  nodes={graph.nodes}
-                  edges={graph.edges}
-                  fitView
-                  nodesConnectable={false}
-                  nodesDraggable={false}
-                  edgesReconnectable={false}
-                  minZoom={0.2}
-                >
-                  <Background gap={22} color="#d9e0e8" />
-                  <Controls />
-                  <MiniMap />
-                </ReactFlow>
-                <div className="canvas-note">
-                  Edit YAML to change execution · Branches preserve engine order
-                </div>
-                {graph.error && (
-                  <div role="alert" className="graph-error">
-                    {graph.error}
-                    <button onClick={() => setTab("source")}>
-                      Fix in YAML
-                    </button>
+              <div className="canvas-layout">
+                <div className="canvas">
+                  <ReactFlow
+                    nodes={graph.nodes.map((node) => ({
+                      ...node,
+                      selected: node.id === selected,
+                    }))}
+                    onNodeClick={(_, node) => {
+                      if (!hasDraft) setSelected(node.id);
+                    }}
+                    onPaneClick={() => {
+                      if (!hasDraft) setSelected(undefined);
+                    }}
+                    deleteKeyCode={null}
+                    edges={graph.edges}
+                    fitView
+                    nodesConnectable={false}
+                    nodesDraggable={false}
+                    edgesReconnectable={false}
+                    minZoom={0.2}
+                  >
+                    <Background gap={22} color="#d9e0e8" />
+                    <Controls />
+                    <MiniMap />
+                  </ReactFlow>
+                  <div className="canvas-note">
+                    Select a step to edit · Ordered execution
                   </div>
-                )}
-              </>
+                  {graph.error && (
+                    <div role="alert" className="graph-error">
+                      {graph.error}
+                      <button
+                        disabled={hasDraft}
+                        onClick={() => setTab("source")}
+                      >
+                        Fix in YAML
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <StepInspector
+                  draft={argumentDraft}
+                  onDraftChange={setArgumentDraft}
+                  disabled={!!busy}
+                  source={source}
+                  selected={selected}
+                  onChange={setSource}
+                  onSource={() => setTab("source")}
+                />
+              </div>
             ) : (
               <div className="source-editor">
                 <div className="source-help">
@@ -244,6 +568,7 @@ export default function App() {
                 <textarea
                   aria-label="Workflow YAML source"
                   spellCheck={false}
+                  disabled={!!busy}
                   value={source}
                   onChange={(e) => setSource(e.target.value)}
                 />
@@ -369,6 +694,34 @@ export default function App() {
           </section>
         </section>
       </main>
+      {pendingDiscard && (
+        <div className="dialog-backdrop">
+          <section
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="discard-title"
+            className="discard-dialog"
+          >
+            <h2 id="discard-title">Discard unsaved workflow changes?</h2>
+            <p>
+              Save your workflow and apply any argument draft first to keep
+              these edits.
+            </p>
+            <button autoFocus onClick={() => setPendingDiscard(undefined)}>
+              Keep editing
+            </button>
+            <button
+              onClick={() => {
+                const action = pendingDiscard;
+                setPendingDiscard(undefined);
+                action();
+              }}
+            >
+              Discard changes and continue
+            </button>
+          </section>
+        </div>
+      )}
       <footer role="status" aria-live="polite" className={error ? "error" : ""}>
         <span>{busy ? `${busy}…` : message}</span>
         <span>Mai Studio · 0.1</span>
