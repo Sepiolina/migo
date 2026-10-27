@@ -1,0 +1,121 @@
+.step-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.step-inspector > p {
+  margin: 0;
+}
+.inspector-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid #dbe2eb;
+}
+.inspector-tabs button {
+  border: 0;
+  border-radius: 6px 6px 0 0;
+  padding: 8px 10px;
+  background: transparent;
+  color: #526176;
+  cursor: pointer;
+}
+.inspector-tabs button[aria-pressed="true"] {
+  color: #194ca0;
+  background: #eaf1fd;
+  font-weight: 700;
+}
+.guided-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.guided-settings label,
+.step-inspector > label,
+.guided-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+.guided-settings input:not([type="checkbox"]),
+.guided-settings select,
+.step-inspector textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid #c6d1df;
+  border-radius: 6px;
+  background: #fff;
+  color: #1d2939;
+  font: inherit;
+}
+.guided-settings input:focus,
+.guided-settings select:focus,
+.step-inspector textarea:focus {
+  outline: 2px solid #8db7ff;
+  outline-offset: 1px;
+}
+.guided-settings small {
+  display: block;
+  font-weight: 400;
+  line-height: 1.4;
+}
+.guided-settings .guided-toggle {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.guided-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid #dbe2eb;
+  border-radius: 8px;
+  min-width: 0;
+}
+.guided-rows legend {
+  padding: 0 4px;
+  font-size: 0.875rem;
+  font-weight: 700;
+}
+.guided-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  align-items: end;
+}
+.guided-row button {
+  grid-column: 1 / -1;
+  justify-self: end;
+}
+.step-inspector textarea {
+  min-height: 150px;
+  resize: vertical;
+  font-family: monospace;
+  font-size: 0.875rem;
+}
+.condition-builder {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.condition-modes {
+  display: flex;
+  gap: 6px;
+}
+.condition-modes button[aria-pressed="true"] {
+  background: #eaf1fd;
+  color: #194ca0;
+}
+.condition-builder p {
+  margin: 0;
+}
+.sheet-input {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}

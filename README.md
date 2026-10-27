@@ -1,8 +1,9 @@
 # MaiService and Mai Studio
 
 **Mai Studio** is a Windows desktop developer app built with Tauri v2, React, and
-React Flow. Open a workspace, edit YAML workflows or selected step arguments,
-validate them, run Excel fixtures, and inspect the generated workbook.
+React Flow. Build workflows on a canvas with a searchable node library and
+guided step settings, validate them, run Excel fixtures, and inspect the generated
+workbook. YAML remains available for advanced editing.
 
 **MaiService** runs those workflows as an HTTP microservice. Each workflow accepts
 Excel inputs and produces an Excel workbook. It runs on Windows for development
@@ -82,17 +83,26 @@ Excel, validation, and execution features require the native desktop window.
 
 ### 3. Try the supplied example
 
-1. Select **Open workspace** and choose the cloned `migo` repository folder.
+1. Open **Project & inputs**, select **Open workspace**, and choose the cloned
+   `migo` repository folder.
 2. Use the built-in parts-summary document, or enter
    `examples/parts-summary.yaml` in **Open path** and open it.
 3. Select **Validate**. For the `parts` input, enter `examples/parts.xlsx`.
-4. Select **Run workflow**. The Excel workspace displays the generated workbook.
-5. Select a top-level step on the canvas to edit its argument. Choose
-   **Apply argument** before saving or running. Use **YAML source** for nested
-   steps and complete workflow definitions.
+4. Select **Run workflow**, then open **Excel data** to inspect the generated
+   workbook. Input/output tabs, sheet selection, paging, and a cell-value inspector
+   help explore the data. **Expand data** enlarges the panel; **Close** hides it.
+5. Select a top-level step on the canvas to edit its **Settings**. Choose
+   **Apply changes** before saving or running. **+ Add node** opens the searchable
+   operation library. Use **Advanced YAML** for unsupported argument shapes and
+   **YAML source** for nested steps and complete workflow definitions.
 6. Enter a new Save path such as `workflows/parts-summary.yaml`, then select
    **Save workflow**. This creates a workflow file without overwriting an existing
    file. The parent folder must already exist.
+
+The canvas uses horizontal nodes with operation summaries. **Readable 100%**,
+**Overview**, and **Focus selected** help navigate it. Project and Excel panels
+start hidden and open when needed. Execution order changes through step controls
+or YAML; canvas ports are not editable connections.
 
 Runs are offline: SQL and external HTTP calls are blocked. Generated workbooks
 are under `.studio/runs/` in the chosen workspace. Input workbooks are read-only.

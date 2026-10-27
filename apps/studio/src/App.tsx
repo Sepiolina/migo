@@ -1,12 +1,22 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { ReactFlow, Background, Controls, MiniMap } from "@xyflow/react";
+import {
+  ReactFlow,
+  Background,
+  Controls,
+  MiniMap,
+  type ReactFlowInstance,
+} from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import "./style.css";
-import { example, projectWorkflow } from "./model";
+import { example, projectWorkflow, type WorkflowGraphNode } from "./model";
 import { changeSteps, topLevelCount } from "./authoring";
 import { useDocument } from "./useDocument";
+import { workflowNodeTypes } from "./WorkflowNode";
+import { operations } from "./operationCatalog";
+import { addOperation } from "./nodeAuthoring";
+import { WorkbookPanel } from "./WorkbookPanel";
 import { StepInspector } from "./StepInspector";
 import {
   isDesktop,
@@ -17,6 +27,13 @@ import {
 } from "./api";
 export default function App() {
   const document = useDocument(example);
+  const [showProject, setShowProject] = useState(false);
+  const [showData, setShowData] = useState(false);
+  const [fullData, setFullData] = useState(false);
+  const [showLibrary, setShowLibrary] = useState(false);
+  const [nodeSearch, setNodeSearch] = useState("");
+  const flow = useRef<ReactFlowInstance<WorkflowGraphNode> | null>(null);
+  const [loadedInspectPath, setLoadedInspectPath] = useState("");
   const { source, setSource } = document;
   const [selected, setSelected] = useState<string>();
   const [argumentDraft, setArgumentDraft] = useState<string>();
@@ -217,7 +234,7 @@ export default function App() {
         event.key === "Insert"
       ) {
         event.preventDefault();
-        mutateSteps("add");
+        setShowLibrary(true);
       } else if (!typing && !busy && !hasDraft && selectedIndex !== undefined) {
         if (event.key === "Delete" || event.key === "Backspace") {
           event.preventDefault();
@@ -268,20 +285,25 @@ export default function App() {
       setInspection(result.preview);
       setRunIdentity(currentIdentity);
       setInspectPath(result.path);
-      setMessage("Run completed. Preview reads the generated Excel artifact.");
+      setLoadedInspectPath(result.path);
+      setMessage(
+        "Run completed. Open Excel data to inspect the generated workbook.",
+      );
     });
   }
-  async function inspect(sheet?: string, offset = 0) {
+  async function inspect(sheet?: string, offset = 0, path = inspectPath) {
     await task("Reading workbook", async () => {
       setInspection(
         await request<Inspection>("inspectWorkbook", {
           workspace,
-          path: inspectPath,
+          path,
           sheet,
           offset,
           limit: 100,
         }),
       );
+      setLoadedInspectPath(path);
+      setInspectPath(path);
       setMessage(
         "Workbook loaded. Cells are read-only; original inputs are preserved.",
       );
@@ -299,7 +321,19 @@ export default function App() {
           <small>WORKFLOW LAB</small>
         </div>
         <div className="toolbar">
-          <span className="mode">● Offline fixtures</span>
+          <button
+            aria-expanded={showProject}
+            onClick={() => setShowProject(!showProject)}
+          >
+            Project & inputs
+          </button>
+          <button
+            aria-expanded={showData}
+            onClick={() => setShowData(!showData)}
+          >
+            Excel data{artifact ? " · Output ready" : ""}
+          </button>
+          <span className="mode">● Offline</span>
           <button disabled={!ready || hasDraft} onClick={validate}>
             ✓ Validate
           </button>
@@ -319,75 +353,79 @@ export default function App() {
         </div>
       )}
       <main>
-        <aside>
-          <div className="eyebrow">WORKSPACE</div>
-          <button
-            className="folder"
-            disabled={!isDesktop() || !!busy}
-            onClick={() => discardGuard(() => void choose())}
-          >
-            ▣ {workspace ? "Change workspace" : "Open workspace"}
-          </button>
-          <p className="path">{workspace || "Choose a local project folder"}</p>
-          <hr />
-          <div className="eyebrow">WORKFLOWS</div>
-          <select
-            aria-label="Open workflow"
-            disabled={!ready}
-            value={workflowPath}
-            onChange={(event) => {
-              const path = event.target.value;
-              discardGuard(() => void loadWorkflow(path));
-            }}
-          >
-            <option value="">Open a workflow…</option>
-            {workflowPaths.map((path) => (
-              <option key={path} value={path}>
-                {path}
-              </option>
-            ))}
-          </select>
-          <p className="hint">
-            Browse workflows/ or open a workspace-relative YAML path.
-          </p>
-          <label>
-            Open path
-            <input
-              aria-label="Workflow open path"
-              disabled={!!busy}
-              value={openPath}
-              onChange={(event) => setOpenPath(event.target.value)}
-            />
-          </label>
-          <button
-            disabled={!ready || !openPath.trim()}
-            onClick={() => discardGuard(() => void loadWorkflow(openPath))}
-          >
-            Open workflow path
-          </button>
-          <label>
-            Save path
-            <input
-              aria-label="Workflow save path"
-              disabled={!!busy}
-              value={savePath}
-              onChange={(event) => setSavePath(event.target.value)}
-            />
-          </label>
-          <button
-            disabled={!ready || !savePath.trim() || hasDraft}
-            onClick={saveWorkflow}
-          >
-            Save workflow{document.dirty || hasDraft ? " •" : ""}
-          </button>
-          <hr />
-          <div className="eyebrow">INPUT FILES</div>
-          <p className="hint">
-            Paths relative to workspace. Validate after changing declared
-            inputs.
-          </p>
-          {(validation?.inputs ?? [{ name: "parts", label: "Parts list" }]).map(
-            (input) => (
+        {showProject && (
+          <aside aria-label="Project and inputs">
+            <div className="eyebrow">WORKSPACE</div>
+            <button
+              className="folder"
+              disabled={!isDesktop() || !!busy}
+              onClick={() => discardGuard(() => void choose())}
+            >
+              ▣ {workspace ? "Change workspace" : "Open workspace"}
+            </button>
+            <p className="path">
+              {workspace || "Choose a local project folder"}
+            </p>
+            <hr />
+            <div className="eyebrow">WORKFLOWS</div>
+            <select
+              aria-label="Open workflow"
+              disabled={!ready}
+              value={workflowPath}
+              onChange={(event) => {
+                const path = event.target.value;
+                discardGuard(() => void loadWorkflow(path));
+              }}
+            >
+              <option value="">Open a workflow…</option>
+              {workflowPaths.map((path) => (
+                <option key={path} value={path}>
+                  {path}
+                </option>
+              ))}
+            </select>
+            <p className="hint">
+              Browse workflows/ or open a workspace-relative YAML path.
+            </p>
+            <label>
+              Open path
+              <input
+                aria-label="Workflow open path"
+                disabled={!!busy}
+                value={openPath}
+                onChange={(event) => setOpenPath(event.target.value)}
+              />
+            </label>
+            <button
+              disabled={!ready || !openPath.trim()}
+              onClick={() => discardGuard(() => void loadWorkflow(openPath))}
+            >
+              Open workflow path
+            </button>
+            <label>
+              Save path
+              <input
+                aria-label="Workflow save path"
+                disabled={!!busy}
+                value={savePath}
+                onChange={(event) => setSavePath(event.target.value)}
+              />
+            </label>
+            <button
+              disabled={!ready || !savePath.trim() || hasDraft}
+              onClick={saveWorkflow}
+            >
+              Save workflow{document.dirty || hasDraft ? " •" : ""}
+            </button>
+            <hr />
+            <div className="eyebrow">INPUT FILES</div>
+            <p className="hint">
+              Paths relative to workspace. Validate after changing declared
+              inputs.
+            </p>
+            {(
+              validation?.inputs ?? [{ name: "parts", label: "Parts list" }]
+            ).map((input) => (
               <label key={input.name}>
                 {input.label}
                 <input
@@ -399,27 +437,29 @@ export default function App() {
                 />
                 <span className="hint">{input.name}</span>
               </label>
-            ),
-          )}
-          <hr />
-          <div className="eyebrow">EXECUTION</div>
-          <p>
-            Local Go engine <small>OFFLINE</small>
-          </p>
-          <p className="hint">
-            SQL and external REST connections are disabled in this development
-            slice.
-          </p>
-          <div className="bottom">
-            <div className="eyebrow">LINUX DEPLOYMENT</div>
-            <p className="hint">
-              Secure packaging and PM2 profiles are planned for the next
-              milestones.
+            ))}
+            <hr />
+            <div className="eyebrow">EXECUTION</div>
+            <p>
+              Local Go engine <small>OFFLINE</small>
             </p>
-            <button disabled>Build Linux package · Planned</button>
-          </div>
-        </aside>
-        <section className="workspace">
+            <p className="hint">
+              SQL and external REST connections are disabled in this development
+              slice.
+            </p>
+            <div className="bottom">
+              <div className="eyebrow">LINUX DEPLOYMENT</div>
+              <p className="hint">
+                Secure packaging and PM2 profiles are planned for the next
+                milestones.
+              </p>
+              <button disabled>Build Linux package · Planned</button>
+            </div>
+          </aside>
+        )}
+        <section
+          className={`workspace ${showData ? "data-open" : ""} ${showData && fullData ? "data-full" : ""}`}
+        >
           <div className="documentbar">
             <strong>
               ◇ {workflowPath || validation?.name || "Untitled workflow"}
@@ -445,7 +485,7 @@ export default function App() {
             >
               YAML source
             </button>
-            <span>Ordered execution · {graph.nodes.length} steps</span>
+            <span>Left → right · {count} steps</span>
           </nav>
           {hasDraft && (
             <div className="notice" role="status">
@@ -471,10 +511,11 @@ export default function App() {
             </button>
             <button
               disabled={!!graph.error || !!busy || hasDraft}
-              onClick={() => mutateSteps("add")}
-              title="Alt+Insert"
+              onClick={() => setShowLibrary(!showLibrary)}
+              aria-expanded={showLibrary}
+              title="Choose a node from the library"
             >
-              Add step
+              + Add node
             </button>
             <button
               disabled={
@@ -508,11 +549,71 @@ export default function App() {
               Delete step
             </button>
           </div>
+          {showLibrary && (
+            <section className="node-library" aria-label="Node library">
+              <div className="library-heading">
+                <div>
+                  <strong>Add a node</strong>
+                  <p>
+                    Choose what happens next. Settings open after insertion.
+                  </p>
+                </div>
+                <button onClick={() => setShowLibrary(false)}>
+                  Close library
+                </button>
+              </div>
+              <input
+                aria-label="Search nodes"
+                autoFocus
+                placeholder="Search nodes: read, filter, group…"
+                value={nodeSearch}
+                onChange={(event) => setNodeSearch(event.target.value)}
+              />
+              <div className="library-items">
+                {operations
+                  .filter((op) =>
+                    `${op.title} ${op.operation} ${op.description}`
+                      .toLowerCase()
+                      .includes(nodeSearch.toLowerCase()),
+                  )
+                  .map((op) => (
+                    <button
+                      className={`library-item category-${op.category}`}
+                      key={op.operation}
+                      disabled={hasDraft || !!busy}
+                      onClick={() => {
+                        try {
+                          setSource(
+                            addOperation(
+                              source,
+                              op.operation,
+                              op.defaultArgument,
+                            ),
+                          );
+                          setSelected(`step.${count}`);
+                          setTab("graph");
+                          setShowLibrary(false);
+                        } catch (error) {
+                          setError(true);
+                          setMessage(String(error));
+                        }
+                      }}
+                    >
+                      <span className="library-icon">{op.icon}</span>
+                      <span>
+                        <strong>{op.title}</strong>
+                        <small>{op.description}</small>
+                      </span>
+                    </button>
+                  ))}
+              </div>
+            </section>
+          )}
           <div className="editor">
             {tab === "graph" ? (
               <div className="canvas-layout">
                 <div className="canvas">
-                  <ReactFlow
+                  <ReactFlow<WorkflowGraphNode>
                     nodes={graph.nodes.map((node) => ({
                       ...node,
                       selected: node.id === selected,
@@ -525,18 +626,59 @@ export default function App() {
                     }}
                     deleteKeyCode={null}
                     edges={graph.edges}
-                    fitView
+                    nodeTypes={workflowNodeTypes}
+                    onInit={(instance) => {
+                      flow.current = instance;
+                    }}
+                    defaultViewport={{ x: 48, y: 80, zoom: 1 }}
+                    fitViewOptions={{ minZoom: 0.1, maxZoom: 1, padding: 0.15 }}
                     nodesConnectable={false}
                     nodesDraggable={false}
                     edgesReconnectable={false}
-                    minZoom={0.2}
+                    minZoom={0.1}
+                    maxZoom={1.75}
                   >
                     <Background gap={22} color="#d9e0e8" />
-                    <Controls />
-                    <MiniMap />
+                    <Controls showFitView={false} showInteractive={false} />
+                    <MiniMap pannable zoomable />
                   </ReactFlow>
-                  <div className="canvas-note">
-                    Select a step to edit · Ordered execution
+                  <div
+                    className="canvas-navigation"
+                    aria-label="Canvas navigation"
+                  >
+                    <button
+                      onClick={() =>
+                        void flow.current?.setViewport(
+                          { x: 48, y: 80, zoom: 1 },
+                          { duration: 200 },
+                        )
+                      }
+                    >
+                      Readable 100%
+                    </button>
+                    <button
+                      onClick={() =>
+                        void flow.current?.fitView({
+                          padding: 0.15,
+                          duration: 200,
+                        })
+                      }
+                    >
+                      Overview
+                    </button>
+                    <button
+                      disabled={!selected}
+                      onClick={() =>
+                        void flow.current?.fitView({
+                          nodes: [{ id: selected! }],
+                          minZoom: 1,
+                          maxZoom: 1,
+                          duration: 200,
+                        })
+                      }
+                    >
+                      Focus selected
+                    </button>
                   </div>
                   {graph.error && (
                     <div role="alert" className="graph-error">
@@ -550,15 +692,17 @@ export default function App() {
                     </div>
                   )}
                 </div>
-                <StepInspector
-                  draft={argumentDraft}
-                  onDraftChange={setArgumentDraft}
-                  disabled={!!busy}
-                  source={source}
-                  selected={selected}
-                  onChange={setSource}
-                  onSource={() => setTab("source")}
-                />
+                {selected && (
+                  <StepInspector
+                    draft={argumentDraft}
+                    onDraftChange={setArgumentDraft}
+                    disabled={!!busy}
+                    source={source}
+                    selected={selected}
+                    onChange={setSource}
+                    onSource={() => setTab("source")}
+                  />
+                )}
               </div>
             ) : (
               <div className="source-editor">
@@ -575,123 +719,24 @@ export default function App() {
               </div>
             )}
           </div>
-          <section className="workbook">
-            <div className="workbookbar">
-              <strong>
-                Excel workspace{" "}
-                <span className="subtle">Actual workbook cells</span>
-              </strong>
-              {artifact && (
-                <span className="state">
-                  {runIdentity === currentIdentity
-                    ? "✓ Output generated"
-                    : "● Stale output — run again"}
-                </span>
-              )}
-            </div>
-            <div className="inspectbar">
-              <input
-                aria-label="Workbook path"
-                value={inspectPath}
-                onChange={(e) => setInspectPath(e.target.value)}
-                placeholder="Path relative to workspace"
-              />
-              <button disabled={!ready} onClick={() => inspect()}>
-                Inspect workbook
-              </button>
-              {inspection && (
-                <select
-                  aria-label="Sheet"
-                  value={inspection.sheet}
-                  onChange={(e) => inspect(e.target.value)}
-                >
-                  {inspection.sheets.map((s) => (
-                    <option key={s}>{s}</option>
-                  ))}
-                </select>
-              )}
-            </div>
-            {inspection ? (
-              <>
-                <div className="grid">
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>#</th>
-                        {Array.from(
-                          {
-                            length: Math.max(
-                              0,
-                              ...inspection.rows.map((r) => r.length),
-                            ),
-                          },
-                          (_, i) => (
-                            <th key={i}>Column {i + 1}</th>
-                          ),
-                        )}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {inspection.rows.map((row, i) => (
-                        <tr key={i}>
-                          <th>{inspection.offset + i + 1}</th>
-                          {row.map((cell, j) => (
-                            <td key={j}>{cell}</td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-                <div className="pager">
-                  <span>
-                    {inspection.sheet} · {inspection.totalRows} rows ·{" "}
-                    {inspection.truncated ? "Paged view" : "All available rows"}
-                  </span>
-                  <button
-                    disabled={!ready || inspection.offset === 0}
-                    onClick={() =>
-                      inspect(
-                        inspection.sheet,
-                        Math.max(0, inspection.offset - 100),
-                      )
-                    }
-                  >
-                    Previous
-                  </button>
-                  <button
-                    disabled={
-                      !ready ||
-                      inspection.offset + inspection.rows.length >=
-                        inspection.totalRows
-                    }
-                    onClick={() =>
-                      inspect(inspection.sheet, inspection.offset + 100)
-                    }
-                  >
-                    Next
-                  </button>
-                </div>
-              </>
-            ) : (
-              <div className="empty">
-                <span>▦</span>
-                <strong>Your data, alongside your logic</strong>
-                <p>
-                  Inspect an input workbook or run the workflow to view its
-                  generated output.
-                </p>
-              </div>
-            )}
-            {artifact && (
-              <div className="artifact">
-                Output: {artifact.path}
-                <span title={artifact.sha256}>
-                  SHA-256 {artifact.sha256.slice(0, 16)}…
-                </span>
-              </div>
-            )}
-          </section>
+          {showData && (
+            <WorkbookPanel
+              inspection={inspection}
+              artifact={artifact}
+              ready={ready}
+              path={inspectPath}
+              loadedPath={loadedInspectPath}
+              onPath={setInspectPath}
+              onInspect={(path, sheet, offset) =>
+                void inspect(sheet, offset, path)
+              }
+              onClose={() => setShowData(false)}
+              fullScreen={fullData}
+              onExpand={() => setFullData(!fullData)}
+              stale={runIdentity !== currentIdentity}
+              inputs={bindings}
+            />
+          )}
         </section>
       </main>
       {pendingDiscard && (
