@@ -56,6 +56,23 @@ describe("workflow authoring", () => {
         .filter,
     ).toBe("true");
   });
+  it("uses replacement scalar types instead of inheriting explicit tags", () => {
+    const integer = editArgument(
+      "steps:\n - filter: !!int 2 # keep comment\n",
+      0,
+      "foo",
+    );
+    expect(value(integer).steps[0].filter).toBe("foo");
+    expect(integer).not.toContain("!!int");
+    expect(integer).toContain("# keep comment");
+    const string = editArgument("steps:\n - filter: !!str 2\n", 0, "2");
+    expect(value(string).steps[0].filter).toBe(2);
+    expect(string).not.toContain("!!str");
+    expect(
+      value(editArgument("steps:\n - filter: 1\n", 0, "!!str 2")).steps[0]
+        .filter,
+    ).toBe("2");
+  });
   it("moves whole step nodes with their branches and comments, then adds and deletes", () => {
     const moved = changeSteps(fixture, "up", 2);
     expect(value(moved).steps[1]).toEqual(value(fixture).steps[2]);

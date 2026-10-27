@@ -6,14 +6,17 @@ export function StepInspector({
   onChange,
   onSource,
   disabled = false,
+  draft: pendingDraft,
+  onDraftChange,
 }: {
   disabled?: boolean;
+  draft?: string;
+  onDraftChange: (draft: string | undefined) => void;
   source: string;
   selected?: string;
   onChange: (source: string) => void;
   onSource: () => void;
 }) {
-  const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
   const index =
     selected && /^step\.\d+$/.test(selected)
@@ -26,8 +29,8 @@ export function StepInspector({
     /* Source error appears on canvas. */
   }
   const argument = detail?.argument ?? "";
+  const draft = pendingDraft ?? argument;
   useEffect(() => {
-    setDraft(argument);
     setError("");
   }, [source, selected, argument]);
   return (
@@ -58,7 +61,13 @@ export function StepInspector({
               aria-label="Step argument"
               value={draft}
               disabled={disabled}
-              onChange={(event) => setDraft(event.target.value)}
+              onChange={(event) =>
+                onDraftChange(
+                  event.target.value === argument
+                    ? undefined
+                    : event.target.value,
+                )
+              }
               spellCheck={false}
             />
           </label>
@@ -67,6 +76,7 @@ export function StepInspector({
             onClick={() => {
               try {
                 onChange(editArgument(source, index!, draft));
+                onDraftChange(undefined);
                 setError("");
               } catch (e) {
                 setError(String(e));
@@ -75,6 +85,16 @@ export function StepInspector({
           >
             Apply argument
           </button>
+          {pendingDraft !== undefined && (
+            <button
+              onClick={() => {
+                onDraftChange(undefined);
+                setError("");
+              }}
+            >
+              Discard argument draft
+            </button>
+          )}
           <p className="hint">
             Apply records one undoable change. Use YAML source to change the
             operation.

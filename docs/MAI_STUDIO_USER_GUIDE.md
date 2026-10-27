@@ -38,8 +38,8 @@ unused path creates a copy. An existing destination cannot be overwritten this
 way. `Ctrl/Cmd+S` saves to the current Save path.
 
 A dot and **Unsaved** mark changes since the last successful save or load.
-Switching workflows or workspaces asks whether to discard those edits; choose
-**Keep editing** to save them first. Save before closing the app. There is no
+Switching workflows or workspaces, or closing the native window, asks whether to
+discard unsaved work; choose **Keep editing** to retain it. Save before closing. There is no
 autosave or recovery store, and input bindings are session settings rather than
 part of the saved YAML.
 
@@ -54,7 +54,9 @@ files added externally do not appear.
 
 Use **Workflow canvas** to see ordered execution and branches. Select a top-level
 step to inspect its operation and edit its argument as a YAML scalar, mapping, or
-list. **Apply argument** records the edit as one undoable change. Change the
+list. **Apply argument** records the edit as one undoable change. Until you Apply
+or Discard the argument draft, Studio blocks Save, Run, source navigation, and
+other step edits so the visible draft cannot be silently omitted. Change the
 operation itself in **YAML source**. Use the source editor for nested steps and
 whenever the inspector does not offer argument editing, including shorthand or
 multi-operation step mappings.

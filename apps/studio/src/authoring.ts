@@ -56,17 +56,13 @@ export function editArgument(
   if (parsed.errors.length) throw new Error(parsed.errors[0].message);
   parsed.toJS({ maxAliasCount: 0 });
   const old = step.items[0].value;
-  if (isScalar(old) && isScalar(parsed.contents))
-    old.value = parsed.contents.value;
-  else {
-    const replacement = parsed.contents ?? doc.createNode(null);
-    if (isNode(old)) {
-      replacement.commentBefore = old.commentBefore;
-      replacement.comment = old.comment;
-      replacement.spaceBefore = old.spaceBefore;
-    }
-    step.items[0].value = replacement;
+  const replacement = parsed.contents ?? doc.createNode(null);
+  if (isNode(old)) {
+    replacement.commentBefore = old.commentBefore;
+    replacement.comment = old.comment;
+    replacement.spaceBefore = old.spaceBefore;
   }
+  step.items[0].value = replacement;
   return doc.toString();
 }
 export function changeSteps(
