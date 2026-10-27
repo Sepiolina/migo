@@ -38,6 +38,8 @@ jobs:
         working-directory: apps/studio
       - run: npm test
         working-directory: apps/studio
+      - run: node scripts/smoke-watcher.mjs
+        working-directory: apps/studio
       - run: npm run build
         working-directory: apps/studio
       - run: node scripts/build-sidecar.mjs

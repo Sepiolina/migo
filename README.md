@@ -376,6 +376,7 @@ on Windows; Linux CI is not a substitute for that check.
 | A tool is not recognized | Open a new terminal after installation; rerun the version checks. |
 | Desktop C++/linker error | Install the C++ workload and Windows SDK; confirm Rust uses an MSVC host toolchain. |
 | Desktop opens only in a browser | Use `npm run desktop:dev`, not `npm run dev`. |
+| Vite reports `EBUSY` on a Rust `.pdb` file | Update to the watcher fix, stop the dev command, and restart `npm run desktop:dev`. Native files under `src-tauri` are excluded from Vite watching. |
 | Go sidecar cannot launch | Rerun `npm run desktop:dev` to rebuild it for your host. |
 | Config is missing | Supply the actual path with `-config`; check that the file exists. |
 | Port already in use | Stop the other process or set `PORT` and use that same port in requests. |
