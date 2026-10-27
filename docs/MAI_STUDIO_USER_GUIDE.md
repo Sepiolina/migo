@@ -6,6 +6,9 @@ connections are disabled.
 
 ## Start and open a workspace
 
+For Windows prerequisites, PowerShell commands, and running the HTTP microservice,
+see the [README getting-started instructions](../README.md).
+
 From the repository root:
 
 ```sh

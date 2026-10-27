@@ -17,3 +17,6 @@ node_modules/
 /apps/studio/*.tsbuildinfo
 /apps/studio/src-tauri/gen/
 /apps/studio/src-tauri/workspace-core/target/
+/maiservice
+/maiservice.exe
+/dist/

@@ -1,338 +1,426 @@
-# migo / miservice (Go)
+# MaiService and Mai Studio
 
-A Go microservice where every process is one YAML file in `workflows/`. Each file is its own
-endpoint pair, maps its uploaded inputs to one output workbook, and holds every rule inline.
-The engine is generic: sheet wrangling, SQL, REST, branching and expressions. No process
-is coded in Go. `workflows/bom.yaml` is the BOM processor, ported from the Node/Express
-service with the same endpoints, JSON and workbook values.
+**Mai Studio** is a Windows desktop developer app built with Tauri v2, React, and
+React Flow. Open a workspace, edit YAML workflows or selected step arguments,
+validate them, run Excel fixtures, and inspect the generated workbook.
 
-```
-POST /api/<name>/upload     multipart: files (one per workflow input, any order), bam (employee number)
-GET  /api/<name>/download   latest generated workbook of this workflow
-GET  /api/health            {"status":"online","service":"BOM Processor Node.js API"}
-```
-For the BOM: `POST /api/bom/upload` takes 2 files (BOM + Priority), and `GET /api/bom/download` returns the result.
-`docs/API.md` of the Node project still describes the contract (unchanged).
+**MaiService** runs those workflows as an HTTP microservice. Each workflow accepts
+Excel inputs and produces an Excel workbook. It runs on Windows for development
+and on Linux under PM2 for deployment. The `migo` CLI runs workflows without HTTP.
 
-## Quick start
-```
-cp config.example.json config.json      # same keys as the Node config.json
-go build -o miservice ./cmd/miservice   # or: make linux / make windows
-./miservice                             # -config path | MISERVICE_CONFIG env | ./config.json
-```
-Config lookup order: `-config` flag, then `MISERVICE_CONFIG`, then `./config.json`, then `config.json` beside the
-executable. `PORT` env overrides `"port"` (as before). `uploads/` and `outputs/` are created next to the config file.
-Each workflow keeps its results in `outputs/<name>/`. Files left in the `outputs/` root by older versions are still
-removed by the root's retention cleanup.
-Deploy = copy the single binary + `config.json`. No Node, no node_modules (Node is only needed on the server if you
-choose PM2 as the process manager, see below).
+## Choose where to start
 
-### Development commands
+- [Run the Windows desktop app](#run-the-windows-desktop-app)
+- [Run the microservice on Windows](#run-the-microservice-on-windows)
+- [Run the microservice on Linux](#run-the-microservice-on-linux)
+- [Deploy on Linux with PM2](#deploy-on-linux-with-pm2)
+- [Run a workflow without a server](#run-a-workflow-without-a-server)
+- [Development checks](#development-checks)
+- [Troubleshooting](#troubleshooting)
 
-Use Go 1.22 or newer. `make help` lists the available commands (GNU Make and a
-POSIX shell are required; on Windows use WSL or the PowerShell commands below).
-Run `make build` to build both the service and CLI, `make test` for vet and unit
-tests, and `make check` for the complete CI checks: formatting, vet, compilation,
-race tests, and all three example workflows. Race tests require a C compiler.
-Use `make fmt` to fix formatting before submitting changes.
+Desktop installation currently requires building from source. The secure
+`mai.zip` deployment builder, signed installer release process, live desktop
+connection profiles, and full Excel style preview are planned features. The
+current preview shows workbook cell values; the generated `.xlsx` is the actual
+output of the Go engine.
 
-For local HTTP development, copy `config.example.json` to `config.json` if you
-have not already created it, then set `db_enabled` and `sap_enabled` to `false`.
-Run `make run`, or `make run CONFIG=/path/to/config.json` for a separate config.
-Uploads and outputs are stored beside that config. `PORT=3090 make run` changes
-the listening port. `make workflows` runs the examples without SQL Server or SAP.
+## Get the source
 
-`internal/app/app.go` wires dependencies and modules; `internal/app/server.go`
-owns HTTP startup and shutdown. Feature modules implement the small interfaces
-in `internal/module`; see [Extending](docs/EXTENDING.md) for adding a feature.
+Install Git, then open PowerShell on Windows or a terminal on Linux:
 
-### What is kept on disk
-| Folder | Contents | Lifetime |
-|---|---|---|
-| `outputs/<workflow>/` | generated workbooks + `.manifest.json` | newest 2 per employee number; unused files deleted after 14 days (checked daily, runs every 14 days) |
-| `uploads/` | the two input files of a request | not registered in `uploads/.keep.json`: deleted at the end of the request, plus an hourly sweep for leftovers. Registered in keep: deleted on the 14-day schedule. See `docs/EXTENDING.md` |
-
-After any request, `uploads/` should contain nothing except `.gitkeep` (and `.keep.json` if a module uses keep).
-
-## Workflows
-```yaml
-# workflows/<name>.yaml  ->  /api/<name>/upload, /api/<name>/download
-name: Parts summary
-input:
-  parts: {label: Parts list}
-steps:
-  - from: parts[Parts]
-  - filter: num(Quantity) > 0
-  - if: 'any(rows, num(#.Quantity) > 100)'
-    then:
-      - log: Large order
-  - group: {by: [ID], sum: [Quantity]}
-  - save: summary
-output:
-  sheets: {Parts: summary}
-```
-Drop a file into `<config dir>/workflows/` and restart to add an endpoint, or to replace a built-in one with the
-same name. Steps (`from`, `set`, `window`, `pick`, `join`, `sql`, `rest`, `if`, `split`...), expressions
-and styled output are described in [docs/WORKFLOWS.md](docs/WORKFLOWS.md). Run any workflow without HTTP:
-```
-go run ./cmd/migo -in bom=testdata/bom_basic.xlsx -in priority=testdata/prio_basic.xlsx -out out.xlsx workflows/bom.yaml
+```sh
+git clone https://github.com/Sepiolina/migo.git
+cd migo
 ```
 
-## Testing on Windows
-Everything below is PowerShell, run from the project folder. None of it needs SQL Server, SAP or Node.
+All commands below start in this repository folder unless stated otherwise.
+When returning from the desktop app folder, use `cd ../..` first.
 
-**1. Prerequisites (once)**
-* Go 1.22 or newer: `winget install GoLang.Go` (or the installer from go.dev), then open a **new** terminal and check `go version`.
-* The first build downloads the dependencies (excelize, mscfb, go-mssqldb), so it needs internet access or a company
-  Go proxy (`go env -w GOPROXY=https://your-proxy,direct`). Later builds are offline.
-* `curl.exe` ships with Windows 10/11 (type `curl.exe`, not `curl`: in PowerShell 5 plain `curl` is an alias of `Invoke-WebRequest`).
+## Run the Windows desktop app
 
-**2. Unit and golden tests**
+### 1. Install the prerequisites
+
+Install these tools, then open a **new PowerShell window**:
+
+| Tool | What to install |
+| --- | --- |
+| Go | Go 1.22 or newer from [go.dev](https://go.dev/dl/) |
+| Node.js | Latest Node.js 22 LTS or a newer supported LTS from [nodejs.org](https://nodejs.org/) |
+| Rust | Stable Rust with the MSVC toolchain from [rustup.rs](https://rustup.rs/) |
+| C++ build tools | Visual Studio Build Tools 2022: select **Desktop development with C++** and a Windows SDK |
+| WebView2 | Microsoft Edge WebView2 Runtime; normally present on current Windows installations |
+
+See the [Tauri v2 Windows prerequisites](https://v2.tauri.app/start/prerequisites/#windows)
+for the installers and platform details. This is a native Windows build; use
+PowerShell rather than WSL for the Windows desktop app.
+
+Check that the tools are available:
+
+```powershell
+go version
+node --version
+npm --version
+rustc --version
+cargo --version
 ```
+
+### 2. Install and launch
+
+From the repository folder:
+
+```powershell
+cd apps/studio
+npm ci
+npm run desktop:dev
+```
+
+The command builds the Go sidecar, starts the frontend, and opens **Mai Studio**.
+The first launch downloads and compiles dependencies and may take several minutes.
+Keep this PowerShell window open. Press `Ctrl+C` there to stop the development app.
+A browser opened at the development URL supports editor preview only; workspace,
+Excel, validation, and execution features require the native desktop window.
+
+### 3. Try the supplied example
+
+1. Select **Open workspace** and choose the cloned `migo` repository folder.
+2. Use the built-in parts-summary document, or enter
+   `examples/parts-summary.yaml` in **Open path** and open it.
+3. Select **Validate**. For the `parts` input, enter `examples/parts.xlsx`.
+4. Select **Run workflow**. The Excel workspace displays the generated workbook.
+5. Select a top-level step on the canvas to edit its argument. Choose
+   **Apply argument** before saving or running. Use **YAML source** for nested
+   steps and complete workflow definitions.
+6. Enter a new Save path such as `workflows/parts-summary.yaml`, then select
+   **Save workflow**. This creates a workflow file without overwriting an existing
+   file. The parent folder must already exist.
+
+Runs are offline: SQL and external HTTP calls are blocked. Generated workbooks
+are under `.studio/runs/` in the chosen workspace. Input workbooks are read-only.
+See the [Studio user guide](docs/MAI_STUDIO_USER_GUIDE.md) for undo/redo, shortcuts,
+save conflicts, and preview limitations.
+
+### 4. Build a Windows installer
+
+From `apps/studio`:
+
+```powershell
+npm run desktop:build
+Get-ChildItem src-tauri/target/release/bundle -Recurse -File
+```
+
+Tauri places installer artifacts under `src-tauri/target/release/bundle/`, normally
+in `msi` and/or `nsis` subfolders. Open the generated installer on the target
+Windows machine. This builds the desktop app; it does not build the Linux
+microservice package. Signing and distribution require separate release setup.
+
+## Run the microservice on Windows
+
+Only Go is needed to build the microservice. Node.js, Rust, and the desktop app
+are not required. A prebuilt executable needs only its configuration and access
+to any configured company services.
+
+### 1. Create local configuration
+
+From the repository folder, copy the example only if you have no config yet:
+
+```powershell
+if (-not (Test-Path config.json)) {
+    Copy-Item config.example.json config.json
+}
+notepad config.json
+```
+
+For the first local run, change these two values and save the file:
+
+```json
+"db_enabled": false,
+"sap_enabled": false
+```
+
+These are fields inside `config.json`, not a complete replacement file. Disabling
+them skips company database/SAP enrichment. Enable them later only after entering
+real connection settings and confirming network access. Keep credentials private.
+
+### 2. Build and start
+
+```powershell
+go build -o maiservice.exe ./cmd/maiservice
+.\maiservice.exe -config config.json
+```
+
+Leave this terminal running. The default port in the example config is **3081**.
+To use a different port, stop the service with `Ctrl+C`, then run:
+
+```powershell
+$env:PORT = "3090"
+.\maiservice.exe -config config.json
+```
+
+Use that port in requests too. `Remove-Item Env:PORT` restores the config-file port
+for subsequent starts.
+
+### 3. Test a real upload and download
+
+Open a **second PowerShell window** in the repository folder:
+
+```powershell
+curl.exe --fail http://localhost:3081/api/health
+curl.exe --fail -F "files=@testdata/bom_basic.xlsx" -F "files=@testdata/prio_basic.xlsx" -F "bam=113280" http://localhost:3081/api/bom/upload
+curl.exe --fail -o "$env:TEMP/mai-output.xlsx" http://localhost:3081/api/bom/download
+```
+
+Expected results: health reports `"status":"online"`, upload reports
+`"status":"success"`, and the downloaded workbook opens in Excel. Use `curl.exe`
+explicitly: Windows PowerShell's `curl` may be a different command. Stop the server
+with `Ctrl+C` in its original terminal.
+
+## Run the microservice on Linux
+
+Install Go 1.22 or newer on the build machine. From the repository folder:
+
+```sh
+# Copy only when config.json does not exist.
+if [ ! -e config.json ]; then cp config.example.json config.json; fi
+```
+
+Edit `config.json` and set `db_enabled` and `sap_enabled` to `false` for an offline
+local test, as described in the Windows section. Then:
+
+```sh
+go build -o maiservice ./cmd/maiservice
+./maiservice -config config.json
+```
+
+In a second terminal in the repository folder:
+
+```sh
+curl --fail http://localhost:3081/api/health
+curl --fail -F files=@testdata/bom_basic.xlsx -F files=@testdata/prio_basic.xlsx -F bam=113280 http://localhost:3081/api/bom/upload
+curl --fail -o /tmp/mai-output.xlsx http://localhost:3081/api/bom/download
+```
+
+Config lookup is `-config`, then `MAISERVICE_CONFIG`, then `config.json` in the
+working directory, then beside the executable. `PORT` overrides the configured
+port. Use an explicit `-config` path for predictable deployments. Uploads and
+outputs are stored **beside the selected config**, not necessarily beside the
+binary. The loader can fall back to `config.example.json`; always supply an
+intentional config for deployment.
+
+## Deploy on Linux with PM2
+
+PM2 runs the Go executable directly. Node.js and PM2 are required on the server
+only for process supervision; the Go executable itself does not need Node or Go.
+Use a supported Node LTS and your team's approved PM2 version.
+
+### 1. Build the Linux executable
+
+On Linux, from the repository folder:
+
+```sh
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o dist/maiservice ./cmd/maiservice
+```
+
+For an ARM64 server, change `GOARCH=amd64` to `GOARCH=arm64`.
+From Windows PowerShell, build the same artifact with:
+
+```powershell
+$env:CGO_ENABLED = "0"
+$env:GOOS = "linux"
+$env:GOARCH = "amd64"
+go build -trimpath -o dist/maiservice ./cmd/maiservice
+Remove-Item Env:CGO_ENABLED, Env:GOOS, Env:GOARCH
+```
+
+The Linux executable cannot run directly on Windows. Test it on the target Linux
+architecture before deployment.
+
+### 2. Prepare the server folder
+
+The following example uses `/opt/maiservice` and a dedicated `maiservice` user.
+Administrator setup, on the Linux server:
+
+```sh
+sudo useradd --system --create-home --shell /bin/bash maiservice
+sudo install -d -o maiservice -g maiservice /opt/maiservice
+```
+
+Skip user creation if the account already exists. Install Node/PM2 through your
+approved server provisioning process. Copy `dist/maiservice` to the server as
+`/tmp/maiservice`, then install it:
+
+```sh
+sudo install -o maiservice -g maiservice -m 755 /tmp/maiservice /opt/maiservice/maiservice
+```
+
+Create `/opt/maiservice/config.json` from the example with the intended DB/SAP
+settings. Copy selected workflow overrides into `/opt/maiservice/workflows/` if
+needed. Protect the config:
+
+```sh
+sudo chown maiservice:maiservice /opt/maiservice/config.json
+sudo chmod 600 /opt/maiservice/config.json
+```
+
+### 3. Create the PM2 configuration
+
+Create `/opt/maiservice/ecosystem.config.js` with this content. This is a file you
+create on the server; there is no pre-existing deployment template to copy.
+
+```js
+module.exports = {
+  apps: [{
+    name: 'maiservice',
+    script: '/opt/maiservice/maiservice',
+    cwd: '/opt/maiservice',
+    interpreter: 'none',
+    args: ['-config', '/opt/maiservice/config.json'],
+    exec_mode: 'fork',
+    instances: 1,
+    autorestart: true,
+    min_uptime: '10s',
+    max_restarts: 10,
+    exp_backoff_restart_delay: 1000,
+    max_memory_restart: '650M',
+    kill_timeout: 15000,
+    time: true,
+    env: { PORT: '3081', GOMEMLIMIT: '400MiB' }
+  }]
+};
+```
+
+Keep `instances: 1`: latest-download state and file registries belong to one
+process. `kill_timeout` allows time for the service's graceful shutdown. Adjust
+memory limits to the server's budget.
+
+### 4. Start and verify
+
+Run these as the **maiservice user**, which must also have the `pm2` command on
+its PATH:
+
+```sh
+sudo -iu maiservice
+cd /opt/maiservice
+pm2 start ecosystem.config.js
+pm2 status
+curl --fail http://localhost:3081/api/health
+pm2 logs maiservice --lines 30
+```
+
+Exit the log viewer with `Ctrl+C`; PM2 keeps the service running. Perform the
+upload/download test with representative input files before accepting deployment.
+For start-on-boot, still as the service user:
+
+```sh
+pm2 startup systemd -u maiservice --hp /home/maiservice
+```
+
+Run the administrator command PM2 prints, then run `pm2 save` as the service user.
+Verify startup after a controlled reboot. Configure log rotation, backups, disk
+monitoring, and your reverse proxy/firewall. Health is a liveness check; it does
+not prove DB/SAP access. Restrict access to trusted users until the planned
+service access controls are implemented.
+
+To update, stage a new executable under another filename, preserve the previous
+version, rename the new file into place, and run `pm2 restart maiservice`. Do not
+copy over a running Linux executable. Recheck health and upload/download behavior;
+restore the previous executable and restart if verification fails.
+
+## Run a workflow without a server
+
+From the repository folder, this command works in PowerShell and Linux shells:
+
+```sh
+go run ./cmd/migo -in parts=examples/parts.xlsx -out parts-output.xlsx examples/parts-summary.yaml
+```
+
+Open `parts-output.xlsx` to inspect the result. To validate by executing without
+keeping output:
+
+```sh
+go run ./cmd/migo -check -in bom=testdata/bom_basic.xlsx -in priority=testdata/prio_basic.xlsx workflows/bom.yaml
+```
+
+Default CLI configuration disables database and SAP enrichment. The
+[workflow reference](docs/WORKFLOWS.md) covers SQL stubs, expressions, and steps.
+
+## Development checks
+
+Go checks, from the repository folder:
+
+```sh
 go vet ./...
+go build ./...
 go test ./...
 ```
-These use the files in `testdata/` with a stubbed Material_Master and a fake SAP server, so they run anywhere. To see
-one package in detail: `go test -v ./internal/storage/` (retention, uploads keep registry), `./internal/workflow/`
-(engine, BOM golden workbook), `./internal/modules/workflows/` (upload endpoints end to end), `./internal/sheet/` (.xls and .xlsx readers). Add `-race` if you have a
-C toolchain installed; it is optional. If an antivirus quarantines the test binaries, exclude `%TEMP%\go-build*`.
 
-**3. Run the service locally**
-```
-Copy-Item config.example.json config.json
-```
-Edit `config.json`. For a local test without the company systems set `"db_enabled": false` and `"sap_enabled": false`:
-the Material_Master lookup and the SAP enrichment steps are then skipped. Set them to `true` with real values to
-test against the real servers (the Windows machine must reach them). Then:
-```
-go run ./cmd/miservice -config config.json
-# or, to test the real artifact:
-go build -o miservice.exe ./cmd/miservice ; .\miservice.exe -config config.json
-```
-To use another port without editing the file: `$env:PORT = 3090` before starting. Stop with Ctrl+C: the server
-finishes the running request and shuts down gracefully (up to 10 s). Windows Firewall may ask to allow the
-program on first start; allow "Private networks" if colleagues should reach it.
+With a C compiler installed, also run `go test -race ./...`. GNU Make users can
+run `make help`, `make build`, or `make check`; `make check` is the Go CI gate.
+Desktop checks, from `apps/studio`:
 
-**4. Smoke test the endpoints** (second terminal)
-```
-curl.exe http://localhost:3081/api/health
-curl.exe -F "files=@testdata/bom_basic.xlsx" -F "files=@testdata/prio_basic.xlsx" -F "bam=113280" http://localhost:3081/api/bom/upload
-curl.exe -o out.xlsx http://localhost:3081/api/bom/download
-dir uploads, outputs\bom
-```
-Expected: health returns `{"status":"online",...}`; upload returns `"status":"success"` and a `downloadUrl`; `out.xlsx`
-opens in Excel; `uploads\` holds only `.gitkeep`; `outputs\bom\` holds `bom_basic_113280.xlsx` and `.manifest.json`.
-The Priority file is recognised by a file name containing `prio` or `shortage`; otherwise the first file is the BOM.
-Error cases worth trying: one file only (400 "Expected 2 files"), `bam=../x` (400), a file over 25 MB (400).
-
-**5. Run a workflow on real files, without HTTP**
-```
-go build -o migo.exe ./cmd/migo
-.\migo.exe -in "bom=C:\data\Customer BOM.xlsx" -in "priority=C:\data\Priority.xlsx" -out out.xlsx workflows\bom.yaml
-```
-`-cfg` takes config.json keys as JSON; the default `{}` skips DB and SAP. Use `-sql-stub testdata/stub_master.json`
-to stand in for the database, and `-check` to run without keeping the output.
-Ubuntu is the production OS, so also run `go test ./...` on the Ubuntu machine (or WSL2 Ubuntu) once before a release.
-
-**6. Cross-build the Ubuntu binary from Windows**
-```
-$env:CGO_ENABLED = "0"; $env:GOOS = "linux"; $env:GOARCH = "amd64"
-go build -ldflags="-s -w" -o dist/miservice ./cmd/miservice
-Remove-Item Env:GOOS, Env:GOARCH, Env:CGO_ENABLED
-```
-The binary is static (no cgo), so it runs on any Ubuntu without installing Go. With GNU make installed, `make linux`
-does the same. Use `GOARCH=arm64` for an ARM server.
-
-## Testing PM2 on Windows
-The same `deploy/ecosystem.config.js` works on Windows (it picks `miservice.exe` there), so you can rehearse the PM2
-setup before touching the server. PM2 on Windows is a test tool only; production stays Ubuntu.
-
-**1. Install Node and PM2 (once)**
-```
-winget install OpenJS.NodeJS.LTS          # open a NEW terminal afterwards
-npm install -g pm2
-pm2 -v
-```
-If PowerShell says running scripts is disabled (`pm2.ps1 cannot be loaded`), run
-`Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`, or call `pm2.cmd` instead of `pm2`.
-
-**2. Build the exe and prepare the config** (project folder)
-```
-go build -o miservice.exe ./cmd/miservice
-Copy-Item config.example.json config.json        # skip if you already have one
-```
-For a test without the company systems set `"db_enabled": false` and `"sap_enabled": false` in `config.json`.
-
-**3. Start under PM2**
-```
-$env:MISERVICE_DIR = (Get-Location).Path          # folder with miservice.exe + config.json
-pm2 start deploy/ecosystem.config.js
-pm2 status                                        # miservice: online
-curl.exe http://localhost:3081/api/health
-pm2 logs miservice --lines 30                     # banner, cleanup lines (Ctrl+C leaves the log view)
+```sh
+npm ci
+npm test
+npm run build
+node scripts/smoke-runner.mjs
 ```
 
-**4. Exercise what PM2 is there for**
-```
-# a) real request still works and uploads/ is cleaned
-curl.exe -F "files=@testdata/bom_basic.xlsx" -F "files=@testdata/prio_basic.xlsx" -F "bam=113280" http://localhost:3081/api/bom/upload
-dir uploads                                       # only .gitkeep
+The last command needs Go and exercises the real runner/workbook protocol.
+See the [desktop developer guide](docs/MAI_STUDIO_DEVELOPMENT.md) for Rust/native
+checks. Windows installer builds and manual desktop interaction need verification
+on Windows; Linux CI is not a substitute for that check.
 
-# b) crash recovery: kill the process, PM2 must start it again
-Stop-Process -Name miservice -Force
-Start-Sleep 5 ; pm2 status                        # online again, "restarts" column went up by 1
-curl.exe http://localhost:3081/api/health
+## Troubleshooting
 
-# c) manual control and inspection
-pm2 restart miservice
-pm2 describe miservice                            # cwd, args, env (PORT, GOMEMLIMIT), restarts, uptime
-pm2 monit                                         # live CPU / memory (q to quit)
-pm2 stop miservice ; pm2 start miservice
-```
-Optional memory-limit test: set `max_memory_restart: "20M"` in a copy of the ecosystem file, start it, upload a BOM,
-and PM2 should log a restart because the process went over the limit. Do not copy that value to production.
+| Problem | What to do |
+| --- | --- |
+| A tool is not recognized | Open a new terminal after installation; rerun the version checks. |
+| Desktop C++/linker error | Install the C++ workload and Windows SDK; confirm Rust uses an MSVC host toolchain. |
+| Desktop opens only in a browser | Use `npm run desktop:dev`, not `npm run dev`. |
+| Go sidecar cannot launch | Rerun `npm run desktop:dev` to rebuild it for your host. |
+| Config is missing | Supply the actual path with `-config`; check that the file exists. |
+| Port already in use | Stop the other process or set `PORT` and use that same port in requests. |
+| Windows executable cannot be rebuilt | Stop the running executable before rebuilding it. |
+| Upload fails only with company integrations enabled | Check DB/SAP settings, credentials, and connectivity from the machine running the service. |
+| PM2 reports `errored` | Inspect `pm2 logs maiservice --err`; check executable architecture, paths, permissions, and config. |
+| A save reports a conflict | Save your edits to a new unused path, then reopen the changed original to compare. |
 
-**5. Clean up**
-```
-pm2 delete miservice
-pm2 kill                                          # stops the PM2 daemon too
-Remove-Item Env:MISERVICE_DIR
-```
-PM2 keeps its logs in `%USERPROFILE%\.pm2\logs\miservice-out.log` and `miservice-error.log`.
+## How workflows and files are organized
 
-**What differs from Ubuntu** (so a pass here is not a full sign-off)
-* Windows has no SIGTERM: `pm2 stop/restart` kills the process at once, so a request in flight is cut. On Ubuntu the
-  service drains it first (`kill_timeout`). Test graceful shutdown on Ubuntu or WSL2.
-* `pm2 startup` (start on boot) is not supported on Windows; test it on the Ubuntu server.
-* A running `miservice.exe` cannot be overwritten: `pm2 stop miservice` before rebuilding with `go build`.
-* File permissions, the `miservice` service user, ufw and `GOARCH` problems only show up on Ubuntu.
+Each `workflows/<name>.yaml` defines one process. Built-in workflows are embedded
+in the service; `<config directory>/workflows/<name>.yaml` can replace or add one.
 
-## Deploying on Ubuntu with PM2
-PM2 can supervise any executable, so it runs the Go binary directly (`interpreter: "none"`). Use it if the company's
-"1 service slot" means a PM2 slot; otherwise `deploy/miservice.service` (systemd) does the same without Node.
-Paths below assume `/opt/miservice` and a service user `miservice`; adjust to taste.
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /api/health` | Liveness response |
+| `POST /api/<name>/upload` | Multipart `files` plus employee number `bam` |
+| `GET /api/<name>/download` | Latest output for that workflow |
 
-**1. One-time server setup**
-```
-sudo useradd --system --create-home --shell /bin/bash miservice
-sudo mkdir -p /opt/miservice && sudo chown miservice:miservice /opt/miservice
-# Node + PM2 (only needed for PM2; any Node LTS works)
-sudo apt update && sudo apt install -y nodejs npm
-sudo npm install -g pm2
-```
-The service user needs a login shell (or run the `pm2` commands via `sudo -iu miservice`), because PM2 keeps its
-process list in that user's home.
+BOM upload takes a BOM workbook and a Priority workbook. A filename containing
+`prio` or `shortage` is recognized as Priority. Outputs live in
+`outputs/<workflow>/` beside config. Upload files are normally deleted at request
+completion; `.keep.json` records uploads explicitly retained by a module. Output
+retention and upload cleanup are managed by the storage layer.
 
-**2. Copy the files** (from the Windows or build machine)
-```
-scp dist/miservice deploy/ecosystem.config.js you@server:/tmp/
-# on the server:
-sudo install -o miservice -g miservice -m 755 /tmp/miservice /opt/miservice/miservice
-sudo install -o miservice -g miservice -m 644 /tmp/ecosystem.config.js /opt/miservice/ecosystem.config.js
-```
-Create `/opt/miservice/config.json` from `config.example.json` with the real DB/SAP values and protect it, because it
-holds the DB password: `sudo chmod 600 /opt/miservice/config.json && sudo chown miservice:miservice /opt/miservice/config.json`.
-`uploads/` and `outputs/` are created next to it on first start.
+| Folder | Purpose |
+| --- | --- |
+| `apps/studio` | Desktop frontend and Tauri host |
+| `cmd/maiservice` | Microservice entry point |
+| `cmd/migo` | Standalone workflow CLI |
+| `cmd/mai-runner` | Desktop protocol sidecar |
+| `internal/workflow` | Production workflow parser and engine |
+| `internal/modules` | HTTP feature modules |
+| `workflows` | Built-in YAML workflows |
+| `examples`, `testdata` | Example inputs and test fixtures |
 
-**3. Start**
-```
-sudo -iu miservice
-cd /opt/miservice
-pm2 start ecosystem.config.js
-pm2 status                      # miservice should be "online"
-curl http://localhost:3081/api/health
-pm2 logs miservice --lines 50   # startup banner, cleanup lines, request logs
-```
-`ecosystem.config.js` pins the working directory to the folder the file sits in (`/opt/miservice`; override with the
-`MISERVICE_DIR` env var), passes `-config`, sets `PORT=3081`, restarts on
-crash (max 10 quick restarts), restarts above 650 MB, and sets `GOMEMLIMIT=400MiB` so the Go garbage collector works
-harder before memory grows (the equivalent of Node's `--max-old-space-size`). Keep `exec_mode: "fork"` and
-`instances: 1`: the "latest download" is per process and the service is built for a single instance.
+### Workbook compatibility
 
-**4. Start on boot**
-```
-pm2 startup systemd -u miservice --hp /home/miservice     # prints one sudo command: run it
-pm2 save
-```
-Reboot once to prove it (`sudo reboot`, then `pm2 status`). Run `pm2 save` again whenever you add or remove apps.
+Inputs must be real `.xlsx` or Excel 97–2003 BIFF8 `.xls` files. Password-protected
+workbooks, older Excel 5/95 files, and CSV/HTML renamed to `.xls` are unsupported.
+The engine reads input cells as text; output values and supported formatting come
+from the workflow definition. It does not implement Excel formula recalculation.
+Keep a copy of original inputs and verify representative outputs in Excel before
+using a new workflow in production.
 
-**5. Open the port** (only if ufw is on): `sudo ufw allow 3081/tcp`. If you put nginx in front, allow bodies of at least
-60 MB (`client_max_body_size 60m;`, two files of up to 25 MB each) and a generous `proxy_read_timeout` (large BOMs with
-SAP lookups can take minutes).
-
-**6. Logs**
-PM2 writes `~/.pm2/logs/miservice-out.log` and `miservice-error.log`. Add rotation once:
-`pm2 install pm2-logrotate` (defaults: 10 MB, 30 files).
-
-**7. Update to a new version**
-```
-# build + copy the new binary to /tmp/miservice, then on the server:
-sudo install -o miservice -g miservice -m 755 /tmp/miservice /opt/miservice/miservice.new
-sudo -iu miservice bash -c 'cd /opt/miservice && mv miservice.new miservice && pm2 restart miservice'
-```
-(Renaming over the file avoids "text file busy"; plain copying over a running binary can fail.) PM2 sends SIGTERM, the
-service finishes the running request and exits, then PM2 starts the new binary. `config.json`, `outputs/` and
-`uploads/` are untouched. Roll back by keeping the previous binary as `miservice.prev` and moving it back.
-
-**8. Verify after every deploy**
-```
-pm2 status                                   # online, restarts count not climbing
-curl -s http://localhost:3081/api/health
-curl -F "files=@bom.xlsx" -F "files=@prio.xlsx" -F "bam=113280" http://localhost:3081/api/bom/upload
-ls -la /opt/miservice/uploads                # only .gitkeep (and .keep.json) after the request
-```
-
-**Troubleshooting**
-| Symptom | Likely cause |
-|---|---|
-| `errored`, log says `no config.json found` | `config.json` is missing in `/opt/miservice`, or `cwd`/`-config` in the ecosystem file is wrong |
-| `listen tcp 0.0.0.0:3081: bind: address already in use` | another process (or an old PM2 app) holds the port: `sudo ss -ltnp \| grep 3081` |
-| `permission denied` on `uploads/` or `outputs/` | the folder is owned by root; `sudo chown -R miservice:miservice /opt/miservice` |
-| `exec format error` | binary built for the wrong architecture (`GOARCH=amd64` vs `arm64`) |
-| restarts again and again | `pm2 logs miservice --err`; also check `max_memory_restart` vs the size of the BOM files |
-| works locally, 500 on the server | DB or SAP unreachable from the server: check `db_server`/`sap_host`, firewall, and the DB credentials in `config.json` |
-
-systemd alternative: `sudo cp deploy/miservice.service /etc/systemd/system/ && sudo systemctl enable --now miservice`,
-logs with `journalctl -u miservice -f`. Use one supervisor or the other, never both at once.
-
-## Mai Studio desktop tool
-
-The Tauri v2 and React Flow developer workspace is under active development.
-See [desktop development](docs/MAI_STUDIO_DEVELOPMENT.md) for the current scope
-and [implementation plan](docs/MAI_DEV_TOOL_IMPLEMENTATION_PLAN.md) for the roadmap.
-
-## Layout
-```
-workflows/             built-in workflow files (embedded); bom.yaml = the BOM processor
-cmd/miservice          server entrypoint (flags + app.Run)
-cmd/migo               run a workflow file on local files without HTTP (-check; -sql-stub for tests)
-internal/app           wiring; modules.go is the list of modules the service runs
-internal/module        what a module is (Module / Starter / Closer / Services)
-internal/workflow      the engine: strict parser, steps, expressions, sql/rest, branching, styled xlsx writer
-internal/modules/workflows  serves each workflow at /api/<name>/{upload,download}
-internal/modules/system     GET /api/health (the smallest example module)
-internal/httpx         router, error responses, multipart upload, CORS + panic-recovery middleware
-internal/config        config.json (typed shared keys; cfg.String/Int/Bool for a module's own keys)
-internal/storage       generated files: atomic commit, newest-N per owner, retention cleanup
-internal/jobs          concurrency gate for heavy jobs, memory release
-internal/clients/sqlserver  shared lazy SQL Server pool
-internal/jsx           JavaScript-exact trim / Number toString / parseFloat
-internal/sheet         .xlsx streaming reader + BIFF8 .xls reader (typed cells, SheetJS range semantics)
-examples/              a generic table workflow and its input
-docs/WORKFLOWS.md      the workflow file reference
-docs/EXTENDING.md      how to add a step type, a module or a custom endpoint
-```
-
-## Known differences
-* Upload order: an uploaded file whose name contains `prio` or `shortage` is always taken as the Priority file
-  (`match` in `workflows/bom.yaml`). Node also required the other file's name to contain `bom` or `.xls`. The two
-  rules differ only for files uploaded without an Excel extension.
-* Output is **value identical**: every cell value matches the Node/former Go output. Colours, fonts and borders
-  come from the `output` styles in `workflows/bom.yaml` and differ in detail (e.g. fonts, debug-cell borders).
-* The SAP request body is built in `bom.yaml`, so its JSON keys go out in alphabetical order. Log wording differs
-  slightly (e.g. header detection).
-* Node's Zod "NOTE: unexpected field values" log lines are gone (static types make that check moot; output unaffected).
-* Unknown routes return plain `Cannot GET /x` instead of Express' HTML error page.
-* Input must be a real .xlsx or Excel 97-2003 (BIFF8) .xls. Excel 5/95 .xls, password-protected files and
-  HTML/CSV files saved with an .xls extension are rejected with a clear error (SheetJS would try to guess).
-* `JS toUpperCase` special cases (e.g. "ß" -> "SS") are not reproduced; irrelevant for part numbers/vendor names.
+Further reading: [Studio user guide](docs/MAI_STUDIO_USER_GUIDE.md),
+[workflow reference](docs/WORKFLOWS.md), [extending MaiService](docs/EXTENDING.md),
+and [implementation plan](docs/MAI_DEV_TOOL_IMPLEMENTATION_PLAN.md).

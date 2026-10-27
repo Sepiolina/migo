@@ -63,6 +63,9 @@ operations are unavailable, including unconditional steps.
 
 ## Start the desktop app
 
+For Windows installation, PowerShell commands, and starting the HTTP microservice,
+see the [README getting-started instructions](../README.md).
+
 ```sh
 cd apps/studio
 npm ci

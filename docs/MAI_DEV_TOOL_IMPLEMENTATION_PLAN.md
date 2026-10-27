@@ -10,8 +10,8 @@ workflows, validate them, run them against Excel inputs, inspect intermediate
 results, and export a Linux deployment as **`mai.zip`**.
 
 Use **Mai Studio** for the desktop tool and **MaiService** for its deployment UI.
-Keep the existing Go entry points `cmd/migo` and `cmd/miservice`; initially ship
-the service executable as `miservice` to preserve existing operations.
+Use `cmd/migo` for local workflow runs and `cmd/maiservice` for the HTTP service;
+ship the service executable as `maiservice`.
 
 The desktop app runs on Windows, macOS, and Linux. Release Linux service builds
 for amd64 and arm64. Verify supported desktop OS versions and native Tauri v2
@@ -29,13 +29,13 @@ plugins are later work.
 
 - `internal/workflow` is the production parser, compiler, expression evaluator,
   execution engine, and workbook writer. Reuse it for desktop runs.
-- `cmd/migo` runs workflows on local files; `cmd/miservice` serves HTTP endpoints.
+- `cmd/migo` runs workflows on local files; `cmd/maiservice` serves HTTP endpoints.
 - YAML steps execute in order against a current table and named saved datasets.
   `if` and `split` contain nested ordered steps; arbitrary graph scheduling is
   not currently supported.
 - Built-in workflows are embedded from `workflows/`; files in
   `<config directory>/workflows/` override or extend them.
-- Config lookup supports `-config`, `MISERVICE_CONFIG`, and config files beside
+- Config lookup supports `-config`, `MAISERVICE_CONFIG`, and config files beside
   the process/binary. Upload and output storage lives beside the selected config.
 - Existing Go tests, golden workbooks, fake SAP fixtures, and SQL stubs provide
   the baseline for compatibility. `make check` is the Go quality gate.
@@ -64,7 +64,7 @@ Go desktop runner sidecar
   ├── internal/sheet: input workbook inspection
   └── workbook artifact inspection and output metadata
 
-Linux deployment: existing cmd/miservice + configuration + workflows + PM2
+Linux deployment: existing cmd/maiservice + configuration + workflows + PM2
 ```
 
 Suggested layout:
@@ -332,7 +332,7 @@ The **Compile & Create mai.zip** button performs a cancelable pipeline:
 3. Run production workflow/config validation and required Go quality gates.
 4. Invoke Go directly with argument arrays and an allowlisted environment, e.g.:
    `CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -mod=readonly -trimpath
-   -o <staging>/miservice ./cmd/miservice`.
+   -o <staging>/maiservice ./cmd/maiservice`.
 5. Generate PM2 configuration and installation/verification instructions; bundle
    the selected config encrypted as config.json.age for Secure Release (or
    config.json for an explicitly selected plaintext profile), workflow overrides,
@@ -364,7 +364,7 @@ Existing runtime overrides make this compatible with the service today.
 ```text
 mai.zip
   mai/
-    miservice
+    maiservice
     config/config.json.age           selected real config, encrypted for server
     # config/config.json instead for explicit plaintext profiles
     config/workflows/*.yaml           selected overrides; beside effective config
@@ -424,7 +424,7 @@ Example defaults, configurable within validated bounds:
 module.exports = {
   apps: [{
     name: 'mai-service',
-    script: '/opt/mai/current/miservice',
+    script: '/opt/mai/current/maiservice',
     cwd: '/opt/mai/shared',
     interpreter: 'none',
     args: ['-config', '/opt/mai/shared/config.json'],
