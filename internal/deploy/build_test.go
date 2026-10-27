@@ -216,6 +216,11 @@ func TestScopedRejectsEscape(t *testing.T) {
 }
 
 func TestBuildEnvironmentUsesVerifiedModuleDownloads(t *testing.T) {
+	goenv := filepath.Join(t.TempDir(), "goenv")
+	if err := os.WriteFile(goenv, []byte("GOFLAGS=-toolexec=hostile\nGONOSUMDB=*\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("GOENV", goenv)
 	t.Setenv("GOFLAGS", "-mod=mod")
 	t.Setenv("GOTOOLCHAIN", "auto")
 	t.Setenv("GOPROXY", "off")
@@ -240,7 +245,7 @@ func TestBuildEnvironmentUsesVerifiedModuleDownloads(t *testing.T) {
 			t.Fatalf("%s was not preserved", key)
 		}
 	}
-	for key, value := range map[string]string{"GOOS": "linux", "GOARCH": "arm64", "CGO_ENABLED": "0", "GOFLAGS": "", "GOTOOLCHAIN": "local", "GOWORK": "off", "GOPROXY": "https://proxy.golang.org", "GOSUMDB": "sum.golang.org"} {
+	for key, value := range map[string]string{"GOOS": "linux", "GOARCH": "arm64", "CGO_ENABLED": "0", "GOFLAGS": "", "GOENV": "off", "GOTOOLCHAIN": "local", "GOWORK": "off", "GOPROXY": "https://proxy.golang.org", "GOSUMDB": "sum.golang.org"} {
 		if env[key] != value {
 			t.Fatalf("%s = %q, want %q", key, env[key], value)
 		}

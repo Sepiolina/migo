@@ -51,7 +51,7 @@ def verify(archive, trusted_key=None, allow_unsigned=False):
                                          '-in', str(directory / 'checksums'), '-sigfile', str(directory / 'signature')],
                                         capture_output=True, timeout=30, check=False)
                 if result.returncode:
-                    raise ValueError('Signature verification failed')
+                    raise ValueError('Signature verification failed; use OpenSSL 3 with Ed25519 support and the correct trusted key')
         elif not allow_unsigned or trusted_key:
             raise ValueError('Unsigned archive rejected; trusted-local verification needs --allow-unsigned')
         declared = {}

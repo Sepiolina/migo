@@ -172,7 +172,7 @@ is separate from browser preferences.
 
 From the repository root, run `go test ./internal/deploy` for builder tests and
 `python3 -m unittest discover -s scripts -p 'test_verify_mai_package.py'` for the
-independent verifier tests (Python 3 and OpenSSL required). Native and frontend
+independent verifier tests (Python 3 and OpenSSL 3 required). Native and frontend
 checks above also cover the bridge and form. Windows native CI compilation/tests
 complement frontend checks; they do not establish installer operation or actual
 credential-store behavior in an interactive session.

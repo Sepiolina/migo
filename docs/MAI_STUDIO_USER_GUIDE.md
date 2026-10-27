@@ -197,7 +197,7 @@ keys. Clearing profiles does not delete the OS signing identity.
 ### Verify before extracting or installing
 
 Obtain [scripts/verify-mai-package.py](../scripts/verify-mai-package.py) from an
-independently trusted checkout/channel, plus Python 3 and OpenSSL on the server.
+independently trusted checkout/channel, plus Python 3 and OpenSSL 3 on the server.
 Obtain the builder's base64 **Signing public key** through a trusted channel and
 retain/compare it independently of the ZIP. A key bundled in the same ZIP is not
 a trust anchor. Before extracting, run:

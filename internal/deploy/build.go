@@ -345,7 +345,7 @@ func Build(ctx context.Context, workspace string, o Options) (Result, error) {
 	return result, nil
 }
 func safeEnv(arch string) []string {
-	env := []string{"GOOS=linux", "GOARCH=" + arch, "CGO_ENABLED=0", "GOFLAGS=", "GOTOOLCHAIN=local", "GOWORK=off", "GOPROXY=https://proxy.golang.org", "GOSUMDB=sum.golang.org"}
+	env := []string{"GOOS=linux", "GOARCH=" + arch, "CGO_ENABLED=0", "GOFLAGS=", "GOENV=off", "GOTOOLCHAIN=local", "GOWORK=off", "GOPROXY=https://proxy.golang.org", "GOSUMDB=sum.golang.org"}
 	for _, k := range []string{"PATH", "HOME", "GOPATH", "GOCACHE", "GOMODCACHE", "GOROOT", "TMPDIR", "TEMP", "TMP", "USERPROFILE", "LOCALAPPDATA", "APPDATA", "SYSTEMROOT", "SystemDrive", "COMSPEC", "PATHEXT"} {
 		if v := os.Getenv(k); v != "" {
 			env = append(env, k+"="+v)

@@ -240,7 +240,7 @@ unsigned and includes readable configuration secrets.
 The result is `.studio/packages/package-*/mai.zip`, with its hash, inventory, and
 validation status. Cross-compilation and ELF checks do not prove the binary runs
 on the target architecture. Before extracting, obtain the verifier independently
-from a trusted checkout and verify with Python 3 and OpenSSL:
+from a trusted checkout and verify with Python 3 and OpenSSL 3:
 
 ```sh
 python3 scripts/verify-mai-package.py --trusted-key 'BASE64_PUBLIC_KEY_FROM_STUDIO' mai.zip
