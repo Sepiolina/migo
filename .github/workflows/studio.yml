@@ -32,6 +32,7 @@ jobs:
             ~/.cargo/git
             apps/studio/src-tauri/target
           key: studio-rust-${{ runner.os }}-${{ hashFiles('apps/studio/src-tauri/**/Cargo.lock') }}
+          restore-keys: studio-rust-${{ runner.os }}-
       - name: Native prerequisites
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf
       - run: npm ci
@@ -44,6 +45,7 @@ jobs:
         working-directory: apps/studio
       - run: node scripts/build-sidecar.mjs
         working-directory: apps/studio
+      - run: python3 -m unittest discover -s scripts -p "test_*.py"
       - run: node scripts/smoke-runner.mjs
         working-directory: apps/studio
       - run: cargo test --locked --manifest-path workspace-core/Cargo.toml
@@ -71,3 +73,38 @@ jobs:
         working-directory: apps/studio
       - run: npm run build
         working-directory: apps/studio
+
+  native-windows:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/studio/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/studio/src-tauri/target
+          key: studio-rust-${{ runner.os }}-${{ hashFiles('apps/studio/src-tauri/**/Cargo.lock') }}
+          restore-keys: studio-rust-${{ runner.os }}-
+      - run: npm ci
+        working-directory: apps/studio
+      - run: npm run build
+        working-directory: apps/studio
+      - run: node scripts/build-sidecar.mjs
+        working-directory: apps/studio
+      - run: go test ./internal/deploy
+      - run: cargo fmt --check
+        working-directory: apps/studio/src-tauri
+      - run: cargo test --locked
+        working-directory: apps/studio/src-tauri

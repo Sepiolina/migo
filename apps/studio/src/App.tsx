@@ -18,6 +18,7 @@ import { operations } from "./operationCatalog";
 import { addOperation } from "./nodeAuthoring";
 import { WorkbookPanel } from "./WorkbookPanel";
 import { StepInspector } from "./StepInspector";
+import { PackageBuilder } from "./PackageBuilder";
 import {
   isDesktop,
   request,
@@ -27,6 +28,10 @@ import {
 } from "./api";
 export default function App() {
   const document = useDocument(example);
+  const [showPackageBuilder, setShowPackageBuilder] = useState(false);
+  const [packagePending, setPackagePending] = useState(false);
+  const packagePendingRef = useRef(false);
+  packagePendingRef.current = packagePending;
   const [showProject, setShowProject] = useState(false);
   const [showData, setShowData] = useState(false);
   const [fullData, setFullData] = useState(false);
@@ -64,7 +69,7 @@ export default function App() {
   unsavedRef.current = document.dirty || hasDraft;
   useEffect(() => {
     const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (unsavedRef.current) {
+      if (unsavedRef.current || packagePendingRef.current) {
         event.preventDefault();
         event.returnValue = "";
       }
@@ -76,6 +81,14 @@ export default function App() {
       const currentWindow = getCurrentWindow();
       void currentWindow
         .onCloseRequested((event) => {
+          if (packagePendingRef.current) {
+            event.preventDefault();
+            setError(true);
+            setMessage(
+              "A package operation is in progress. Keep this window open until it finishes; cancellation is unavailable.",
+            );
+            return;
+          }
           if (!unsavedRef.current) return;
           event.preventDefault();
           setPendingDiscard(() => () => {
@@ -209,6 +222,7 @@ export default function App() {
   }
   useEffect(() => {
     const keyboard = (event: KeyboardEvent) => {
+      if (showPackageBuilder) return;
       const target = event.target as HTMLElement;
       const typing =
         ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName) ||
@@ -309,7 +323,7 @@ export default function App() {
       );
     });
   }
-  const ready = isDesktop() && !!workspace && !busy;
+  const ready = isDesktop() && !!workspace && !busy && !packagePending;
   return (
     <div className="app">
       <header>
@@ -332,6 +346,17 @@ export default function App() {
             onClick={() => setShowData(!showData)}
           >
             Excel data{artifact ? " · Output ready" : ""}
+          </button>
+          <button
+            disabled={!ready || hasDraft || document.dirty}
+            onClick={() => setShowPackageBuilder(true)}
+            title={
+              hasDraft || document.dirty
+                ? "Save workflow changes and apply or discard the argument draft first"
+                : "Build an offline Linux deployment ZIP"
+            }
+          >
+            Build Linux package
           </button>
           <span className="mode">● Offline</span>
           <button disabled={!ready || hasDraft} onClick={validate}>
@@ -358,7 +383,7 @@ export default function App() {
             <div className="eyebrow">WORKSPACE</div>
             <button
               className="folder"
-              disabled={!isDesktop() || !!busy}
+              disabled={!isDesktop() || !!busy || packagePending}
               onClick={() => discardGuard(() => void choose())}
             >
               ▣ {workspace ? "Change workspace" : "Open workspace"}
@@ -450,10 +475,9 @@ export default function App() {
             <div className="bottom">
               <div className="eyebrow">LINUX DEPLOYMENT</div>
               <p className="hint">
-                Secure packaging and PM2 profiles are planned for the next
-                milestones.
+                Build an offline ZIP with selected workflows and Linux service
+                settings from the header.
               </p>
-              <button disabled>Build Linux package · Planned</button>
             </div>
           </aside>
         )}
@@ -487,11 +511,17 @@ export default function App() {
             </button>
             <span>Left → right · {count} steps</span>
           </nav>
+          {document.dirty && !hasDraft && (
+            <div className="notice" role="status">
+              Save workflow changes before building a Linux package. Packages
+              include saved files from disk.
+            </div>
+          )}
           {hasDraft && (
             <div className="notice" role="status">
               Unapplied argument draft. Apply or discard it in the inspector
-              before saving, running, changing steps, switching views, or
-              undoing.
+              before saving, running, packaging, changing steps, switching
+              views, or undoing.
             </div>
           )}
           <div className="authoring-toolbar">
@@ -739,6 +769,20 @@ export default function App() {
           )}
         </section>
       </main>
+      {showPackageBuilder && (
+        <PackageBuilder
+          workspace={workspace}
+          workflows={workflowPaths}
+          blocked={hasDraft || document.dirty}
+          onPending={(pending) => {
+            packagePendingRef.current = pending;
+            setPackagePending(pending);
+          }}
+          onClose={() => {
+            if (!packagePendingRef.current) setShowPackageBuilder(false);
+          }}
+        />
+      )}
       {pendingDiscard && (
         <div className="dialog-backdrop">
           <section

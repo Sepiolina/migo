@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"net"
+	"os"
+	"os/exec"
 	"testing"
 
 	"miservice/internal/config"
@@ -48,4 +50,22 @@ func TestStartupFailureReleasesResources(t *testing.T) {
 		t.Fatalf("listener was not released: %v", err)
 	}
 	replacement.Close()
+}
+
+func TestInvalidInheritedListener(t *testing.T) {
+	if os.Getenv("MAI_TEST_INVALID_FD") == "1" {
+		a, err := New(&config.Config{Dir: t.TempDir()}, logx.Nop, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := a.Run(context.Background()); err == nil {
+			t.Fatal("invalid descriptor accepted")
+		}
+		return
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestInvalidInheritedListener$")
+	cmd.Env = append(os.Environ(), "MAI_TEST_INVALID_FD=1", "MAISERVICE_LISTEN_FD=3")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("child failed: %v: %s", err, output)
+	}
 }

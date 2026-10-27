@@ -128,6 +128,132 @@ Editing YAML or changing input bindings marks the displayed output stale. Run
 again to refresh it. Changes to workbook files made outside Studio are not
 tracked automatically; rerun after changing them.
 
+## Build a Linux deployment package
+
+Open a workspace containing the complete MaiService source checkout, including
+`go.mod`, `go.sum`, and `cmd/maiservice`. Install Go on the build computer and put
+it on PATH. The first build downloads missing Go modules automatically through
+the Go module proxy and checksum database, so allow network access and time for
+dependencies. Subsequent builds can use the local module cache. A workflow-only
+folder cannot build the service. Build only a source checkout you trust.
+
+Save workflow changes and apply or discard pending settings, then choose
+**Build Linux package** in the toolbar. In the builder:
+
+1. Choose Linux **amd64** or **arm64** to match the deployment machine.
+2. Enter a saved, workspace-relative file named `config.json`, such as
+   `deployment/config.json`. The builder reads configuration and workflow files
+   from disk, not unsaved editor buffers.
+3. Select saved **Workflow overrides**. Built-in endpoints remain available;
+   selected files replace matching built-ins or add endpoints. This selection is
+   not an endpoint allowlist. Override filenames must be unique lowercase
+   `.yaml` names using letters, numbers, and hyphens.
+4. Set a new installation directory directly under `/opt`, the service name,
+   HTTP port, PM2 restart-memory threshold, and Go memory target. Defaults use
+   `/opt/maiservice`, `maiservice`, and port `3081`. Memory settings are runtime
+   guidance; they do not reserve memory or replace capacity testing.
+5. Choose **Secure** or **Trusted local**, then choose **Build ZIP package**.
+   Keep the window open; build cancellation is unavailable.
+
+**Secure** signs the checksum inventory with Ed25519 and encrypts configuration
+with age for the server. Choose **Create signing identity** once. Its private key
+is retained in the build computer's OS credential store, accessed by the native
+host; the frontend receives the public key and fingerprint. Unlock/configure the
+credential store if access fails. There is no signing-key export, backup,
+recovery, or rotation UI yet. Retain the public verification key independently;
+losing the OS identity means future packages may need a new trusted signer.
+
+Create the server's age identity once on the Linux machine with `age-keygen`.
+Install age using your approved provisioning process, then, as an administrator:
+
+```sh
+sudo install -d -m 700 /etc/maiservice
+sudo sh -c 'umask 077; age-keygen -o /etc/maiservice/age-identity.txt'
+sudo age-keygen -y /etc/maiservice/age-identity.txt
+```
+
+Do not regenerate or overwrite an identity used for existing packages. Copy only
+the printed **public** `age1…` recipient into **Deployment age public recipient**.
+Keep the private identity file protected on the server and arrange its backup
+through your approved secret-management process. The desktop does not need it.
+
+**Trusted local** creates an unsigned package containing plaintext configuration,
+including any secrets. Use it only where that exposure is acceptable. Studio does
+not silently fall back to this mode when secure signing fails.
+
+The result shows `.studio/packages/package-*/mai.zip`, its SHA-256, included files,
+and validation status. The ZIP contains the Linux `maiservice` executable,
+configuration, selected workflow overrides, PM2 settings, checksum inventory,
+installation scripts, and deployment notes. Secure mode adds the signature and
+uses `config.json.age`. A successful cross-build verifies the ELF architecture;
+read the reported validation status to see whether a local health check actually
+ran. It does not prove target-machine or live-integration behavior.
+
+**Save profile** stores public, non-secret deployment settings in this computer's
+localStorage, scoped to the workspace. Profiles contain paths, limits, selected
+workflows, and the public age recipient, not configuration contents or private
+keys. Clearing profiles does not delete the OS signing identity.
+
+### Verify before extracting or installing
+
+Obtain [scripts/verify-mai-package.py](../scripts/verify-mai-package.py) from an
+independently trusted checkout/channel, plus Python 3 and OpenSSL on the server.
+Obtain the builder's base64 **Signing public key** through a trusted channel and
+retain/compare it independently of the ZIP. A key bundled in the same ZIP is not
+a trust anchor. Before extracting, run:
+
+```sh
+python3 scripts/verify-mai-package.py --trusted-key 'BASE64_PUBLIC_KEY_FROM_STUDIO' mai.zip
+```
+
+This verifies the signature, complete payload inventory, paths, and checksums
+before extraction. Do not run any script or executable from the ZIP before this
+verification succeeds. A ZIP hash alone does not establish who signed it.
+
+For an intentionally unsigned trusted-local package, explicitly use:
+
+```sh
+python3 scripts/verify-mai-package.py --allow-unsigned mai.zip
+```
+
+That checks integrity and inventory, not authenticity. Only after successful
+verification, extract into a new empty directory:
+
+```sh
+package_dir=$(mktemp -d)
+unzip mai.zip -d "$package_dir"
+```
+
+The server needs Python 3, Node.js, and PM2; secure installation also needs age.
+Create a dedicated service account if absent:
+
+```sh
+sudo useradd --system --create-home --shell /bin/bash maiservice
+```
+
+Skip that command if `maiservice` already exists. Do not pre-create
+`/opt/maiservice`: the installer requires an absent target and refuses replacement of an existing installation. For the default profile:
+
+```sh
+sudo env AGE_IDENTITY=/etc/maiservice/age-identity.txt sh "$package_dir/mai/install.sh"
+sudo chown -R maiservice:maiservice /opt/maiservice
+sudo -u maiservice -H pm2 start /opt/maiservice/ecosystem.config.js
+sudo -u maiservice -H pm2 save
+curl --fail http://127.0.0.1:3081/api/health
+```
+
+For trusted-local mode, omit `AGE_IDENTITY`. The installer stages files beside
+the target, decrypts/copies configuration with restrictive permissions
+(`config/config.json` is mode `0600`), then moves the staged directory into place.
+Run PM2 as the service user, not root. Follow the
+[README PM2 instructions](../README.md#deploy-on-linux-with-pm2) for startup-on-boot
+setup and runtime checks, using the package's generated ecosystem configuration.
+Test representative uploads/downloads and integrations on the actual target.
+
+This installer supports new targets only. Updating an existing deployment
+requires a deliberate stop, backup, move-aside, install, and rollback plan; there
+is no in-place upgrade, automatic rollback, or deployment/upload button.
+
 ## Workspace limits and troubleshooting
 
 Workflow files must be UTF-8, at most 1 MiB, and end in `.yaml` or `.yml`. Absolute
@@ -142,10 +268,14 @@ cannot start, verify Go is on PATH or set `MAI_GO` to its executable. Missing
 GTK/WebKit libraries or a missing desktop session prevent the Linux native host
 from starting; see the development guide for dependencies.
 
-Intermediate execution traces, cancellation controls, live connections, and the
-Linux service package builder are planned. The disabled **Build Linux package**
-control does not generate a deployment package.
+Intermediate execution traces, cancellation controls, and live desktop
+connections are planned.
 
 For **Filter rows**, use **Build condition** to choose a column, comparison, and
 text or number value. Studio writes the expression for you. Existing complex
 conditions stay in Expression mode until you deliberately replace them.
+
+Each package also includes `release.json` with the target and available build
+provenance, and `sbom.cdx.json` with a CycloneDX Go dependency inventory. These
+files are covered by the checksum manifest/signature. The inventory is not a
+vulnerability audit. Avoid editing saved source or inputs during compilation.

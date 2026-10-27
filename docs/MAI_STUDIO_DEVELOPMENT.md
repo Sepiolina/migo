@@ -16,8 +16,9 @@ read-only Excel data panel open on demand; the data panel supports input/output
 selection, expansion, paging, and full cell-value inspection. Nested authoring and
 unsupported step forms use the YAML source editor.
 
-Intermediate traces, live connections, cancellation controls, and the secure Linux
-release wizard remain subsequent milestones. The production service and its HTTP
+The native package builder cross-builds Linux service ZIPs, with secure signing
+and configuration encryption or explicit trusted-local mode. Intermediate traces,
+live desktop connections, and cancellation controls remain subsequent milestones. The production service and its HTTP
 contract are unchanged. See the [user guide](MAI_STUDIO_USER_GUIDE.md) for the
 editing and execution flow.
 
@@ -81,15 +82,15 @@ npm run desktop:dev
 
 `desktop:dev` builds the Go runner for the Rust host target before starting Tauri.
 If Go is not on PATH, set `MAI_GO` to the Go executable. `npm run desktop:build`
-builds the desktop distribution, not the planned Linux service deployment ZIP.
+builds the desktop distribution. The in-app **Build Linux package** command
+builds the separate Linux service deployment ZIP.
 
 Open **Project & inputs** and choose the repository folder as the workspace. The
-initial document contains the
-parts-summary example; you can also paste `examples/parts-summary.yaml` into the
+initial document contains the parts-summary example; you can also paste `examples/parts-summary.yaml` into the
 source editor. Validate, bind `parts` to `examples/parts.xlsx`, then run. Open
 **Excel data** to inspect the generated artifact, select input/output workbooks,
-or page through another sheet. Artifacts are stored under `.studio/runs/`. The first preview displays
-cell values only; styles, formula metadata, and full Excel visual fidelity remain
+or page through another sheet. Artifacts are stored under `.studio/runs/`. The
+preview displays cell values only; styles, formula metadata, and full Excel visual fidelity remain
 roadmap work. Generated workbooks themselves come from the production writer.
 
 ## Runner protocol
@@ -140,6 +141,46 @@ requires a desktop display/session. In a headless environment, use frontend,
 workspace-core, and runner checks; those do not establish that the desktop window
 launches correctly.
 
-`desktop:build` packages the Studio application and runner. The in-app Linux
-service package builder, secure release wizard, and PM2 deployment profiles are
-planned and cannot be exercised in this milestone.
+`desktop:build` packages the Studio application and runner. For Linux service ZIP
+creation, security setup, verification before extraction, and installation, follow
+the [package builder user guide](MAI_STUDIO_USER_GUIDE.md#build-a-linux-deployment-package).
+
+## Linux package builder implementation
+
+`PackageBuilder.tsx` edits public deployment profiles; the native bridge strictly
+whitelists fields, authorizes saved inputs inside the workspace, and reads the
+Ed25519 signing identity from the OS credential store. Private signing material
+is passed only through the native-to-runner request, not the frontend or saved
+profile. Secure mode signs the checksum inventory and encrypts config with the
+server's age public recipient. Trusted-local mode is explicitly unsigned and
+includes plaintext configuration. OS credential-store availability in an
+interactive desktop session requires platform testing; headless tests do not
+prove that keys persist or can be unlocked on a user's machine.
+
+`internal/deploy` requires the full trusted source checkout and Go on PATH. It
+builds with `GOOS=linux`, selected `GOARCH`, `CGO_ENABLED=0`, `-mod=readonly`, and
+`GOTOOLCHAIN=local`. Missing modules download through the fixed Go proxy and
+checksum database. It checks ELF architecture and archive contents; a local
+health smoke test runs only on a matching Linux host with the recognized server
+listener implementation. Otherwise the result explicitly reports runtime untested.
+That smoke test disables database/SAP and is not a production configuration test.
+
+Artifacts go to `.studio/packages/package-*/mai.zip`. Do not commit packages or
+real configuration. Profiles use workspace-scoped localStorage for public
+settings; there is no private-key export/recovery/rotation UI. Native OS storage
+is separate from browser preferences.
+
+From the repository root, run `go test ./internal/deploy` for builder tests and
+`python3 -m unittest discover -s scripts -p 'test_verify_mai_package.py'` for the
+independent verifier tests (Python 3 and OpenSSL required). Native and frontend
+checks above also cover the bridge and form. Windows native CI compilation/tests
+complement frontend checks; they do not establish installer operation or actual
+credential-store behavior in an interactive session.
+
+The independently obtained `scripts/verify-mai-package.py` verifies signature,
+archive inventory, paths, and checksums before extraction. Never execute ZIP
+scripts to establish initial trust. `--allow-unsigned` is an explicit integrity-only
+path for trusted-local packages. Installation stages a new target, decrypts with
+server-local `AGE_IDENTITY`, protects config with mode `0600`, and refuses existing
+targets. PM2 must run as a dedicated service user. In-place upgrades, automatic
+rollback, remote deployment, and signing-key lifecycle UI remain future work.

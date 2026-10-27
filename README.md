@@ -17,14 +17,16 @@ validation coverage, and features still planned.
 - [Run the Windows desktop app](#run-the-windows-desktop-app)
 - [Run the microservice on Windows](#run-the-microservice-on-windows)
 - [Run the microservice on Linux](#run-the-microservice-on-linux)
+- [Build a Linux deployment ZIP in Studio](#build-a-linux-deployment-zip-in-studio)
 - [Deploy on Linux with PM2](#deploy-on-linux-with-pm2)
 - [Run a workflow without a server](#run-a-workflow-without-a-server)
 - [Development checks](#development-checks)
 - [Troubleshooting](#troubleshooting)
 
-Desktop installation currently requires building from source. The secure
-`mai.zip` deployment builder, signed installer release process, live desktop
-connection profiles, and full Excel style preview are planned features. The
+Desktop installation currently requires building from source. Studio can build
+Linux `mai.zip` service packages with signing and configuration encryption, or
+explicit trusted-local plaintext mode. Signed desktop installer distribution,
+live desktop connection profiles, and full Excel style preview remain planned. The
 current preview shows workbook cell values; the generated `.xlsx` is the actual
 output of the Go engine.
 
@@ -218,6 +220,43 @@ port. Use an explicit `-config` path for predictable deployments. Uploads and
 outputs are stored **beside the selected config**, not necessarily beside the
 binary. The loader can fall back to `config.example.json`; always supply an
 intentional config for deployment.
+
+## Build a Linux deployment ZIP in Studio
+
+Open the full trusted source checkout as the workspace and install Go on PATH.
+Missing Go modules download automatically through the module proxy and checksum
+database on the first build. Save workflow edits, then choose **Build Linux
+package**. Select amd64/arm64, a saved relative `config.json`, workflow overrides,
+installation folder, port, and memory limits. Built-in workflow endpoints remain
+available; selected overrides add or replace them rather than restrict routes.
+
+**Secure** creates an OS-stored signing identity and encrypts configuration for
+the server's age public recipient. Generate the private age identity once on the
+server with `age-keygen` and copy only its public `age1…` recipient into Studio.
+The signing private key remains in the build computer's OS credential store;
+there is no key export/recovery/rotation UI yet. **Trusted local** is explicitly
+unsigned and includes readable configuration secrets.
+
+The result is `.studio/packages/package-*/mai.zip`, with its hash, inventory, and
+validation status. Cross-compilation and ELF checks do not prove the binary runs
+on the target architecture. Before extracting, obtain the verifier independently
+from a trusted checkout and verify with Python 3 and OpenSSL:
+
+```sh
+python3 scripts/verify-mai-package.py --trusted-key 'BASE64_PUBLIC_KEY_FROM_STUDIO' mai.zip
+```
+
+Retain/confirm that public key through a trusted channel outside the ZIP. Never
+execute scripts from the ZIP before signature and full inventory verification.
+Unsigned trusted-local archives require explicit `--allow-unsigned` instead.
+
+Follow the [package builder guide](docs/MAI_STUDIO_USER_GUIDE.md#build-a-linux-deployment-package)
+for server age setup, verification, and installation. The installer requires a
+new target and does not replace an existing `/opt/maiservice`. For a privileged
+install, transfer ownership to the dedicated service user before starting PM2 as
+that user. Configuration is decrypted with server-local `AGE_IDENTITY` and stored
+with mode `0600`. Packages include their own `ecosystem.config.js`; the manual
+PM2 example below is an alternative for directly built binaries.
 
 ## Deploy on Linux with PM2
 
