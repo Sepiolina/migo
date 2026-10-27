@@ -20,3 +20,5 @@ node_modules/
 /maiservice
 /maiservice.exe
 /dist/
+.studio/packages/
+scripts/__pycache__/

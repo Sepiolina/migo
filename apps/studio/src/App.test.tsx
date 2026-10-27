@@ -235,3 +235,67 @@ describe("optional Excel workspace", () => {
     expect(native.invoke).not.toHaveBeenCalled();
   });
 });
+
+it("opens the separate package dialog and blocks native window close during a build", async () => {
+  const baseInvoke = native.invoke.getMockImplementation()!;
+  let resolveBuild: (result: unknown) => void = () => {};
+  native.invoke.mockImplementation(
+    (command: string, args?: { source?: string }) => {
+      if (command === "get_signing_identity")
+        return Promise.resolve({ available: false });
+      if (command === "build_linux_package")
+        return new Promise((resolve) => {
+          resolveBuild = resolve;
+        });
+      return baseInvoke(command, args);
+    },
+  );
+  const user = userEvent.setup();
+  render(<App />);
+  expect(
+    (
+      screen.getByRole("button", {
+        name: "Build Linux package",
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(true);
+  await user.click(screen.getByRole("button", { name: "Project & inputs" }));
+  await user.click(screen.getByRole("button", { name: /Open workspace/ }));
+  await user.click(screen.getByRole("button", { name: "Build Linux package" }));
+  await screen.findByText("No signing identity");
+  expect(
+    screen.getByRole("dialog", { name: "Build Linux package" }),
+  ).toBeTruthy();
+  await user.click(screen.getByRole("radio", { name: /Trusted local/ }));
+  await user.click(screen.getByRole("button", { name: "Build ZIP package" }));
+  const preventDefault = vi.fn();
+  act(() => native.closeRequested!({ preventDefault }));
+  expect(preventDefault).toHaveBeenCalledOnce();
+  expect(native.destroy).not.toHaveBeenCalled();
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  await act(async () =>
+    resolveBuild({
+      path: "dist/test.zip",
+      sha256: "abc",
+      arch: "amd64",
+      mode: "trusted",
+      files: [],
+      validation: { runtimeTested: false },
+    }),
+  );
+  await screen.findByText("Package created");
+  await user.click(
+    screen.getByRole("button", { name: "Close package builder" }),
+  );
+  await user.click(screen.getByRole("button", { name: "YAML source" }));
+  fireEvent.change(screen.getByLabelText("Workflow YAML source"), {
+    target: { value: "# unsaved" },
+  });
+  expect(
+    (
+      screen.getByRole("button", {
+        name: "Build Linux package",
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(true);
+});

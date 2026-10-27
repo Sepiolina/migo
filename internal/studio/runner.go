@@ -17,6 +17,7 @@ import (
 	"strings"
 
 	"github.com/xuri/excelize/v2"
+	"miservice/internal/deploy"
 	"miservice/internal/sheet"
 	"miservice/internal/workflow"
 )
@@ -32,6 +33,7 @@ type Request struct {
 	Params  Params `json:"params"`
 }
 type Params struct {
+	Build     deploy.Options    `json:"build"`
 	Workspace string            `json:"workspace"`
 	YAML      string            `json:"yaml"`
 	Path      string            `json:"path"`
@@ -115,7 +117,7 @@ func execute(ctx context.Context, req Request) (any, error) {
 	p := req.Params
 	switch req.Command {
 	case "capabilities":
-		return map[string]any{"version": Version, "commands": []string{"capabilities", "validate", "inspectWorkbook", "run"}, "offlineOnly": true, "maxFrameBytes": MaxFrameBytes}, nil
+		return map[string]any{"version": Version, "commands": []string{"capabilities", "validate", "inspectWorkbook", "run", "buildPackage"}, "offlineOnly": true, "maxFrameBytes": MaxFrameBytes}, nil
 	case "validate":
 		wf, err := workflow.Parse([]byte(p.YAML))
 		if err != nil {
@@ -137,6 +139,8 @@ func execute(ctx context.Context, req Request) (any, error) {
 		return inspect(path, p)
 	case "run":
 		return run(ctx, p)
+	case "buildPackage":
+		return deploy.Build(ctx, p.Workspace, p.Build)
 	default:
 		return nil, fmt.Errorf("Unknown command %q", req.Command)
 	}

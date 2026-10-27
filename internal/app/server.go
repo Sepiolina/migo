@@ -5,12 +5,21 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"time"
 )
 
 // Run serves until ctx is cancelled, then shuts down gracefully.
 func (a *App) Run(ctx context.Context) error {
-	ln, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", a.cfg.Port))
+	var ln net.Listener
+	var err error
+	if os.Getenv("MAISERVICE_LISTEN_FD") == "3" {
+		f := os.NewFile(3, "inherited-listener")
+		ln, err = net.FileListener(f)
+		f.Close()
+	} else {
+		ln, err = net.Listen("tcp", fmt.Sprintf("0.0.0.0:%d", a.cfg.Port))
+	}
 	if err != nil {
 		a.closeModules()
 		return err

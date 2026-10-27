@@ -1,6 +1,10 @@
 use mai_studio_workspace as workflows;
 
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+use ed25519_dalek::SigningKey;
+use serde::Serialize;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::{
     path::{Path, PathBuf},
     process::Stdio,
@@ -13,16 +17,21 @@ use tokio::{
     process::Command,
     time::{timeout, Duration},
 };
+use zeroize::Zeroize;
 
 struct Workspace {
     root: Mutex<Option<PathBuf>>,
     slots: tokio::sync::Semaphore,
+    build_slot: tokio::sync::Semaphore,
+    identity_lock: Mutex<()>,
 }
 impl Default for Workspace {
     fn default() -> Self {
         Self {
             root: Mutex::new(None),
             slots: tokio::sync::Semaphore::new(2),
+            build_slot: tokio::sync::Semaphore::new(1),
+            identity_lock: Mutex::new(()),
         }
     }
 }
@@ -183,6 +192,19 @@ async fn runner_request(
         .map_err(|_| "Workspace lock failed")?
         .clone();
     authorize(&mut request, root.as_deref())?;
+    invoke_runner(
+        request,
+        Duration::from_secs(120),
+        "Run exceeded the 120-second desktop limit",
+    )
+    .await
+}
+
+async fn invoke_runner(
+    mut request: Value,
+    limit: Duration,
+    timeout_message: &str,
+) -> Result<Value, String> {
     let mut bytes = serde_json::to_vec(&request).map_err(|_| "Invalid request")?;
     if bytes.len() > 1024 * 1024 {
         return Err("Request exceeds 1 MiB".into());
@@ -200,8 +222,17 @@ async fn runner_request(
         .write_all(&bytes)
         .await
         .map_err(|_| "Cannot send runner request")?;
+    bytes.zeroize();
+    if let Some(build) = request
+        .pointer_mut("/params/build")
+        .and_then(Value::as_object_mut)
+    {
+        if let Some(Value::String(mut secret)) = build.remove("signingKey") {
+            secret.zeroize();
+        }
+    }
     drop(stdin); // One request per process; EOF lets the runner exit cleanly.
-    let output = timeout(Duration::from_secs(120), async {
+    let output = timeout(limit, async {
         let stdout = child.stdout.take().ok_or("Cannot open runner output")?;
         let mut output = Vec::new();
         stdout
@@ -219,13 +250,212 @@ async fn runner_request(
         Ok(output)
     })
     .await
-    .map_err(|_| "Run exceeded the 120-second desktop limit")??;
+    .map_err(|_| timeout_message)??;
     let response: Value = serde_json::from_slice(&output).map_err(|_| "Invalid runner response")?;
     if response.get("version") != request.get("version") || response.get("id") != request.get("id")
     {
         return Err("Runner response identity mismatch".into());
     }
     Ok(response)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SigningIdentity {
+    available: bool,
+    public_key: Option<String>,
+    fingerprint: Option<String>,
+}
+
+fn credential() -> Result<keyring::Entry, String> {
+    // Explicit backends are configured in Cargo.toml; unsupported targets must
+    // never fall back to keyring's in-memory mock implementation.
+    if !cfg!(any(
+        target_os = "linux",
+        target_os = "macos",
+        target_os = "windows"
+    )) {
+        return Err(
+            "Secure signing is unavailable on this platform; use trusted mode explicitly".into(),
+        );
+    }
+    keyring::Entry::new("org.mai.studio", "linux-package-signing-v1")
+        .map_err(|_| "Cannot access the OS credential store; unlock or configure it, or use trusted mode explicitly".into())
+}
+
+fn load_signing_key() -> Result<Option<SigningKey>, String> {
+    let mut secret = match credential()?.get_secret() {
+        Ok(secret) => secret,
+        Err(keyring::Error::NoEntry) => return Ok(None),
+        Err(_) => return Err("Cannot access the OS credential store; unlock or configure it, or use trusted mode explicitly".into()),
+    };
+    let key = <[u8; 32]>::try_from(secret.as_slice()).map(|bytes| SigningKey::from_bytes(&bytes));
+    secret.zeroize();
+    key.map(Some).map_err(|_| {
+        "The stored signing identity is invalid; repair the OS credential store".into()
+    })
+}
+
+fn identity(key: Option<&SigningKey>) -> SigningIdentity {
+    match key {
+        Some(key) => {
+            let public = key.verifying_key().to_bytes();
+            SigningIdentity {
+                available: true,
+                public_key: Some(STANDARD.encode(public)),
+                fingerprint: Some(format!("{:x}", Sha256::digest(public))),
+            }
+        }
+        None => SigningIdentity {
+            available: false,
+            public_key: None,
+            fingerprint: None,
+        },
+    }
+}
+
+#[tauri::command]
+fn get_signing_identity(workspace: State<'_, Workspace>) -> Result<SigningIdentity, String> {
+    let _guard = workspace
+        .identity_lock
+        .lock()
+        .map_err(|_| "Signing identity lock failed")?;
+    Ok(identity(load_signing_key()?.as_ref()))
+}
+
+#[tauri::command]
+fn create_signing_identity(workspace: State<'_, Workspace>) -> Result<SigningIdentity, String> {
+    let _guard = workspace
+        .identity_lock
+        .lock()
+        .map_err(|_| "Signing identity lock failed")?;
+    if let Some(key) = load_signing_key()? {
+        return Ok(identity(Some(&key)));
+    }
+    let key = SigningKey::generate(&mut rand_core::OsRng);
+    let mut secret = key.to_bytes();
+    let result = credential()?.set_secret(&secret);
+    secret.zeroize();
+    result.map_err(|_| "Cannot save the signing identity in the OS credential store; unlock or configure it, or use trusted mode explicitly")?;
+    // Read back to ensure the store persisted the identity before reporting success.
+    let stored =
+        load_signing_key()?.ok_or("OS credential store did not retain the signing identity")?;
+    if stored.verifying_key() != key.verifying_key() {
+        return Err("OS credential store returned a different signing identity".into());
+    }
+    Ok(identity(Some(&stored)))
+}
+
+fn check_build_path(root: &Path, value: &Value) -> Result<(), String> {
+    let path = Path::new(value.as_str().ok_or("Build paths must be strings")?);
+    if path.as_os_str().is_empty()
+        || path
+            .components()
+            .any(|part| !matches!(part, std::path::Component::Normal(_)))
+    {
+        return Err("Use workspace-relative build paths without traversal".into());
+    }
+    let resolved = root
+        .join(path)
+        .canonicalize()
+        .map_err(|_| "Build input file does not exist")?;
+    if !resolved.starts_with(root) || !resolved.is_file() {
+        return Err("Build input must be a file inside the selected workspace".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn build_linux_package(
+    mut profile: Value,
+    workspace: State<'_, Workspace>,
+) -> Result<Value, String> {
+    let _slot = workspace
+        .build_slot
+        .try_acquire()
+        .map_err(|_| "A package build is already running")?;
+    let root = workspace
+        .root
+        .lock()
+        .map_err(|_| "Workspace lock failed")?
+        .clone()
+        .ok_or("Choose a workspace first")?;
+    let build = profile.as_object_mut().ok_or("Invalid build profile")?;
+    // Strictly whitelist the frontend profile; credentials and runner controls are native-only.
+    let allowed = [
+        "arch",
+        "configPath",
+        "workflows",
+        "installDir",
+        "serviceName",
+        "port",
+        "memoryMB",
+        "goMemoryMB",
+        "mode",
+        "recipient",
+    ];
+    if build.keys().any(|key| !allowed.contains(&key.as_str())) {
+        return Err("Unexpected build profile field".into());
+    }
+    check_build_path(
+        &root,
+        build
+            .get("configPath")
+            .ok_or("Choose a configuration file")?,
+    )?;
+    let paths = build
+        .get("workflows")
+        .and_then(Value::as_array)
+        .ok_or("Choose workflows")?;
+    for path in paths {
+        check_build_path(&root, path)?;
+    }
+    let mode = build
+        .get("mode")
+        .and_then(Value::as_str)
+        .unwrap_or("secure");
+    let mut encoded_secret = None;
+    match mode {
+        "secure" => {
+            let key = load_signing_key()?.ok_or("Create a signing identity in the OS credential store before building a secure package")?;
+            let mut private = key.to_keypair_bytes();
+            let encoded = STANDARD.encode(private);
+            private.zeroize();
+            build.insert("mode".into(), json!("secure"));
+            build.insert("signingKey".into(), json!(encoded));
+            encoded_secret = Some(encoded);
+        }
+        "trusted" => (),
+        _ => return Err("Choose secure or trusted package mode".into()),
+    }
+    let request = json!({"version": 1, "id": "build-linux-package", "command": "buildPackage", "params": {"workspace": root, "build": profile}});
+    let response = invoke_runner(
+        request,
+        Duration::from_secs(15 * 60),
+        "Package build exceeded the 15-minute desktop limit",
+    )
+    .await?;
+    // Never relay a credential if the sidecar includes request data in its response.
+    let mut serialized = serde_json::to_string(&response).map_err(|_| "Invalid runner response")?;
+    if let Some(mut secret) = encoded_secret {
+        serialized = serialized.replace(&secret, "[redacted]");
+        secret.zeroize();
+    }
+    let response: Value =
+        serde_json::from_str(&serialized).map_err(|_| "Invalid runner response")?;
+    if response.get("ok").and_then(Value::as_bool) == Some(true) {
+        response
+            .get("result")
+            .cloned()
+            .ok_or_else(|| "Runner returned no package result".into())
+    } else {
+        Err(response
+            .get("error")
+            .and_then(|error| error.get("message"))
+            .and_then(Value::as_str)
+            .unwrap_or("Package build failed")
+            .to_string())
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -238,7 +468,10 @@ pub fn run() {
             runner_request,
             list_workflows,
             read_workflow,
-            save_workflow
+            save_workflow,
+            get_signing_identity,
+            create_signing_identity,
+            build_linux_package
         ])
         .run(tauri::generate_context!())
         .expect("failed to start Mai Studio");
@@ -247,6 +480,75 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_credential_store_round_trip() {
+        struct Cleanup(keyring::Entry);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = self.0.delete_credential();
+            }
+        }
+        let unique = format!(
+            "test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock before epoch")
+                .as_nanos()
+        );
+        let service = "org.mai.studio.tests";
+        let entry = keyring::Entry::new(service, &unique)
+            .expect("Windows Credential Manager entry unavailable");
+        let _cleanup = Cleanup(entry);
+        let secret = b"synthetic-credential-store-round-trip";
+        _cleanup
+            .0
+            .set_secret(secret)
+            .expect("Windows Credential Manager failed to store test credential");
+        let fresh = keyring::Entry::new(service, &unique)
+            .expect("Windows Credential Manager entry unavailable on reopen");
+        assert_eq!(
+            fresh
+                .get_secret()
+                .expect("Windows Credential Manager failed to retrieve test credential"),
+            secret
+        );
+    }
+
+    #[test]
+    fn signing_identity_uses_go_ed25519_keypair_format() {
+        use ed25519_dalek::{Signer, Verifier};
+        let key = SigningKey::from_bytes(&[7; 32]);
+        let pair = key.to_keypair_bytes();
+        assert_eq!(&pair[..32], &key.to_bytes());
+        assert_eq!(&pair[32..], &key.verifying_key().to_bytes());
+        let public = identity(Some(&key));
+        assert_eq!(public.public_key.unwrap(), STANDARD.encode(&pair[32..]));
+        assert_eq!(
+            public.fingerprint.unwrap(),
+            format!("{:x}", Sha256::digest(&pair[32..]))
+        );
+        key.verifying_key()
+            .verify(b"package", &key.sign(b"package"))
+            .unwrap();
+        assert!(!identity(None).available);
+    }
+
+    #[test]
+    fn build_inputs_are_scoped_to_selected_workspace() {
+        let root = tempfile::tempdir().unwrap();
+        let canonical_root = root.path().canonicalize().unwrap();
+        std::fs::write(root.path().join("config.yaml"), b"config").unwrap();
+        assert!(check_build_path(&canonical_root, &json!("config.yaml")).is_ok());
+        assert!(check_build_path(&canonical_root, &json!("../config.yaml")).is_err());
+        assert!(check_build_path(&canonical_root, &json!("/etc/passwd")).is_err());
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink("/etc/passwd", root.path().join("link")).unwrap();
+            assert!(check_build_path(&canonical_root, &json!("link")).is_err());
+        }
+    }
     #[test]
     fn rejects_paths_outside_workspace() {
         let root = std::env::temp_dir().join(format!("mai-host-test-{}", std::process::id()));

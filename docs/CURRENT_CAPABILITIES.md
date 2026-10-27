@@ -1,15 +1,15 @@
 # Current capabilities
 
-This describes the implementation on `main` as of **27 October 2026**, after the
-editor redesign in PR #13. The [implementation plan](MAI_DEV_TOOL_IMPLEMENTATION_PLAN.md)
+This describes the implementation including the Linux package builder milestone
+as of **27 October 2026**. The [implementation plan](MAI_DEV_TOOL_IMPLEMENTATION_PLAN.md)
 describes the broader roadmap; features in that plan are not all available yet.
 
 ## What you can do today
 
 Use **Mai Studio** to open a local workspace, create or edit a YAML workflow,
 configure common steps through forms, validate it, run it against Excel fixtures,
-and inspect the generated workbook. Use **MaiService** to serve workflows over
-HTTP, including configured SQL Server and REST/SAP enrichment. Use **migo** to
+inspect the generated workbook, and build a Linux deployment ZIP. Use
+**MaiService** to serve workflows over HTTP, including configured SQL Server and REST/SAP enrichment. Use **migo** to
 execute a workflow from the command line without starting a server.
 
 | Component | Purpose | Current execution mode |
@@ -165,23 +165,52 @@ should use the appropriate trusted network/gateway controls.
 
 ## Packaging and platform status
 
+**Build Linux package** creates `.studio/packages/package-*/mai.zip` from saved
+configuration, selected workflow overrides, and a complete trusted MaiService
+source checkout. Go is required on the build computer; missing dependencies are
+downloaded automatically through the Go module proxy and checksum database.
+Choose amd64/arm64, a relative `config.json`, new `/opt` target, service name,
+port, and memory settings. Selected overrides add or replace workflows; embedded
+built-in routes remain active.
+
+- **Secure** signs the inventory with Ed25519 and encrypts configuration to the
+  Linux machine's age public recipient. The native host keeps the signing identity
+  in the OS credential store; the UI exposes only the public key and fingerprint.
+- **Trusted local** is explicitly unsigned and includes plaintext configuration.
+- Profiles save public settings in workspace-scoped localStorage. There is no
+  signing-key export, recovery, backup, or rotation UI.
+- Results show file inventory, hash, architecture, mode, and actual validation
+  status. ELF checks do not imply runtime testing; a local health check is
+  conditional on a matching Linux host and recognized server implementation.
+- The independent `scripts/verify-mai-package.py` requires Python 3 and OpenSSL.
+  It checks the signature against an independently trusted public key and verifies
+  the complete payload inventory before extraction. Do not execute ZIP scripts
+  before this check. Unsigned verification requires explicit `--allow-unsigned`
+  and establishes integrity only.
+- The installer requires a new target, stages installation, decrypts with a
+  server-local age identity, and protects plaintext config with mode `0600`.
+  After privileged installation, assign ownership to the dedicated service user
+  and run PM2 as that user. In-place upgrades and remote deployment are absent.
+
+See the [package builder guide](MAI_STUDIO_USER_GUIDE.md#build-a-linux-deployment-package)
+for the one-time prerequisites and full verification/install commands.
+
 | Area | Current status |
 | --- | --- |
-| Windows desktop development | Source-based Tauri development commands documented; Windows frontend/watcher tests and build run in CI |
-| Windows desktop installer | Local Tauri build command documented; installer operation and signed distribution are not covered by the current Windows CI job |
-| Linux desktop native host | Compiled and tested in CI with GTK/WebKit prerequisites |
+| Windows desktop development | Source-based Tauri commands; frontend and watcher CI, plus native compilation/tests configured for this milestone |
+| Windows desktop installer | Local Tauri build command documented; installer operation and signed distribution require separate validation |
+| Linux desktop native host | Native compilation/tests configured with GTK/WebKit prerequisites |
+| OS signing credential store | Native backends configured; headless CI does not validate interactive key storage/unlocking |
 | macOS desktop release | No validated release/distribution workflow documented yet |
-| Windows/Linux service binaries | Built directly with Go; Linux target can be cross-built from Windows |
-| PM2 deployment | Manual setup and complete configuration example documented |
-| One-click Linux `mai.zip` build | Planned; disabled/planned UI entry only |
-| UI-managed signing and config encryption | Planned; no production signing/encryption wizard implemented yet |
+| Windows/Linux service binaries | Go builds; Linux amd64/arm64 package cross-builds supported |
+| PM2 deployment | Generated single-instance ecosystem config and new-target installation; manual server provisioning/startup |
+| One-click Linux `mai.zip` build | Implemented; secure and trusted-local modes |
+| Signing and config encryption | Native OS-store Ed25519 signing and age recipient encryption; key lifecycle UI remains future work |
 
-A successful frontend build alone does not prove a desktop installer or a live
-server deployment works. The latest editor milestone passed 43 frontend tests,
-Windows frontend CI, Linux native CI, and Go checks. Browser interactions were
-also checked for guided editing, node insertion, and panel controls. These are
-validation results for that milestone, not a guarantee for every platform or
-company integration.
+Frontend, Go builder, native bridge, and independent-verifier checks cover
+different layers. A successful build or headless test does not prove installer
+operation, OS credential-store access, target-architecture runtime behavior, or
+live company integrations. Test those on the intended desktop and Linux server.
 
 ## Where to go next
 
