@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { createServer, loadConfigFromFile } from 'vite';
@@ -43,7 +43,7 @@ try {
   await writeFile(native, 'new native output');
   await writeFile(frontend, 'export const value = 2;');
   const changed = Date.now() + 5000;
-  while (!events.includes(frontend)) {
+  while (!events.some(path => normalize(path) === normalize(frontend))) {
     assert.ok(Date.now() < changed, 'Frontend edits did not reach the watcher');
     await delay(25);
   }

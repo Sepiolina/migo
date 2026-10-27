@@ -52,3 +52,22 @@ jobs:
         working-directory: apps/studio/src-tauri
       - run: cargo test --locked
         working-directory: apps/studio/src-tauri
+
+  watcher-windows:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/studio/package-lock.json
+      - run: npm ci
+        working-directory: apps/studio
+      - run: node scripts/smoke-watcher.mjs
+        working-directory: apps/studio
+      - run: npm test
+        working-directory: apps/studio
+      - run: npm run build
+        working-directory: apps/studio
