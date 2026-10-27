@@ -1,9 +1,12 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { ReactFlow, Background, Controls, MiniMap } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import "./style.css";
 import { example, projectWorkflow } from "./model";
+import { changeSteps, topLevelCount } from "./authoring";
+import { useDocument } from "./useDocument";
+import { StepInspector } from "./StepInspector";
 import {
   isDesktop,
   request,
@@ -12,8 +15,16 @@ import {
   type RunResult,
 } from "./api";
 export default function App() {
-  const [source, setSource] = useState(example),
-    [workspace, setWorkspace] = useState(""),
+  const document = useDocument(example);
+  const { source, setSource } = document;
+  const [selected, setSelected] = useState<string>();
+  const [workflowPaths, setWorkflowPaths] = useState<string[]>([]);
+  const [workflowPath, setWorkflowPath] = useState("");
+  const [openPath, setOpenPath] = useState("examples/parts-summary.yaml");
+  const [savePath, setSavePath] = useState("workflows/summary.yaml");
+  const [revision, setRevision] = useState<string | null>(null);
+  const [pendingDiscard, setPendingDiscard] = useState<() => void>();
+  const [workspace, setWorkspace] = useState(""),
     [tab, setTab] = useState("graph");
   const [validation, setValidation] = useState<Validation>(),
     [bindings, setBindings] = useState<Record<string, string>>({
@@ -53,6 +64,15 @@ export default function App() {
         return;
       }
       setWorkspace(selected.path);
+      document.load(example);
+      setWorkflowPath("");
+      setRevision(null);
+      setWorkflowPaths([]);
+      setValidation(undefined);
+      setValidatedSource("");
+      setSelected(undefined);
+      const listing = await invoke<{ paths: string[] }>("list_workflows");
+      setWorkflowPaths(listing.paths);
       setArtifact(undefined);
       setInspection(undefined);
       setMessage(
@@ -60,6 +80,111 @@ export default function App() {
       );
     });
   }
+  function discardGuard(action: () => void) {
+    if (document.dirty) setPendingDiscard(() => action);
+    else action();
+  }
+  async function loadWorkflow(path: string) {
+    if (!path) return;
+    await task("Loading workflow", async () => {
+      const loaded = await invoke<{
+        path: string;
+        source: string;
+        revision: string;
+      }>("read_workflow", { path });
+      document.load(loaded.source);
+      setWorkflowPath(loaded.path);
+      setSavePath(loaded.path);
+      setRevision(loaded.revision);
+      setSelected(undefined);
+      setValidation(undefined);
+      setValidatedSource("");
+      setMessage(`Loaded ${loaded.path}.`);
+    });
+  }
+  async function saveWorkflow() {
+    await task("Saving workflow", async () => {
+      const saved = await invoke<{
+        path: string;
+        source: string;
+        revision: string;
+      }>("save_workflow", {
+        path: savePath,
+        source,
+        expectedRevision: savePath === workflowPath ? revision : null,
+      });
+      document.markSaved(saved.source);
+      setWorkflowPath(saved.path);
+      setSavePath(saved.path);
+      setRevision(saved.revision);
+      setWorkflowPaths((paths) =>
+        Array.from(new Set([...paths, saved.path])).sort(),
+      );
+      setMessage(`Saved ${saved.path}.`);
+    });
+  }
+  const count = topLevelCount(source);
+  const selectedIndex =
+    selected && /^step\.\d+$/.test(selected)
+      ? Number(selected.split(".")[1])
+      : undefined;
+  function mutateSteps(action: "add" | "delete" | "up" | "down") {
+    try {
+      setSource(changeSteps(source, action, selectedIndex));
+      if (action === "add") setSelected(`step.${count}`);
+      else if (action === "delete") setSelected(undefined);
+      else if (selectedIndex !== undefined)
+        setSelected(`step.${selectedIndex + (action === "up" ? -1 : 1)}`);
+    } catch (e) {
+      setError(true);
+      setMessage(String(e));
+    }
+  }
+  useEffect(() => {
+    const keyboard = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement;
+      const typing =
+        ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName) ||
+        target.isContentEditable;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        if (isDesktop() && workspace && !busy && savePath) void saveWorkflow();
+      } else if (
+        !typing &&
+        !busy &&
+        (event.ctrlKey || event.metaKey) &&
+        ["z", "y"].includes(event.key.toLowerCase())
+      ) {
+        event.preventDefault();
+        if (event.key.toLowerCase() === "y" || event.shiftKey) document.redo();
+        else document.undo();
+      } else if (!typing && !busy && event.altKey && event.key === "Insert") {
+        event.preventDefault();
+        mutateSteps("add");
+      } else if (!typing && !busy && selectedIndex !== undefined) {
+        if (event.key === "Delete" || event.key === "Backspace") {
+          event.preventDefault();
+          mutateSteps("delete");
+        } else if (
+          event.altKey &&
+          event.key === "ArrowUp" &&
+          selectedIndex > 0
+        ) {
+          event.preventDefault();
+          mutateSteps("up");
+        } else if (
+          event.altKey &&
+          event.key === "ArrowDown" &&
+          selectedIndex < count - 1
+        ) {
+          event.preventDefault();
+          mutateSteps("down");
+        }
+      }
+    };
+    window.addEventListener("keydown", keyboard);
+    return () => window.removeEventListener("keydown", keyboard);
+  });
   async function validate() {
     await task("Validating", async () => {
       const result = await request<Validation>("validate", {
@@ -140,11 +265,59 @@ export default function App() {
           <button
             className="folder"
             disabled={!isDesktop() || !!busy}
-            onClick={choose}
+            onClick={() => discardGuard(() => void choose())}
           >
             ▣ {workspace ? "Change workspace" : "Open workspace"}
           </button>
           <p className="path">{workspace || "Choose a local project folder"}</p>
+          <hr />
+          <div className="eyebrow">WORKFLOWS</div>
+          <select
+            aria-label="Open workflow"
+            disabled={!ready}
+            value={workflowPath}
+            onChange={(event) => {
+              const path = event.target.value;
+              discardGuard(() => void loadWorkflow(path));
+            }}
+          >
+            <option value="">Open a workflow…</option>
+            {workflowPaths.map((path) => (
+              <option key={path} value={path}>
+                {path}
+              </option>
+            ))}
+          </select>
+          <p className="hint">
+            Browse workflows/ or open a workspace-relative YAML path.
+          </p>
+          <label>
+            Open path
+            <input
+              aria-label="Workflow open path"
+              disabled={!!busy}
+              value={openPath}
+              onChange={(event) => setOpenPath(event.target.value)}
+            />
+          </label>
+          <button
+            disabled={!ready || !openPath.trim()}
+            onClick={() => discardGuard(() => void loadWorkflow(openPath))}
+          >
+            Open workflow path
+          </button>
+          <label>
+            Save path
+            <input
+              aria-label="Workflow save path"
+              disabled={!!busy}
+              value={savePath}
+              onChange={(event) => setSavePath(event.target.value)}
+            />
+          </label>
+          <button disabled={!ready || !savePath.trim()} onClick={saveWorkflow}>
+            Save workflow{document.dirty ? " •" : ""}
+          </button>
           <hr />
           <div className="eyebrow">INPUT FILES</div>
           <p className="hint">
@@ -186,7 +359,10 @@ export default function App() {
         </aside>
         <section className="workspace">
           <div className="documentbar">
-            <strong>◇ {validation?.name ?? "Parts summary"}</strong>
+            <strong>
+              ◇ {workflowPath || validation?.name || "Untitled workflow"}
+              {document.dirty ? " • Unsaved" : ""}
+            </strong>
             <span className="state">
               {validatedSource === source
                 ? "✓ Validated"
@@ -208,34 +384,99 @@ export default function App() {
             </button>
             <span>Ordered execution · {graph.nodes.length} steps</span>
           </nav>
+          <div className="authoring-toolbar">
+            <button
+              disabled={!document.canUndo || !!busy}
+              onClick={document.undo}
+              title="Ctrl/Cmd+Z outside text fields"
+            >
+              Undo
+            </button>
+            <button
+              disabled={!document.canRedo || !!busy}
+              onClick={document.redo}
+              title="Ctrl/Cmd+Shift+Z outside text fields"
+            >
+              Redo
+            </button>
+            <button
+              disabled={!!graph.error || !!busy}
+              onClick={() => mutateSteps("add")}
+              title="Alt+Insert"
+            >
+              Add step
+            </button>
+            <button
+              disabled={
+                selectedIndex === undefined || selectedIndex === 0 || !!busy
+              }
+              onClick={() => mutateSteps("up")}
+              title="Alt+↑"
+            >
+              Move up
+            </button>
+            <button
+              disabled={
+                selectedIndex === undefined ||
+                selectedIndex >= count - 1 ||
+                !!busy
+              }
+              onClick={() => mutateSteps("down")}
+              title="Alt+↓"
+            >
+              Move down
+            </button>
+            <button
+              disabled={selectedIndex === undefined || !!busy}
+              onClick={() => mutateSteps("delete")}
+              title="Delete"
+            >
+              Delete step
+            </button>
+          </div>
           <div className="editor">
             {tab === "graph" ? (
-              <>
-                <ReactFlow
-                  nodes={graph.nodes}
-                  edges={graph.edges}
-                  fitView
-                  nodesConnectable={false}
-                  nodesDraggable={false}
-                  edgesReconnectable={false}
-                  minZoom={0.2}
-                >
-                  <Background gap={22} color="#d9e0e8" />
-                  <Controls />
-                  <MiniMap />
-                </ReactFlow>
-                <div className="canvas-note">
-                  Edit YAML to change execution · Branches preserve engine order
-                </div>
-                {graph.error && (
-                  <div role="alert" className="graph-error">
-                    {graph.error}
-                    <button onClick={() => setTab("source")}>
-                      Fix in YAML
-                    </button>
+              <div className="canvas-layout">
+                <div className="canvas">
+                  <ReactFlow
+                    nodes={graph.nodes.map((node) => ({
+                      ...node,
+                      selected: node.id === selected,
+                    }))}
+                    onNodeClick={(_, node) => setSelected(node.id)}
+                    onPaneClick={() => setSelected(undefined)}
+                    deleteKeyCode={null}
+                    edges={graph.edges}
+                    fitView
+                    nodesConnectable={false}
+                    nodesDraggable={false}
+                    edgesReconnectable={false}
+                    minZoom={0.2}
+                  >
+                    <Background gap={22} color="#d9e0e8" />
+                    <Controls />
+                    <MiniMap />
+                  </ReactFlow>
+                  <div className="canvas-note">
+                    Select a step to edit · Ordered execution
                   </div>
-                )}
-              </>
+                  {graph.error && (
+                    <div role="alert" className="graph-error">
+                      {graph.error}
+                      <button onClick={() => setTab("source")}>
+                        Fix in YAML
+                      </button>
+                    </div>
+                  )}
+                </div>
+                <StepInspector
+                  disabled={!!busy}
+                  source={source}
+                  selected={selected}
+                  onChange={setSource}
+                  onSource={() => setTab("source")}
+                />
+              </div>
             ) : (
               <div className="source-editor">
                 <div className="source-help">
@@ -244,6 +485,7 @@ export default function App() {
                 <textarea
                   aria-label="Workflow YAML source"
                   spellCheck={false}
+                  disabled={!!busy}
                   value={source}
                   onChange={(e) => setSource(e.target.value)}
                 />
@@ -369,6 +611,31 @@ export default function App() {
           </section>
         </section>
       </main>
+      {pendingDiscard && (
+        <div className="dialog-backdrop">
+          <section
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="discard-title"
+            className="discard-dialog"
+          >
+            <h2 id="discard-title">Discard unsaved workflow changes?</h2>
+            <p>Save your workflow first to keep these edits.</p>
+            <button autoFocus onClick={() => setPendingDiscard(undefined)}>
+              Keep editing
+            </button>
+            <button
+              onClick={() => {
+                const action = pendingDiscard;
+                setPendingDiscard(undefined);
+                action();
+              }}
+            >
+              Discard changes and continue
+            </button>
+          </section>
+        </div>
+      )}
       <footer role="status" aria-live="polite" className={error ? "error" : ""}>
         <span>{busy ? `${busy}…` : message}</span>
         <span>Mai Studio · 0.1</span>

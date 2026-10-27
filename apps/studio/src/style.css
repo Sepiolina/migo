@@ -479,3 +479,83 @@ footer.error {
     height: 270px;
   }
 }
+.authoring-toolbar {
+  display: flex;
+  gap: 6px;
+  padding: 7px 16px;
+  background: white;
+  flex-wrap: wrap;
+  border-bottom: 1px solid #dfe5ed;
+}
+.authoring-toolbar button {
+  padding: 5px 9px;
+  font-size: 11px;
+}
+.canvas-layout {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+.canvas {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.step-inspector {
+  width: 265px;
+  flex-shrink: 0;
+  padding: 16px;
+  overflow: auto;
+  border-left: 1px solid #dfe5ed;
+  background: #fafbfd;
+}
+.step-inspector textarea {
+  display: block;
+  width: 100%;
+  min-height: 105px;
+  padding: 8px;
+  margin-top: 8px;
+  border: 1px solid #d9e1e9;
+  border-radius: 5px;
+  font-family: ui-monospace, monospace;
+  resize: vertical;
+}
+.step-inspector .hint {
+  margin-top: 12px;
+}
+.inline-error {
+  color: #ac4040;
+  overflow-wrap: anywhere;
+}
+.react-flow__node-default.selected {
+  border-color: #225bdf;
+  box-shadow: 0 0 0 2px #225bdf33;
+}
+aside select {
+  max-width: 100%;
+  padding: 8px;
+  border: 1px solid #d9e1e9;
+  border-radius: 5px;
+  margin-bottom: 8px;
+}
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  background: #25354b66;
+  display: grid;
+  place-items: center;
+  z-index: 1000;
+}
+.discard-dialog {
+  background: white;
+  padding: 24px;
+  border-radius: 10px;
+  max-width: 460px;
+  box-shadow: 0 8px 40px #25354b44;
+}
+.discard-dialog h2 {
+  font-size: 18px;
+}
+.discard-dialog button {
+  margin: 8px 8px 0 0;
+}

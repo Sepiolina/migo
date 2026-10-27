@@ -1,3 +1,5 @@
+use mai_studio_workspace as workflows;
+
 use serde_json::{json, Value};
 use std::{
     path::{Path, PathBuf},
@@ -103,6 +105,37 @@ fn authorize(request: &mut Value, root: Option<&Path>) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn list_workflows(workspace: State<'_, Workspace>) -> Result<workflows::WorkflowList, String> {
+    let root = workspace.root.lock().map_err(|_| "Workspace lock failed")?;
+    workflows::list(root.as_deref().ok_or("Choose a workspace first")?)
+}
+
+#[tauri::command]
+fn read_workflow(
+    path: String,
+    workspace: State<'_, Workspace>,
+) -> Result<workflows::Workflow, String> {
+    let root = workspace.root.lock().map_err(|_| "Workspace lock failed")?;
+    workflows::read(root.as_deref().ok_or("Choose a workspace first")?, &path)
+}
+
+#[tauri::command]
+fn save_workflow(
+    path: String,
+    source: String,
+    expected_revision: Option<String>,
+    workspace: State<'_, Workspace>,
+) -> Result<workflows::Workflow, String> {
+    let root = workspace.root.lock().map_err(|_| "Workspace lock failed")?;
+    workflows::save(
+        root.as_deref().ok_or("Choose a workspace first")?,
+        &path,
+        &source,
+        expected_revision.as_deref(),
+    )
+}
+
 fn runner_path() -> Result<PathBuf, String> {
     // Release bundles place the sidecar beside the desktop executable.
     let name = if cfg!(windows) {
@@ -200,7 +233,13 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(Workspace::default())
-        .invoke_handler(tauri::generate_handler![choose_workspace, runner_request])
+        .invoke_handler(tauri::generate_handler![
+            choose_workspace,
+            runner_request,
+            list_workflows,
+            read_workflow,
+            save_workflow
+        ])
         .run(tauri::generate_context!())
         .expect("failed to start Mai Studio");
 }

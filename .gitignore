@@ -16,3 +16,4 @@ node_modules/
 .studio/runs/
 /apps/studio/*.tsbuildinfo
 /apps/studio/src-tauri/gen/
+/apps/studio/src-tauri/workspace-core/target/
