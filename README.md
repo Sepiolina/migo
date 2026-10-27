@@ -9,6 +9,9 @@ workbook. YAML remains available for advanced editing.
 Excel inputs and produces an Excel workbook. It runs on Windows for development
 and on Linux under PM2 for deployment. The `migo` CLI runs workflows without HTTP.
 
+See [current capabilities](docs/CURRENT_CAPABILITIES.md) for what works today,
+validation coverage, and features still planned.
+
 ## Choose where to start
 
 - [Run the Windows desktop app](#run-the-windows-desktop-app)
