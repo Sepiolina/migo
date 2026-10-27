@@ -1,3 +1,4 @@
+import { parseCondition } from "./SimpleCondition";
 import { parseDocument } from "yaml";
 import type { Node, Edge } from "@xyflow/react";
 import { getOperation } from "./operationCatalog";
@@ -51,8 +52,14 @@ function summarize(operation: string, argument: unknown): string {
       return `Read ${text || words(arg.input) || "an input"}${arg.sheet ? ` · sheet ${words(arg.sheet)}` : ""}`;
     case "save":
       return `Keep the current table as ${text || "a named dataset"}`;
-    case "filter":
-      return `Keep rows where ${text || "the condition matches"}`;
+    case "filter": {
+      const condition = parseCondition(text);
+      if (condition) {
+        const comparison: Record<string, string> = { "==": "equals", "!=": "does not equal", ">": "is greater than", ">=": "is at least", "<": "is less than", "<=": "is at most" };
+        return `${condition.column} ${comparison[condition.operator]} ${condition.value}`;
+      }
+      return text === "true" ? "Keep every row" : "Keep rows matching a custom condition";
+    }
     case "if":
       return `Choose a path when ${words(argument) || "the condition matches"}`;
     case "split":

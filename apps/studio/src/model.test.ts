@@ -94,3 +94,8 @@ describe("ordered workflow projection", () => {
     expect(graph.nodes).toEqual([]);
   });
 });
+
+it("shows readable filter conditions on the canvas", () => {
+  const graph = projectWorkflow(example);
+  expect(graph.nodes.find(node => node.data.operation === "filter")?.data.summary).toBe("Quantity is greater than 0");
+});
