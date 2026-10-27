@@ -1,0 +1,481 @@
+:root {
+  font-family: Inter, system-ui, sans-serif;
+  color: #25354b;
+  background: #f3f5f8;
+  font-size: 13px;
+}
+* {
+  box-sizing: border-box;
+}
+body {
+  margin: 0;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+button {
+  border: 1px solid #d6dfe8;
+  background: white;
+  color: #34465b;
+  border-radius: 6px;
+  padding: 8px 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+button:hover:not(:disabled) {
+  background: #f0f5fb;
+  border-color: #99b6d6;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 2px solid #477df2;
+  outline-offset: 2px;
+}
+.primary {
+  background: #225bdf;
+  color: white;
+  border-color: #225bdf;
+  font-weight: 600;
+}
+.app {
+  height: 100vh;
+  min-height: 650px;
+  display: flex;
+  flex-direction: column;
+}
+header {
+  height: 66px;
+  background: white;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  border-bottom: 1px solid #dfe5ed;
+  flex-shrink: 0;
+}
+.brand,
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.brand strong {
+  font-size: 23px;
+  letter-spacing: -1px;
+  color: #1a2b43;
+}
+.brand strong span {
+  font-weight: 400;
+  color: #53647b;
+  margin-left: 3px;
+}
+.mark {
+  background: #225bdf;
+  color: white;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 9px;
+}
+small {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.9px;
+  padding: 4px 6px;
+  background: #edf2f8;
+  color: #6e8199;
+  border-radius: 4px;
+}
+.mode {
+  font-size: 11px;
+  color: #638376;
+  margin-right: 8px;
+}
+.notice {
+  padding: 8px 24px;
+  background: #fff5df;
+  border-bottom: 1px solid #f0dfb5;
+  color: #876728;
+  font-size: 12px;
+}
+main {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+}
+aside {
+  width: 260px;
+  min-width: 220px;
+  max-width: 420px;
+  resize: horizontal;
+  overflow: auto;
+  padding: 25px 20px;
+  background: #fafbfd;
+  border-right: 1px solid #dfe5ed;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+.eyebrow {
+  font-size: 10px;
+  letter-spacing: 1.4px;
+  font-weight: 750;
+  color: #8291a5;
+  margin-bottom: 14px;
+}
+.folder {
+  text-align: left;
+  width: 100%;
+  font-weight: 600;
+}
+.path {
+  font-size: 11px;
+  line-height: 1.5;
+  color: #8c99a9;
+  overflow-wrap: anywhere;
+}
+hr {
+  height: 1px;
+  min-height: 1px;
+  background: #e3e9ef;
+  border: 0;
+  margin: 20px 0;
+  width: 100%;
+}
+.hint {
+  font-size: 11px;
+  line-height: 1.6;
+  color: #8290a3;
+  margin: 0 0 14px;
+}
+label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  margin-bottom: 14px;
+}
+input {
+  padding: 9px 10px;
+  border: 1px solid #d9e1e9;
+  background: white;
+  border-radius: 5px;
+  color: #34465b;
+  min-width: 0;
+}
+label input {
+  display: block;
+  width: 100%;
+  margin: 8px 0 3px;
+  font-size: 11px;
+}
+label .hint {
+  font-weight: 400;
+}
+.bottom {
+  margin-top: auto;
+  padding-top: 30px;
+}
+.bottom button {
+  font-size: 10px;
+  width: 100%;
+  white-space: normal;
+}
+.workspace {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.documentbar {
+  height: 59px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 23px;
+  background: white;
+  flex-shrink: 0;
+}
+.subtle {
+  font-size: 10px;
+  font-weight: 400;
+  color: #93a0b1;
+  margin-left: 15px;
+}
+.state {
+  font-size: 10px;
+  color: #628476;
+}
+nav {
+  height: 41px;
+  display: flex;
+  padding: 0 20px;
+  border-top: 1px solid #edf0f4;
+  border-bottom: 1px solid #dfe5ed;
+  background: white;
+  align-items: stretch;
+  flex-shrink: 0;
+}
+nav button {
+  border: 0;
+  border-radius: 0;
+  background: none;
+  color: #8693a4;
+  padding: 0 15px;
+  font-size: 11px;
+}
+nav button.active {
+  border-bottom: 2px solid #326ce5;
+  color: #326ce5;
+  font-weight: 650;
+}
+nav > span {
+  margin-left: auto;
+  align-self: center;
+  font-size: 10px;
+  color: #97a2b1;
+}
+.editor {
+  position: relative;
+  flex: 1;
+  min-height: 200px;
+  background: #f6f8fb;
+}
+.react-flow__node-default {
+  border: 1px solid #d8e1ec;
+  border-radius: 8px;
+  box-shadow: 0 3px 9px #27374b0a;
+  color: #43536a;
+  font-size: 11px;
+  line-height: 1.7;
+  background: white;
+  padding: 14px;
+}
+.react-flow__handle {
+  background: #5e89e8;
+  border: 2px solid white;
+  width: 8px;
+  height: 8px;
+}
+.react-flow__edge-path {
+  stroke: #94add0;
+  stroke-width: 1.5;
+}
+.react-flow__minimap {
+  width: 110px !important;
+  height: 80px !important;
+}
+.canvas-note {
+  position: absolute;
+  top: 14px;
+  left: 18px;
+  color: #8a99ac;
+  font-size: 10px;
+  pointer-events: none;
+}
+.graph-error {
+  position: absolute;
+  inset: 60px 40px auto;
+  background: #fff0ef;
+  color: #b44343;
+  padding: 20px;
+  display: flex;
+  gap: 20px;
+  align-items: center;
+}
+.source-editor {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.source-help {
+  font-size: 11px;
+  padding: 12px 20px;
+  color: #78899d;
+  background: #f9fbfd;
+}
+.source-editor textarea {
+  border: 0;
+  resize: none;
+  flex: 1;
+  padding: 18px 24px;
+  background: #f8fafd;
+  line-height: 1.7;
+  font-family: ui-monospace, monospace;
+  color: #38506c;
+  font-size: 12px;
+  tab-size: 2;
+}
+.workbook {
+  height: 315px;
+  min-height: 210px;
+  max-height: 65vh;
+  resize: vertical;
+  overflow: auto;
+  background: white;
+  border-top: 1px solid #dbe3ec;
+  display: flex;
+  flex-direction: column;
+  flex-shrink: 0;
+}
+.workbookbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 13px 21px;
+  border-bottom: 1px solid #edf1f5;
+  font-size: 12px;
+}
+.inspectbar {
+  display: flex;
+  gap: 8px;
+  padding: 10px 20px;
+}
+.inspectbar input {
+  flex: 1;
+  font-size: 11px;
+}
+.inspectbar button,
+.inspectbar select {
+  font-size: 10px;
+}
+.inspectbar select {
+  max-width: 150px;
+  border: 1px solid #d9e1e9;
+  border-radius: 5px;
+  background: white;
+  color: #43536a;
+}
+.empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #91a0b3;
+  min-height: 100px;
+}
+.empty > span {
+  font-size: 27px;
+  color: #9bb0ca;
+  margin-bottom: 7px;
+}
+.empty strong {
+  font-size: 12px;
+  color: #6c819a;
+  font-weight: 500;
+}
+.empty p {
+  font-size: 11px;
+  margin-top: 7px;
+}
+.grid {
+  overflow: auto;
+  flex: 1;
+  min-height: 80px;
+}
+table {
+  border-collapse: collapse;
+  font-size: 11px;
+  min-width: 100%;
+}
+th,
+td {
+  border: 1px solid #e6ebf2;
+  padding: 7px 13px;
+  text-align: left;
+  white-space: nowrap;
+  max-width: 500px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+thead th {
+  position: sticky;
+  top: 0;
+  background: #f3f6fa;
+  color: #7890aa;
+  font-weight: 500;
+}
+tbody th {
+  background: #f7f9fc;
+  color: #9aabba;
+  font-weight: 400;
+  width: 40px;
+}
+.pager {
+  display: flex;
+  align-items: center;
+  padding: 6px 20px;
+  gap: 8px;
+  font-size: 10px;
+  color: #91a0b3;
+}
+.pager span {
+  margin-right: auto;
+}
+.pager button {
+  padding: 4px 8px;
+  font-size: 10px;
+}
+.artifact {
+  font-size: 10px;
+  padding: 7px 20px;
+  color: #758aa2;
+  border-top: 1px solid #edf1f5;
+  overflow-wrap: anywhere;
+}
+.artifact span {
+  float: right;
+}
+footer {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 20px;
+  background: #f8fafc;
+  border-top: 1px solid #dfe5ed;
+  font-size: 10px;
+  color: #8292a6;
+  flex-shrink: 0;
+  gap: 20px;
+}
+footer.error {
+  color: #ac4040;
+  background: #fff4f2;
+}
+@media (max-width: 900px) {
+  aside {
+    width: 220px;
+    padding: 20px 14px;
+  }
+  small,
+  .mode,
+  nav > span,
+  .subtle {
+    display: none;
+  }
+  header {
+    padding: 0 16px;
+  }
+  .empty p {
+    max-width: 280px;
+    text-align: center;
+  }
+  .toolbar {
+    gap: 6px;
+  }
+  .documentbar {
+    padding: 0 15px;
+  }
+  .workbook {
+    height: 270px;
+  }
+}

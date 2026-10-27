@@ -7,3 +7,12 @@ outputs/*
 /miservice
 /miservice.exe
 /migo
+
+# Desktop development and local workflow runs
+node_modules/
+/apps/studio/dist/
+/apps/studio/src-tauri/target/
+/apps/studio/src-tauri/binaries/
+.studio/runs/
+/apps/studio/*.tsbuildinfo
+/apps/studio/src-tauri/gen/

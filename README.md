@@ -295,6 +295,12 @@ ls -la /opt/miservice/uploads                # only .gitkeep (and .keep.json) af
 systemd alternative: `sudo cp deploy/miservice.service /etc/systemd/system/ && sudo systemctl enable --now miservice`,
 logs with `journalctl -u miservice -f`. Use one supervisor or the other, never both at once.
 
+## Mai Studio desktop tool
+
+The Tauri v2 and React Flow developer workspace is under active development.
+See [desktop development](docs/MAI_STUDIO_DEVELOPMENT.md) for the current scope
+and [implementation plan](docs/MAI_DEV_TOOL_IMPLEMENTATION_PLAN.md) for the roadmap.
+
 ## Layout
 ```
 workflows/             built-in workflow files (embedded); bom.yaml = the BOM processor
