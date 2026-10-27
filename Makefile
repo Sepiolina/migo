@@ -15,16 +15,16 @@ help:
 	@echo 'make linux/windows  Cross-build a static service binary into dist/'
 
 build:
-	$(GO) build -o miservice ./cmd/miservice
+	$(GO) build -o maiservice ./cmd/maiservice
 	$(GO) build -o migo ./cmd/migo
 build-all:
 	$(GO) build ./...
 linux:
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -ldflags="-s -w" -o dist/miservice ./cmd/miservice
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -ldflags="-s -w" -o dist/maiservice ./cmd/maiservice
 windows:
-	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build -ldflags="-s -w" -o dist/miservice.exe ./cmd/miservice
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build -ldflags="-s -w" -o dist/maiservice.exe ./cmd/maiservice
 run:
-	$(GO) run ./cmd/miservice -config "$(CONFIG)"
+	$(GO) run ./cmd/maiservice -config "$(CONFIG)"
 vet:
 	$(GO) vet ./...
 test: vet

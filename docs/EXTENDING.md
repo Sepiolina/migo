@@ -1,4 +1,4 @@
-# Extending miservice
+# Extending maiservice
 
 Processes, endpoints and business rules are workflow files, never Go: see
 [WORKFLOWS.md](WORKFLOWS.md). This page covers what needs Go: a new generic
@@ -7,7 +7,7 @@ step type, a new module, or a custom endpoint.
 ## The map
 
 ```
-cmd/miservice            entrypoint (flags + app.Run) -- rarely edited
+cmd/maiservice            entrypoint (flags + app.Run) -- rarely edited
 internal/app             wiring. modules.go = the list of modules (1 line per module)
 internal/module          what a module is (Module, Starter, Closer, Services)
 internal/httpx           router, error responses, uploads, CORS/recover middleware
