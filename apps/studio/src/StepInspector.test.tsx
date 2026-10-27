@@ -128,6 +128,7 @@ it("rejects integer-like row keys before they can reorder a selection", async ()
       .disabled,
   ).toBe(true);
   expect(result).toBe("");
+  expect(screen.getByRole("button", { name: "Discard changes" })).toBeTruthy();
   await user.clear(key);
   await user.type(key, "Third");
   await user.click(screen.getByRole("button", { name: "Apply changes" }));

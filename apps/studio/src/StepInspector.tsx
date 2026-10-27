@@ -343,8 +343,11 @@ export function StepInspector({
   const [advanced, setAdvanced] = useState(false);
   const [validity, setValidity] = useState<Record<string, boolean>>({});
   const valid = Object.values(validity).every(Boolean);
-  const setFieldValid = (key: string, value: boolean) =>
+  const setFieldValid = (key: string, value: boolean) => {
     setValidity((previous) => ({ ...previous, [key]: value }));
+    // Invalid local field edits still count as unsaved work in the shell.
+    if (!value && pendingDraft === undefined) onDraftChange(argument);
+  };
   const [revision, setRevision] = useState(0);
   const index =
     selected && /^step\.\d+$/.test(selected)
