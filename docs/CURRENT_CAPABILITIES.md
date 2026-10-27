@@ -117,8 +117,9 @@ not reproduce full workbook styling, charts, merged-cell layouts, macros, or
 formula recalculation. Workbook editing and intermediate-step tables are not
 available. Inspect the generated file in Excel when final formatting matters.
 
-The desktop protocol limits input workbook files to 25 MiB, checks XLSX ZIP
-expansion against a 64 MiB limit, and bounds protocol frames and preview pages.
+Desktop workbook inspection limits files to 25 MiB, including generated output
+previews. It checks XLSX ZIP expansion against a 64 MiB limit and bounds protocol
+frames and preview pages.
 The UI requests 100 rows per page. Paging limits the response size; it is not a
 guarantee that workbook parsing itself uses constant memory.
 
