@@ -5,7 +5,7 @@ import {
   readWorkbookSettings,
   validateWorkbookSettings,
   writeWorkbookSettings,
-} from "./workflowSetup";
+} from "./workbookSettings";
 
 const source = `# Workflow comment
 name: Report

@@ -45,7 +45,7 @@ The visual editor separates block definitions and copy/paste state in
 `src/blocklyBlocks.ts`, the restricted expression grammar in
 `src/blocklyExpressions.ts`, and YAML round-trip editing in
 `src/blocklyWorkflow.ts`. `BlockEditor.tsx` owns the canvas lifecycle;
-`workflowSetup.ts` preserves workbook metadata when the setup form changes.
+`workbookSettings.ts` preserves workbook metadata when the setup form changes.
 
 From the repository root, `make check` runs Go formatting, vet, compilation, race
 tests, and the existing example workflows. From `apps/studio`, run `npm ci`,

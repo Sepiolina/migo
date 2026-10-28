@@ -4,7 +4,7 @@ import {
   validateWorkbookSettings,
   writeWorkbookSettings,
   type WorkbookSettings,
-} from "./workflowSetup";
+} from "./workbookSettings";
 import "./workflow-setup.css";
 
 export function WorkflowSetup({

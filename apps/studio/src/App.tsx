@@ -27,7 +27,7 @@ import { WorkbookPanel } from "./WorkbookPanel";
 import { StepInspector } from "./StepInspector";
 import { PackageBuilder } from "./PackageBuilder";
 import { WorkflowSetup } from "./WorkflowSetup";
-import { readWorkbookSettings } from "./workflowSetup";
+import { readWorkbookSettings } from "./workbookSettings";
 import { workflowTemplates } from "./workflowTemplates";
 import { WorkflowTemplatePicker } from "./WorkflowTemplatePicker";
 import {
