@@ -57,7 +57,7 @@ type Result struct {
 
 var nameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
 var dirRE = regexp.MustCompile(`^/opt/[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$`)
-var workflowRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}\.yaml$`)
+var workflowRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,39}\.yaml$`)
 
 func scoped(root, rel string) (string, error) {
 	if rel == "" || filepath.IsAbs(rel) {
@@ -150,7 +150,7 @@ func Build(ctx context.Context, workspace string, o Options) (Result, error) {
 	for _, p := range o.Workflows {
 		name := filepath.Base(p)
 		if !workflowRE.MatchString(name) || names[name] {
-			return result, errors.New("workflow names must be unique lowercase YAML filenames")
+			return result, errors.New("workflow names must be unique lowercase YAML filenames starting with a letter")
 		}
 		names[name] = true
 		b, e := readInput(root, p, 1<<20)
@@ -446,7 +446,7 @@ func installScript(o Options) string {
 	return fmt.Sprintf(`#!/bin/sh
 set -eu
 cd "$(dirname "$0")"
-./verify.sh
+sh ./verify.sh
 target=%q
 umask 077
 [ ! -e "$target" ] && [ ! -L "$target" ] || { echo 'Target already exists; move it aside first' >&2; exit 1; }
@@ -456,6 +456,9 @@ mkdir -p "$stage/config/workflows"
 cp maiservice ecosystem.config.js "$stage/"
 %s
 for f in config/workflows/*.yaml; do [ ! -f "$f" ] || cp "$f" "$stage/config/workflows/"; done
+chmod 0700 "$stage/maiservice"
+chmod 0600 "$stage/ecosystem.config.js" "$stage/config/config.json"
+for f in "$stage"/config/workflows/*.yaml; do [ ! -f "$f" ] || chmod 0600 "$f"; done
 mv -T -n "$stage" "$target"
 [ ! -e "$stage" ] || { echo 'Target already exists' >&2; exit 1; }
 trap - EXIT HUP INT TERM
@@ -483,8 +486,8 @@ Protect the age identity on the target. Install age and set AGE_IDENTITY to the 
 
     unzip mai.zip
     cd mai
-    ./verify.sh
-    ./install.sh
+    sh ./verify.sh
+    sh ./install.sh
 
 The bundled verify.sh provides an additional check after extraction; it does not establish initial trust. Installation requires a new target directory; move an existing installation aside first. Install Node.js and PM2 on the target, then start the printed PM2 command. release.json records build metadata. sbom.cdx.json lists Go modules in the compiled binary; it is not a vulnerability audit. The service reads configuration and workflow overrides from its config directory. Built-in workflows are embedded in the service; selected workflow files override them or add endpoints rather than restricting the built-in endpoints. The configured memory restart is a PM2 threshold; GOMEMLIMIT is a Go runtime soft limit. Back up existing configuration and workflows before installing.
 `

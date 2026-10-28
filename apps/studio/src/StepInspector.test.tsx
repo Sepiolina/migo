@@ -1,11 +1,44 @@
 // @vitest-environment jsdom
 import { useState } from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it } from "vitest";
 import { parse } from "yaml";
 import { StepInspector } from "./StepInspector";
 afterEach(cleanup);
+
+it("retains invalid local edits when another setting is changed back to its saved value", async () => {
+  const user = userEvent.setup();
+  function Harness() {
+    const [draft, setDraft] = useState<string>();
+    return (
+      <StepInspector
+        source={"steps:\n  - from: {input: parts, sheet: 1, trim: false}\n"}
+        selected="step.0"
+        draft={draft}
+        onDraftChange={setDraft}
+        onChange={() => {}}
+        onSource={() => {}}
+      />
+    );
+  }
+  render(<Harness />);
+  fireEvent.change(screen.getByLabelText("Sheet number (starting at 1)"), {
+    target: { value: "" },
+  });
+  await user.click(screen.getByLabelText("Trim whitespace"));
+  await user.click(screen.getByLabelText("Trim whitespace"));
+  expect(screen.getByText("Enter a sheet number of 1 or greater.")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Discard changes" })).toBeTruthy();
+  expect(
+    (screen.getByRole("button", { name: "Apply changes" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  fireEvent.change(screen.getByLabelText("Sheet number (starting at 1)"), {
+    target: { value: "1" },
+  });
+  expect(screen.queryByRole("button", { name: "Discard changes" })).toBeNull();
+});
 
 it("edits a guided setting and preserves additional options when applied", async () => {
   const user = userEvent.setup();

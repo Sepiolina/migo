@@ -147,7 +147,7 @@ Save workflow changes and apply or discard pending settings, then choose
 3. Select saved **Workflow overrides**. Built-in endpoints remain available;
    selected files replace matching built-ins or add endpoints. This selection is
    not an endpoint allowlist. Override filenames must be unique lowercase
-   `.yaml` names using letters, numbers, and hyphens.
+   `.yaml` names starting with a letter and using letters, numbers, and hyphens.
 4. Set a new installation directory directly under `/opt`, the service name,
    HTTP port, PM2 restart-memory threshold, and Go memory target. Defaults use
    `/opt/maiservice`, `maiservice`, and port `3081`. Memory settings are runtime

@@ -363,6 +363,11 @@ export function StepInspector({
   const draft = pendingDraft ?? argument;
   const guided = detail && readGuided(detail.operation, draft);
   useEffect(() => {
+    // A field can recover without changing YAML (for example, re-entering
+    // the saved sheet number). Keep its local edit guarded until it is valid.
+    if (valid && pendingDraft === argument) onDraftChange(undefined);
+  }, [valid, pendingDraft, argument, onDraftChange]);
+  useEffect(() => {
     setError("");
   }, [source, selected, argument]);
   useEffect(() => {
@@ -370,7 +375,7 @@ export function StepInspector({
     setValidity({});
   }, [selected]);
   const changeDraft = (next: string) =>
-    onDraftChange(next === argument ? undefined : next);
+    onDraftChange(valid && next === argument ? undefined : next);
   const changeGuided = (key: string | null, value: unknown) => {
     try {
       changeDraft(updateGuided(draft, detail!.operation, key, value));

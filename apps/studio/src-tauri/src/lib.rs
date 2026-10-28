@@ -17,7 +17,9 @@ use tokio::{
     process::Command,
     time::{timeout, Duration},
 };
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
+
+mod runner_process;
 
 struct Workspace {
     root: Mutex<Option<PathBuf>>,
@@ -201,28 +203,20 @@ async fn runner_request(
 }
 
 async fn invoke_runner(
+    request: Value,
+    limit: Duration,
+    timeout_message: &str,
+) -> Result<Value, String> {
+    invoke_runner_at(runner_path()?, request, limit, timeout_message).await
+}
+
+async fn invoke_runner_at(
+    runner: PathBuf,
     mut request: Value,
     limit: Duration,
     timeout_message: &str,
 ) -> Result<Value, String> {
-    let mut bytes = serde_json::to_vec(&request).map_err(|_| "Invalid request")?;
-    if bytes.len() > 1024 * 1024 {
-        return Err("Request exceeds 1 MiB".into());
-    }
-    bytes.push(b'\n');
-    let mut child = Command::new(runner_path()?)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .kill_on_drop(true)
-        .spawn()
-        .map_err(|_| "Cannot launch Go sidecar; rebuild it for this host")?;
-    let mut stdin = child.stdin.take().ok_or("Cannot open runner input")?;
-    stdin
-        .write_all(&bytes)
-        .await
-        .map_err(|_| "Cannot send runner request")?;
-    bytes.zeroize();
+    let mut bytes = Zeroizing::new(serde_json::to_vec(&request).map_err(|_| "Invalid request")?);
     if let Some(build) = request
         .pointer_mut("/params/build")
         .and_then(Value::as_object_mut)
@@ -231,8 +225,30 @@ async fn invoke_runner(
             secret.zeroize();
         }
     }
-    drop(stdin); // One request per process; EOF lets the runner exit cleanly.
+    if bytes.len() > 1024 * 1024 {
+        return Err("Request exceeds 1 MiB".into());
+    }
+    bytes.push(b'\n');
+    let mut command = Command::new(runner);
+    command
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    runner_process::configure(&mut command);
+    let mut child = command
+        .spawn()
+        .map_err(|_| "Cannot launch Go sidecar; rebuild it for this host")?;
+    let _process_tree =
+        runner_process::guard(&child).map_err(|_| "Cannot configure Go sidecar process cleanup")?;
     let output = timeout(limit, async {
+        let mut stdin = child.stdin.take().ok_or("Cannot open runner input")?;
+        stdin
+            .write_all(&bytes)
+            .await
+            .map_err(|_| "Cannot send runner request")?;
+        bytes.zeroize();
+        drop(stdin); // One request per process; EOF lets the runner exit cleanly.
         let stdout = child.stdout.take().ok_or("Cannot open runner output")?;
         let mut output = Vec::new();
         stdout
@@ -423,7 +439,7 @@ async fn build_linux_package(
             private.zeroize();
             build.insert("mode".into(), json!("secure"));
             build.insert("signingKey".into(), json!(encoded));
-            encoded_secret = Some(encoded);
+            encoded_secret = Some(Zeroizing::new(encoded));
         }
         "trusted" => (),
         _ => return Err("Choose secure or trusted package mode".into()),
@@ -437,9 +453,8 @@ async fn build_linux_package(
     .await?;
     // Never relay a credential if the sidecar includes request data in its response.
     let mut serialized = serde_json::to_string(&response).map_err(|_| "Invalid runner response")?;
-    if let Some(mut secret) = encoded_secret {
-        serialized = serialized.replace(&secret, "[redacted]");
-        secret.zeroize();
+    if let Some(secret) = encoded_secret {
+        serialized = serialized.replace(secret.as_str(), "[redacted]");
     }
     let response: Value =
         serde_json::from_str(&serialized).map_err(|_| "Invalid runner response")?;
@@ -480,6 +495,153 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_runner_job_kills_descendants() {
+        fn encoded_script(script: &str) -> String {
+            let bytes: Vec<u8> = script.encode_utf16().flat_map(u16::to_le_bytes).collect();
+            STANDARD.encode(bytes)
+        }
+        fn powershell_literal(path: &Path) -> String {
+            path.to_string_lossy().replace('\'', "''")
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let ready = dir.path().join("ready");
+        let marker = dir.path().join("survived");
+        let child_script = format!(
+            "Set-Content -LiteralPath '{}' -Value ready; Start-Sleep -Seconds 3; Set-Content -LiteralPath '{}' -Value survived",
+            powershell_literal(&ready), powershell_literal(&marker)
+        );
+        let parent_script = format!(
+            "$null = [Console]::In.ReadLine(); Start-Process -FilePath powershell.exe -WindowStyle Hidden -ArgumentList '-NoProfile', '-NonInteractive', '-EncodedCommand', '{}'; Start-Sleep -Seconds 10",
+            encoded_script(&child_script)
+        );
+
+        tauri::async_runtime::block_on(async {
+            let mut command = Command::new("powershell.exe");
+            command
+                .args([
+                    "-NoProfile",
+                    "-NonInteractive",
+                    "-EncodedCommand",
+                    &encoded_script(&parent_script),
+                ])
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .kill_on_drop(true);
+            runner_process::configure(&mut command);
+            let mut child = command.spawn().expect("start PowerShell runner");
+            let guard = runner_process::guard(&child).expect("assign runner to Job Object");
+            child
+                .stdin
+                .take()
+                .unwrap()
+                .write_all(b"start\n")
+                .await
+                .unwrap();
+
+            timeout(Duration::from_secs(5), async {
+                while !ready.exists() {
+                    tokio::time::sleep(Duration::from_millis(50)).await;
+                }
+            })
+            .await
+            .expect("descendant did not start");
+            drop(guard);
+            let _ = child.wait().await;
+            tokio::time::sleep(Duration::from_millis(3500)).await;
+        });
+        assert!(
+            !marker.exists(),
+            "runner descendant survived Job Object cleanup"
+        );
+    }
+    #[cfg(unix)]
+    #[test]
+    fn timed_out_runner_kills_descendants() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let runner = dir.path().join("runner");
+        let marker = dir.path().join("survived");
+        std::fs::write(
+            &runner,
+            format!(
+                "#!/bin/sh\n(sleep 1; touch '{}') &\nwait\n",
+                marker.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&runner, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let result = tauri::async_runtime::block_on(invoke_runner_at(
+            runner,
+            json!({"version": 1, "id": "test"}),
+            Duration::from_millis(200),
+            "timed out",
+        ));
+        assert_eq!(result.unwrap_err(), "timed out");
+        std::thread::sleep(Duration::from_millis(1200));
+        assert!(!marker.exists(), "runner descendant survived timeout");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cancelled_runner_kills_descendants() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let runner = dir.path().join("runner");
+        let marker = dir.path().join("survived");
+        std::fs::write(
+            &runner,
+            format!(
+                "#!/bin/sh\n(sleep 1; touch '{}') &\nwait\n",
+                marker.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&runner, std::fs::Permissions::from_mode(0o700)).unwrap();
+        tauri::async_runtime::block_on(async {
+            let task = tokio::spawn(async move {
+                invoke_runner_at(
+                    runner,
+                    json!({"version": 1, "id": "test"}),
+                    Duration::from_secs(10),
+                    "timed out",
+                )
+                .await
+            });
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            task.abort();
+            let _ = task.await;
+            tokio::time::sleep(Duration::from_millis(1200)).await;
+        });
+        assert!(!marker.exists(), "runner descendant survived cancellation");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stalled_runner_input_obeys_timeout() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let runner = dir.path().join("runner");
+        std::fs::write(&runner, "#!/bin/sh\nexec sleep 10\n").unwrap();
+        std::fs::set_permissions(&runner, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let request = json!({"version": 1, "id": "test", "params": {"build": {
+            "signingKey": "secret", "data": "a".repeat(500_000)
+        }}});
+        let start = std::time::Instant::now();
+        let result = tauri::async_runtime::block_on(invoke_runner_at(
+            runner,
+            request,
+            Duration::from_millis(100),
+            "timed out",
+        ));
+        assert_eq!(result.unwrap_err(), "timed out");
+        assert!(start.elapsed() < Duration::from_secs(3));
+    }
+
     #[cfg(target_os = "windows")]
     #[test]
     fn windows_credential_store_round_trip() {
