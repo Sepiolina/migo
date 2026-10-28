@@ -40,6 +40,28 @@ function open() {
   );
   return { onClose, onPending };
 }
+it("blocks workflow names the deployed service cannot load before invoking the builder", async () => {
+  const user = userEvent.setup();
+  render(
+    <PackageBuilder
+      workspace="/project"
+      workflows={["workflows/1-invalid.yaml"]}
+      onClose={() => {}}
+      onPending={() => {}}
+    />,
+  );
+  await screen.findByText("No signing identity");
+  await user.click(screen.getByRole("radio", { name: /Trusted local/ }));
+  expect(screen.getByText(/filenames must.*starting with a letter/)).toBeTruthy();
+  expect(
+    (screen.getByRole("button", { name: "Build ZIP package" }) as HTMLButtonElement).disabled,
+  ).toBe(true);
+  expect(native.invoke).not.toHaveBeenCalledWith("build_linux_package", expect.anything());
+  await user.click(screen.getByRole("checkbox", { name: "workflows/1-invalid.yaml" }));
+  expect(
+    (screen.getByRole("button", { name: "Build ZIP package" }) as HTMLButtonElement).disabled,
+  ).toBe(false);
+});
 it("defaults to secure and requires both signing identity and an age public recipient", async () => {
   const user = userEvent.setup();
   open();

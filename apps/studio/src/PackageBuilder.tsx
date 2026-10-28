@@ -116,10 +116,10 @@ export function packageProfileError(
     return "Select at most 100 workflow overrides.";
   const names = profile.workflows.map((path) => path.split("/").at(-1)!);
   if (
-    names.some((name) => !/^[a-z0-9][a-z0-9-]{0,39}\.yaml$/.test(name)) ||
+    names.some((name) => !/^[a-z][a-z0-9-]{0,39}\.yaml$/.test(name)) ||
     new Set(names).size !== names.length
   )
-    return "Workflow override filenames must be unique, lowercase names ending in .yaml (letters, numbers and hyphens; up to 40 characters before .yaml).";
+    return "Workflow override filenames must be unique, lowercase names starting with a letter and ending in .yaml (letters, numbers and hyphens; up to 40 characters before .yaml).";
   if (!/^\/opt\/[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$/.test(profile.installDir))
     return "Enter an installation folder directly under /opt, such as /opt/maiservice.";
   if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(profile.serviceName))

@@ -2180,6 +2180,7 @@ dependencies = [
  "base64 0.22.1",
  "ed25519-dalek",
  "keyring",
+ "libc",
  "mai-studio-workspace",
  "rand_core",
  "serde",
@@ -2190,6 +2191,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tempfile",
  "tokio",
+ "windows-sys 0.61.2",
  "zeroize",
 ]
 

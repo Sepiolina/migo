@@ -25,10 +25,11 @@ func TestInstallPublishesAndCleansUp(t *testing.T) {
 				t.Fatal(err)
 			}
 			entries := map[string][]byte{
-				"maiservice":          []byte("binary"),
-				"ecosystem.config.js": []byte("ecosystem"),
-				"install.sh":          []byte(installScript(Options{Mode: mode, InstallDir: target})),
-				"verify.sh":           []byte(verifyScript),
+				"maiservice":                 []byte("binary"),
+				"ecosystem.config.js":        []byte("ecosystem"),
+				"install.sh":                 []byte(installScript(Options{Mode: mode, InstallDir: target})),
+				"verify.sh":                  []byte(verifyScript),
+				"config/workflows/test.yaml": []byte("workflow"),
 			}
 			if mode == "trusted" {
 				entries["config/config.json"] = []byte(`{"value":"original"}`)
@@ -46,11 +47,8 @@ func TestInstallPublishesAndCleansUp(t *testing.T) {
 				if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 					t.Fatal(err)
 				}
-				fileMode := os.FileMode(0600)
-				if name == "maiservice" || strings.HasSuffix(name, ".sh") {
-					fileMode = 0700
-				}
-				if err := os.WriteFile(path, entries[name], fileMode); err != nil {
+				// ZIP extraction may not preserve the archive's executable bits.
+				if err := os.WriteFile(path, entries[name], 0600); err != nil {
 					t.Fatal(err)
 				}
 				sum := sha256.Sum256(entries[name])
@@ -95,8 +93,14 @@ func TestInstallPublishesAndCleansUp(t *testing.T) {
 				t.Fatal("installed config differs")
 			}
 			st, err := os.Stat(filepath.Join(target, "maiservice"))
-			if err != nil || st.Mode()&0111 == 0 {
+			if err != nil || st.Mode().Perm() != 0700 {
 				t.Fatal("installed binary is not executable")
+			}
+			for _, name := range []string{"config/config.json", "config/workflows/test.yaml", "ecosystem.config.js"} {
+				st, err := os.Stat(filepath.Join(target, name))
+				if err != nil || st.Mode().Perm() != 0600 {
+					t.Fatalf("installed %s has incorrect permissions: %v, %v", name, st, err)
+				}
 			}
 			if err := os.WriteFile(config, []byte("preserve"), 0600); err != nil {
 				t.Fatal(err)

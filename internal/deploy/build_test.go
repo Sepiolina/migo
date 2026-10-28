@@ -215,6 +215,36 @@ func TestScopedRejectsEscape(t *testing.T) {
 	}
 }
 
+func TestBuildRejectsWorkflowNamesServiceCannotLoad(t *testing.T) {
+	root := t.TempDir()
+	for name, contents := range map[string]string{
+		"go.mod":                 "module example\n",
+		"cmd/maiservice/main.go": "package main\nfunc main() {}\n",
+		"config.json":            "{}",
+	} {
+		path := filepath.Join(root, name)
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, source, _, _ := runtime.Caller(0)
+	wf, err := os.ReadFile(filepath.Join(filepath.Dir(source), "../../workflows/bom.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "1workflow.yaml"), wf, 0600); err != nil {
+		t.Fatal(err)
+	}
+	o := Options{Arch: "arm64", ConfigPath: "config.json", Workflows: []string{"1workflow.yaml"}, InstallDir: "/opt/maiservice", ServiceName: "maiservice", Port: 3081, MemoryMB: 650, GoMemoryMB: 400, Mode: "trusted"}
+	_, err = Build(context.Background(), root, o)
+	if err == nil || !strings.Contains(err.Error(), "workflow names") {
+		t.Fatalf("expected workflow name validation error, got %v", err)
+	}
+}
+
 func TestBuildEnvironmentUsesVerifiedModuleDownloads(t *testing.T) {
 	goenv := filepath.Join(t.TempDir(), "goenv")
 	if err := os.WriteFile(goenv, []byte("GOFLAGS=-toolexec=hostile\nGONOSUMDB=*\n"), 0600); err != nil {
