@@ -435,7 +435,7 @@ async fn build_linux_package(
         "secure" => {
             let key = load_signing_key()?.ok_or("Create a signing identity in the OS credential store before building a secure package")?;
             let mut private = key.to_keypair_bytes();
-            let encoded = STANDARD.encode(private);
+            let encoded = STANDARD.encode(&private);
             private.zeroize();
             build.insert("mode".into(), json!("secure"));
             build.insert("signingKey".into(), json!(encoded));
@@ -444,7 +444,10 @@ async fn build_linux_package(
         "trusted" => (),
         _ => return Err("Choose secure or trusted package mode".into()),
     }
-    let request = json!({"version": 1, "id": "build-linux-package", "command": "buildPackage", "params": {"workspace": root, "build": profile}});
+    let mut request = json!({"version": 1, "id": "build-linux-package", "command": "buildPackage", "params": {"workspace": root}});
+    // Move the credential-bearing profile; json!(profile) would clone it and
+    // leave another signing-key string outside invoke_runner's cleanup.
+    request["params"]["build"] = profile;
     let response = invoke_runner(
         request,
         Duration::from_secs(15 * 60),
