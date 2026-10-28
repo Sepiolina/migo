@@ -1,0 +1,61 @@
+.workflow-setup {
+  background: #fff;
+  color: #243047;
+  padding: 20px;
+  overflow: auto;
+  min-width: 0;
+}
+.workflow-setup h2 {
+  margin: 0 0 10px;
+  font-size: 1.2rem;
+}
+.workflow-setup h3 {
+  margin: 22px 0 8px;
+  font-size: 1rem;
+}
+.workflow-setup p {
+  color: #526178;
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+.workflow-setup fieldset {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+}
+.workflow-setup label {
+  display: grid;
+  gap: 4px;
+  margin: 10px 0;
+  font-size: 0.9375rem;
+  font-weight: 600;
+}
+.workflow-setup input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid #bbc7d5;
+  border-radius: 5px;
+}
+.workflow-setup-row {
+  margin: 10px 0;
+  padding: 2px 10px 10px;
+  border: 1px solid #dce3eb;
+  border-radius: 6px;
+}
+.workflow-setup button {
+  white-space: normal;
+}
+.workflow-setup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 18px;
+}
+.workflow-setup-errors {
+  padding-left: 20px;
+  color: #a72e2e;
+  font-size: 0.82rem;
+}

@@ -1,20 +1,21 @@
 # Mai Studio development
 
 Mai Studio is being implemented in stages. The current milestone connects a Tauri v2
-React/React Flow desktop workspace to the production Go workflow engine. The full
+React desktop workspace with Blockly and React Flow to the production Go workflow engine. The full
 roadmap is in [the implementation plan](MAI_DEV_TOOL_IMPLEMENTATION_PLAN.md).
 
 ## Current scope
 
-The runner validates YAML, inspects Excel input workbooks, and runs workflows
-offline to generate inspectable XLSX artifacts. The desktop shell provides
-workspace workflow discovery, revision-checked saves, source-backed graph
-visualization, a searchable node library, guided top-level step settings with an
-Advanced YAML fallback, step ordering, undo/redo, input bindings, and result
-inspection. The horizontal canvas is the default view. Project controls and the
-read-only Excel data panel open on demand; the data panel supports input/output
-selection, expansion, paging, and full cell-value inspection. Nested authoring and
-unsupported step forms use the YAML source editor.
+The runner validates workflow source, inspects Excel input workbooks, and runs
+workflows offline to generate inspectable XLSX artifacts. The default Blocks view
+uses Blockly 12.4.1 for a typed, snap-together step chain and visual expressions.
+Workbook setup edits names, inputs, and output sheets while preserving advanced
+settings. Incomplete or disconnected blocks and pending workbook setup drafts
+guard saving, running, switching views, and closing. Unsupported steps and
+expressions remain opaque and preserved. Workflow canvas provides the existing
+React Flow graph, node library, and guided settings; YAML source supports advanced
+and nested authoring. The shell also provides workspace discovery, revision-checked
+saves, undo/redo, input bindings, and result inspection.
 
 The native package builder cross-builds Linux service ZIPs, with secure signing
 and configuration encryption or explicit trusted-local mode. Intermediate traces,
@@ -40,10 +41,21 @@ pretend to have successfully executed a workflow.
 
 ## Checks
 
+The visual editor separates block definitions and copy/paste state in
+`src/blocklyBlocks.ts`, the restricted expression grammar in
+`src/blocklyExpressions.ts`, and YAML round-trip editing in
+`src/blocklyWorkflow.ts`. `BlockEditor.tsx` owns the canvas lifecycle;
+`workflowSetup.ts` preserves workbook metadata when the setup form changes.
+
 From the repository root, `make check` runs Go formatting, vet, compilation, race
 tests, and the existing example workflows. From `apps/studio`, run `npm ci`,
 `npm run build`, and `npm test` for frontend checks. Run
-`node scripts/smoke-runner.mjs` from `apps/studio` for the serialized runner
+`node scripts/smoke-blockly.mjs` from `apps/studio` to generate a visual workflow
+and execute it and both starter templates against the Go engine and Excel fixture.
+Run `node scripts/smoke-blockly-ui.mjs` to check real block editing, reopening,
+undo, incomplete edits, and the compact layout in a system-installed Chrome or
+Chromium browser. Set `MAI_CHROME` to its executable if it is not detected.
+Run `node scripts/smoke-runner.mjs` from `apps/studio` for the serialized runner
 integration check: it builds Go, validates a synthetic fixture, runs it in a
 temporary workspace, verifies the artifact hash, and compares workbook previews.
 Run `cargo test --locked --manifest-path src-tauri/workspace-core/Cargo.toml`
@@ -60,11 +72,12 @@ coverage without access to company services.
 ## Design boundaries
 
 React renders workflow documents and displays native results. Tauri authorizes
-workspace access and supervises the sidecar. Go owns validation, workbook reading,
-and execution. Do not reimplement expression evaluation in TypeScript or Rust. Guided forms
-edit YAML arguments; Go remains responsible for validation and execution. The
-canvas projects ordered YAML steps and branches. It does not support arbitrary
-wire editing or drag-to-reorder execution.
+workspace access and supervises the sidecar. Go owns validation, expression
+semantics, workbook reading, and execution. Blockly and workbook setup translate
+edits to workflow source; they do not evaluate expressions or use a Blockly
+JavaScript generator. Unsupported content must round-trip intact. The graph
+projects ordered source steps and branches; its ports are not editable wires.
+`predev` and `prebuild` copy Blockly media locally for offline use.
 Protocol responses use version 1 and preserve request IDs; unsupported commands,
 paths, and versions must fail explicitly. Offline means all external SQL/HTTP
 operations are unavailable, including unconditional steps.

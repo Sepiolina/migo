@@ -1,9 +1,9 @@
 # MaiService and Mai Studio
 
 **Mai Studio** is a Windows desktop developer app built with Tauri v2, React, and
-React Flow. Build workflows on a canvas with a searchable node library and
-guided step settings, validate them, run Excel fixtures, and inspect the generated
-workbook. YAML remains available for advanced editing.
+React Flow. Build workflows with snap-together blocks, validate them, run Excel
+fixtures, and inspect the generated workbook. A graph canvas and YAML remain
+available for advanced editing.
 
 **MaiService** runs those workflows as an HTTP microservice. Each workflow accepts
 Excel inputs and produces an Excel workbook. It runs on Windows for development
@@ -86,33 +86,29 @@ Keep this PowerShell window open. Press `Ctrl+C` there to stop the development a
 A browser opened at the development URL supports editor preview only; workspace,
 Excel, validation, and execution features require the native desktop window.
 
-### 3. Try the supplied example
+### 3. Create and run a workflow
 
 1. Open **Project & inputs**, select **Open workspace**, and choose the cloned
-   `migo` repository folder.
-2. Use the built-in parts-summary document, or enter
-   `examples/parts-summary.yaml` in **Open path** and open it.
-3. Select **Validate**. For the `parts` input, enter `examples/parts.xlsx`.
-4. Select **Run workflow**, then open **Excel data** to inspect the generated
-   workbook. Input/output tabs, sheet selection, paging, and a cell-value inspector
-   help explore the data. **Expand data** enlarges the panel; **Close** hides it.
-5. Select a top-level step on the canvas to edit its **Settings**. Choose
-   **Apply changes** before saving or running. **+ Add node** opens the searchable
-   operation library. Use **Advanced YAML** for unsupported argument shapes and
-   **YAML source** for nested steps and complete workflow definitions.
-6. Enter a new Save path such as `workflows/parts-summary.yaml`, then select
-   **Save workflow**. This creates a workflow file without overwriting an existing
-   file. The parent folder must already exist.
+   `migo` repository folder. Choose **+ New workflow**, then **Copy a worksheet**.
+2. In **Workbook setup**, set the workflow display name and input identifier and
+   label. Set the output sheet name and its saved table name, then choose **Apply
+   workbook settings**. The template uses input `parts` and saved table `result`.
+3. In **Blocks**, set **Read source** to the input identifier and enter a sheet
+   name if needed. Set **Save dataset as** to the output's saved table name.
+   Drag and snap additional steps or expressions into the workflow if desired.
+4. Choose **Validate**, then in **Project & inputs** bind the input to a workbook
+   relative to the workspace, such as `examples/parts.xlsx`. Choose **Run
+   workflow** and open **Excel data** to inspect the output.
+5. Check the **Save path** (for example `workflows/copy-workbook.yaml`) and choose
+   **Save workflow**. The parent folder must already exist. To deploy, save first
+   and choose **Build Linux package**; see the package instructions below.
 
-The canvas uses horizontal nodes with operation summaries. **Readable 100%**,
-**Overview**, and **Focus selected** help navigate it. Project and Excel panels
-start hidden and open when needed. Execution order changes through step controls
-or YAML; canvas ports are not editable connections.
-
-Runs are offline: SQL and external HTTP calls are blocked. Generated workbooks
-are under `.studio/runs/` in the chosen workspace. Input workbooks are read-only.
-See the [Studio user guide](docs/MAI_STUDIO_USER_GUIDE.md) for undo/redo, shortcuts,
-save conflicts, and preview limitations.
+**Workflow canvas** provides a graph and guided step settings; **YAML source** is
+available for advanced definitions. Finish or discard incomplete block edits and
+apply or discard workbook setup changes before saving, running, switching views,
+or closing. Runs are offline: SQL and external HTTP calls are blocked. Generated
+workbooks are under `.studio/runs/`; input workbooks are read-only. See the
+[Studio user guide](docs/MAI_STUDIO_USER_GUIDE.md) for details and limitations.
 
 ### 4. Build a Windows installer
 

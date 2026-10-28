@@ -1,4 +1,11 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  lazy,
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
@@ -19,6 +26,10 @@ import { addOperation } from "./nodeAuthoring";
 import { WorkbookPanel } from "./WorkbookPanel";
 import { StepInspector } from "./StepInspector";
 import { PackageBuilder } from "./PackageBuilder";
+import { WorkflowSetup } from "./WorkflowSetup";
+import { readWorkbookSettings } from "./workflowSetup";
+import { workflowTemplates } from "./workflowTemplates";
+import { WorkflowTemplatePicker } from "./WorkflowTemplatePicker";
 import {
   isDesktop,
   request,
@@ -26,6 +37,8 @@ import {
   type Validation,
   type RunResult,
 } from "./api";
+const BlockEditor = lazy(() => import("./BlockEditor"));
+
 export default function App() {
   const document = useDocument(example);
   const [showPackageBuilder, setShowPackageBuilder] = useState(false);
@@ -36,13 +49,18 @@ export default function App() {
   const [showData, setShowData] = useState(false);
   const [fullData, setFullData] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
+  const [showSetup, setShowSetup] = useState(false);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [editorGeneration, setEditorGeneration] = useState(0);
   const [nodeSearch, setNodeSearch] = useState("");
   const flow = useRef<ReactFlowInstance<WorkflowGraphNode> | null>(null);
   const [loadedInspectPath, setLoadedInspectPath] = useState("");
   const { source, setSource } = document;
   const [selected, setSelected] = useState<string>();
   const [argumentDraft, setArgumentDraft] = useState<string>();
-  const hasDraft = argumentDraft !== undefined;
+  const [blockDraft, setBlockDraft] = useState(false);
+  const [setupDraft, setSetupDraft] = useState(false);
+  const hasDraft = argumentDraft !== undefined || blockDraft || setupDraft;
   const [workflowPaths, setWorkflowPaths] = useState<string[]>([]);
   const [workflowPath, setWorkflowPath] = useState("");
   const [openPath, setOpenPath] = useState("examples/parts-summary.yaml");
@@ -50,7 +68,7 @@ export default function App() {
   const [revision, setRevision] = useState<string | null>(null);
   const [pendingDiscard, setPendingDiscard] = useState<() => void>();
   const [workspace, setWorkspace] = useState(""),
-    [tab, setTab] = useState("graph");
+    [tab, setTab] = useState("blocks");
   const [validation, setValidation] = useState<Validation>(),
     [bindings, setBindings] = useState<Record<string, string>>({
       parts: "examples/parts.xlsx",
@@ -115,6 +133,10 @@ export default function App() {
   }, []);
   const currentIdentity = JSON.stringify({ source, workspace, bindings });
   const graph = useMemo(() => projectWorkflow(source), [source]);
+  const workbookSettings = useMemo(
+    () => readWorkbookSettings(source),
+    [source],
+  );
   async function task(label: string, action: () => Promise<void>) {
     setBusy(label);
     setError(false);
@@ -139,6 +161,9 @@ export default function App() {
       setWorkspace(selected.path);
       document.load(example);
       setArgumentDraft(undefined);
+      setBlockDraft(false);
+      setSetupDraft(false);
+      setEditorGeneration((value) => value + 1);
       setWorkflowPath("");
       setRevision(null);
       setWorkflowPaths([]);
@@ -168,6 +193,9 @@ export default function App() {
       }>("read_workflow", { path });
       document.load(loaded.source);
       setArgumentDraft(undefined);
+      setBlockDraft(false);
+      setSetupDraft(false);
+      setEditorGeneration((value) => value + 1);
       setWorkflowPath(loaded.path);
       setSavePath(loaded.path);
       setRevision(loaded.revision);
@@ -176,6 +204,29 @@ export default function App() {
       setValidatedSource("");
       setMessage(`Loaded ${loaded.path}.`);
     });
+  }
+  function startTemplate(template: (typeof workflowTemplates)[number]) {
+    document.load(template.source);
+    // A new workflow must be saved before it can be packaged.
+    document.markSaved("");
+    setWorkflowPath("");
+    setSavePath(`workflows/${template.id}.yaml`);
+    setRevision(null);
+    setArgumentDraft(undefined);
+    setBlockDraft(false);
+    setSetupDraft(false);
+    setSelected(undefined);
+    setValidation(undefined);
+    setValidatedSource("");
+    setArtifact(undefined);
+    setInspection(undefined);
+    setEditorGeneration((value) => value + 1);
+    setTab("blocks");
+    setShowTemplates(false);
+    setShowSetup(true);
+    setMessage(
+      "Start with workbook setup, then edit the connected blocks. Open Project & inputs to choose workbook paths.",
+    );
   }
   async function saveWorkflow() {
     if (hasDraft) {
@@ -222,7 +273,7 @@ export default function App() {
   }
   useEffect(() => {
     const keyboard = (event: KeyboardEvent) => {
-      if (showPackageBuilder) return;
+      if (showPackageBuilder || showTemplates || pendingDiscard) return;
       const target = event.target as HTMLElement;
       const typing =
         ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName) ||
@@ -238,18 +289,26 @@ export default function App() {
         ["z", "y"].includes(event.key.toLowerCase())
       ) {
         event.preventDefault();
+        event.stopPropagation();
         if (event.key.toLowerCase() === "y" || event.shiftKey) document.redo();
         else document.undo();
       } else if (
         !typing &&
         !busy &&
         !hasDraft &&
+        tab === "graph" &&
         event.altKey &&
         event.key === "Insert"
       ) {
         event.preventDefault();
         setShowLibrary(true);
-      } else if (!typing && !busy && !hasDraft && selectedIndex !== undefined) {
+      } else if (
+        !typing &&
+        !busy &&
+        !hasDraft &&
+        tab === "graph" &&
+        selectedIndex !== undefined
+      ) {
         if (event.key === "Delete" || event.key === "Backspace") {
           event.preventDefault();
           mutateSteps("delete");
@@ -270,8 +329,8 @@ export default function App() {
         }
       }
     };
-    window.addEventListener("keydown", keyboard);
-    return () => window.removeEventListener("keydown", keyboard);
+    window.addEventListener("keydown", keyboard, true);
+    return () => window.removeEventListener("keydown", keyboard, true);
   });
   async function validate() {
     if (hasDraft) return;
@@ -335,6 +394,13 @@ export default function App() {
           <small>WORKFLOW LAB</small>
         </div>
         <div className="toolbar">
+          <button
+            aria-expanded={showTemplates}
+            disabled={!!busy || packagePending}
+            onClick={() => setShowTemplates(!showTemplates)}
+          >
+            + New workflow
+          </button>
           <button
             aria-expanded={showProject}
             onClick={() => setShowProject(!showProject)}
@@ -449,6 +515,10 @@ export default function App() {
               inputs.
             </p>
             {(
+              workbookSettings?.inputs.map((input) => ({
+                name: input.id,
+                label: input.label,
+              })) ??
               validation?.inputs ?? [{ name: "parts", label: "Parts list" }]
             ).map((input) => (
               <label key={input.name}>
@@ -486,7 +556,11 @@ export default function App() {
         >
           <div className="documentbar">
             <strong>
-              ◇ {workflowPath || validation?.name || "Untitled workflow"}
+              ◇{" "}
+              {workflowPath ||
+                workbookSettings?.name ||
+                validation?.name ||
+                "Untitled workflow"}
               {document.dirty || hasDraft ? " • Unsaved" : ""}
             </strong>
             <span className="state">
@@ -497,7 +571,19 @@ export default function App() {
           </div>
           <nav>
             <button
+              className={tab === "blocks" ? "active" : ""}
+              disabled={hasDraft}
+              onClick={() => {
+                setTab("blocks");
+                setSelected(undefined);
+                setShowLibrary(false);
+              }}
+            >
+              Blocks
+            </button>
+            <button
               className={tab === "graph" ? "active" : ""}
+              disabled={hasDraft}
               onClick={() => setTab("graph")}
             >
               Workflow canvas
@@ -509,7 +595,12 @@ export default function App() {
             >
               YAML source
             </button>
-            <span>Left → right · {count} steps</span>
+            <span>
+              {count} connected steps ·{" "}
+              {tab === "blocks"
+                ? "Drag, snap, and configure"
+                : "Ordered workflow"}
+            </span>
           </nav>
           {document.dirty && !hasDraft && (
             <div className="notice" role="status">
@@ -519,9 +610,17 @@ export default function App() {
           )}
           {hasDraft && (
             <div className="notice" role="status">
-              Unapplied argument draft. Apply or discard it in the inspector
-              before saving, running, packaging, changing steps, switching
-              views, or undoing.
+              {blockDraft ? (
+                "Finish connecting and filling in your blocks, or discard block edits, before saving, running, or switching views."
+              ) : setupDraft ? (
+                "Apply or discard workbook settings before saving, running, or switching views."
+              ) : (
+                <>
+                  Unapplied argument draft. Apply or discard it in the inspector
+                  before saving, running, packaging, changing steps, switching
+                  views, or undoing.
+                </>
+              )}
             </div>
           )}
           <div className="authoring-toolbar">
@@ -540,44 +639,60 @@ export default function App() {
               Redo
             </button>
             <button
-              disabled={!!graph.error || !!busy || hasDraft}
-              onClick={() => setShowLibrary(!showLibrary)}
-              aria-expanded={showLibrary}
-              title="Choose a node from the library"
-            >
-              + Add node
-            </button>
-            <button
+              aria-expanded={showSetup}
               disabled={
-                selectedIndex === undefined ||
-                selectedIndex === 0 ||
+                setupDraft ||
                 !!busy ||
-                hasDraft
+                blockDraft ||
+                argumentDraft !== undefined
               }
-              onClick={() => mutateSteps("up")}
-              title="Alt+↑"
+              onClick={() => setShowSetup(!showSetup)}
             >
-              Move up
+              Workbook setup
             </button>
-            <button
-              disabled={
-                selectedIndex === undefined ||
-                selectedIndex >= count - 1 ||
-                !!busy ||
-                hasDraft
-              }
-              onClick={() => mutateSteps("down")}
-              title="Alt+↓"
-            >
-              Move down
-            </button>
-            <button
-              disabled={selectedIndex === undefined || !!busy || hasDraft}
-              onClick={() => mutateSteps("delete")}
-              title="Delete"
-            >
-              Delete step
-            </button>
+            {tab === "graph" && (
+              <>
+                <button
+                  disabled={!!graph.error || !!busy || hasDraft}
+                  onClick={() => setShowLibrary(!showLibrary)}
+                  aria-expanded={showLibrary}
+                  title="Choose a node from the library"
+                >
+                  + Add node
+                </button>
+                <button
+                  disabled={
+                    selectedIndex === undefined ||
+                    selectedIndex === 0 ||
+                    !!busy ||
+                    hasDraft
+                  }
+                  onClick={() => mutateSteps("up")}
+                  title="Alt+↑"
+                >
+                  Move up
+                </button>
+                <button
+                  disabled={
+                    selectedIndex === undefined ||
+                    selectedIndex >= count - 1 ||
+                    !!busy ||
+                    hasDraft
+                  }
+                  onClick={() => mutateSteps("down")}
+                  title="Alt+↓"
+                >
+                  Move down
+                </button>
+                <button
+                  disabled={selectedIndex === undefined || !!busy || hasDraft}
+                  onClick={() => mutateSteps("delete")}
+                  title="Delete"
+                >
+                  Delete step
+                </button>
+              </>
+            )}
           </div>
           {showLibrary && (
             <section className="node-library" aria-label="Node library">
@@ -639,115 +754,149 @@ export default function App() {
               </div>
             </section>
           )}
-          <div className="editor">
-            {tab === "graph" ? (
-              <div className="canvas-layout">
-                <div className="canvas">
-                  <ReactFlow<WorkflowGraphNode>
-                    nodes={graph.nodes.map((node) => ({
-                      ...node,
-                      selected: node.id === selected,
-                    }))}
-                    onNodeClick={(_, node) => {
-                      if (!hasDraft) setSelected(node.id);
-                    }}
-                    onPaneClick={() => {
-                      if (!hasDraft) setSelected(undefined);
-                    }}
-                    deleteKeyCode={null}
-                    edges={graph.edges}
-                    nodeTypes={workflowNodeTypes}
-                    onInit={(instance) => {
-                      flow.current = instance;
-                    }}
-                    defaultViewport={{ x: 48, y: 80, zoom: 1 }}
-                    fitViewOptions={{ minZoom: 0.1, maxZoom: 1, padding: 0.15 }}
-                    nodesConnectable={false}
-                    nodesDraggable={false}
-                    edgesReconnectable={false}
-                    minZoom={0.1}
-                    maxZoom={1.75}
-                  >
-                    <Background gap={22} color="#d9e0e8" />
-                    <Controls showFitView={false} showInteractive={false} />
-                    <MiniMap pannable zoomable />
-                  </ReactFlow>
-                  <div
-                    className="canvas-navigation"
-                    aria-label="Canvas navigation"
-                  >
-                    <button
-                      onClick={() =>
-                        void flow.current?.setViewport(
-                          { x: 48, y: 80, zoom: 1 },
-                          { duration: 200 },
-                        )
-                      }
+          <div className={`editor ${showSetup ? "with-setup" : ""}`}>
+            {showSetup && (
+              <WorkflowSetup
+                key={`setup-${editorGeneration}`}
+                source={source}
+                onChange={setSource}
+                onDraftChange={setSetupDraft}
+                disabled={!!busy || blockDraft || argumentDraft !== undefined}
+              />
+            )}
+            <div className="editor-content">
+              {tab === "blocks" ? (
+                <Suspense
+                  fallback={
+                    <div className="editor-loading" role="status">
+                      Opening block editor…
+                    </div>
+                  }
+                >
+                  <BlockEditor
+                    key={editorGeneration}
+                    source={source}
+                    onChange={setSource}
+                    disabled={!!busy || setupDraft}
+                    onDraftChange={setBlockDraft}
+                    onAdvanced={() => setTab("source")}
+                  />
+                </Suspense>
+              ) : tab === "graph" ? (
+                <div className="canvas-layout">
+                  <div className="canvas">
+                    <ReactFlow<WorkflowGraphNode>
+                      nodes={graph.nodes.map((node) => ({
+                        ...node,
+                        selected: node.id === selected,
+                      }))}
+                      onNodeClick={(_, node) => {
+                        if (!hasDraft) setSelected(node.id);
+                      }}
+                      onPaneClick={() => {
+                        if (!hasDraft) setSelected(undefined);
+                      }}
+                      deleteKeyCode={null}
+                      edges={graph.edges}
+                      nodeTypes={workflowNodeTypes}
+                      onInit={(instance) => {
+                        flow.current = instance;
+                      }}
+                      defaultViewport={{ x: 48, y: 80, zoom: 1 }}
+                      fitViewOptions={{
+                        minZoom: 0.1,
+                        maxZoom: 1,
+                        padding: 0.15,
+                      }}
+                      nodesConnectable={false}
+                      nodesDraggable={false}
+                      edgesReconnectable={false}
+                      minZoom={0.1}
+                      maxZoom={1.75}
                     >
-                      Readable 100%
-                    </button>
-                    <button
-                      onClick={() =>
-                        void flow.current?.fitView({
-                          padding: 0.15,
-                          duration: 200,
-                        })
-                      }
+                      <Background gap={22} color="#d9e0e8" />
+                      <Controls showFitView={false} showInteractive={false} />
+                      <MiniMap pannable zoomable />
+                    </ReactFlow>
+                    <div
+                      className="canvas-navigation"
+                      aria-label="Canvas navigation"
                     >
-                      Overview
-                    </button>
-                    <button
-                      disabled={!selected}
-                      onClick={() =>
-                        void flow.current?.fitView({
-                          nodes: [{ id: selected! }],
-                          minZoom: 1,
-                          maxZoom: 1,
-                          duration: 200,
-                        })
-                      }
-                    >
-                      Focus selected
-                    </button>
-                  </div>
-                  {graph.error && (
-                    <div role="alert" className="graph-error">
-                      {graph.error}
                       <button
-                        disabled={hasDraft}
-                        onClick={() => setTab("source")}
+                        onClick={() =>
+                          void flow.current?.setViewport(
+                            { x: 48, y: 80, zoom: 1 },
+                            { duration: 200 },
+                          )
+                        }
                       >
-                        Fix in YAML
+                        Readable 100%
+                      </button>
+                      <button
+                        onClick={() =>
+                          void flow.current?.fitView({
+                            padding: 0.15,
+                            duration: 200,
+                          })
+                        }
+                      >
+                        Overview
+                      </button>
+                      <button
+                        disabled={!selected}
+                        onClick={() =>
+                          void flow.current?.fitView({
+                            nodes: [{ id: selected! }],
+                            minZoom: 1,
+                            maxZoom: 1,
+                            duration: 200,
+                          })
+                        }
+                      >
+                        Focus selected
                       </button>
                     </div>
+                    {graph.error && (
+                      <div role="alert" className="graph-error">
+                        {graph.error}
+                        <button
+                          disabled={hasDraft}
+                          onClick={() => setTab("source")}
+                        >
+                          Fix in YAML
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  {selected && (
+                    <StepInspector
+                      draft={argumentDraft}
+                      onDraftChange={setArgumentDraft}
+                      disabled={!!busy || setupDraft}
+                      source={source}
+                      selected={selected}
+                      onChange={setSource}
+                      onSource={() => setTab("source")}
+                    />
                   )}
                 </div>
-                {selected && (
-                  <StepInspector
-                    draft={argumentDraft}
-                    onDraftChange={setArgumentDraft}
-                    disabled={!!busy}
-                    source={source}
-                    selected={selected}
-                    onChange={setSource}
-                    onSource={() => setTab("source")}
+              ) : (
+                <div className="source-editor">
+                  <div className="source-help">
+                    Advanced editing · Blocks and workbook setup generate this
+                    file automatically. Validation uses the production Go
+                    parser.
+                  </div>
+                  <textarea
+                    aria-label="Workflow YAML source"
+                    spellCheck={false}
+                    disabled={!!busy || setupDraft}
+                    value={source}
+                    onChange={(e) => setSource(e.target.value)}
                   />
-                )}
-              </div>
-            ) : (
-              <div className="source-editor">
-                <div className="source-help">
-                  Executable source · Validation uses the production Go parser.
                 </div>
-                <textarea
-                  aria-label="Workflow YAML source"
-                  spellCheck={false}
-                  disabled={!!busy}
-                  value={source}
-                  onChange={(e) => setSource(e.target.value)}
-                />
-              </div>
-            )}
+              )}
+            </div>
           </div>
           {showData && (
             <WorkbookPanel
@@ -769,6 +918,15 @@ export default function App() {
           )}
         </section>
       </main>
+      {showTemplates && (
+        <WorkflowTemplatePicker
+          onClose={() => setShowTemplates(false)}
+          onSelect={(template) => {
+            setShowTemplates(false);
+            discardGuard(() => startTemplate(template));
+          }}
+        />
+      )}
       {showPackageBuilder && (
         <PackageBuilder
           workspace={workspace}

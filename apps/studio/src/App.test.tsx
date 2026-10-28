@@ -20,6 +20,20 @@ const native = vi.hoisted(() => ({
     undefined | ((event: { preventDefault: () => void }) => void),
 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: native.invoke }));
+// SVG rendering is checked in the browser smoke test. Keep the editor's draft
+// contract here so the app's file and navigation guards use actual state.
+vi.mock("./BlockEditor", () => ({
+  default: ({
+    onDraftChange,
+  }: {
+    onDraftChange: (pending: boolean) => void;
+  }) => (
+    <section aria-label="Workflow block editor">
+      <button onClick={() => onDraftChange(true)}>Disconnect a block</button>
+      <button onClick={() => onDraftChange(false)}>Discard block edits</button>
+    </section>
+  ),
+}));
 vi.mock("@tauri-apps/api/window", () => ({
   getCurrentWindow: () => ({
     destroy: native.destroy,
@@ -77,12 +91,76 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+it("starts with blocks and protects incomplete edits from save, run, view changes, and close", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+  await screen.findByRole("region", { name: "Workflow block editor" });
+  expect(screen.queryByLabelText("Workflow YAML source")).toBeNull();
+  await user.click(screen.getByRole("button", { name: "Project & inputs" }));
+  await user.click(screen.getByRole("button", { name: /Open workspace/ }));
+  await user.click(
+    await screen.findByRole("button", { name: "Disconnect a block" }),
+  );
+  for (const name of [
+    /Save workflow/,
+    /Run workflow/,
+    /Validate/,
+    "Workflow canvas",
+    "YAML source",
+  ]) {
+    expect(
+      (screen.getByRole("button", { name }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+  }
+  await user.keyboard("{Control>}s{/Control}");
+  expect(
+    native.invoke.mock.calls.some(([command]) => command === "save_workflow"),
+  ).toBe(false);
+  const preventDefault = vi.fn();
+  act(() => native.closeRequested!({ preventDefault }));
+  expect(preventDefault).toHaveBeenCalledOnce();
+  await user.click(screen.getByRole("button", { name: "Keep editing" }));
+  await user.click(screen.getByRole("button", { name: "Discard block edits" }));
+  expect(
+    (screen.getByRole("button", { name: /Save workflow/ }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(false);
+});
+
+it("creates a new unsaved workflow from a template without editing YAML", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(screen.getByRole("button", { name: /New workflow/ }));
+  await user.click(screen.getByRole("button", { name: /Copy a worksheet/ }));
+  expect(
+    (screen.getByLabelText("Workflow display name") as HTMLInputElement).value,
+  ).toBe("Copy a worksheet");
+  expect(screen.getByText(/Copy a worksheet.*Unsaved/)).toBeTruthy();
+  expect(screen.queryByLabelText("Workflow YAML source")).toBeNull();
+  fireEvent.change(screen.getByLabelText("Workflow display name"), {
+    target: { value: "My workbook" },
+  });
+  expect(
+    (screen.getByRole("button", { name: "YAML source" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  await user.click(
+    screen.getByRole("button", { name: "Apply workbook settings" }),
+  );
+  await user.click(screen.getByRole("button", { name: "YAML source" }));
+  expect(
+    (screen.getByLabelText("Workflow YAML source") as HTMLTextAreaElement)
+      .value,
+  ).toContain("name: My workbook");
+});
+
 async function openInspector() {
   const user = userEvent.setup();
   render(<App />);
   await user.click(screen.getByRole("button", { name: "Project & inputs" }));
   await user.click(screen.getByRole("button", { name: /Open workspace/ }));
   await waitFor(() => expect(screen.getByText("/project")).toBeTruthy());
+  await user.click(screen.getByRole("button", { name: "Workflow canvas" }));
   await user.click(screen.getByRole("button", { name: "Select step.0" }));
   await user.click(screen.getByRole("button", { name: "Advanced YAML" }));
   return user;
