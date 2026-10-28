@@ -94,6 +94,16 @@ label select {
   align-items: center;
   gap: 10px;
 }
+.brand {
+  flex-shrink: 0;
+}
+.toolbar {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.toolbar button {
+  white-space: nowrap;
+}
 .brand strong {
   font-size: 26px;
   letter-spacing: -1px;
@@ -245,6 +255,83 @@ nav > span {
   min-height: 220px;
   position: relative;
   background: #132238;
+  display: flex;
+  overflow: hidden;
+}
+.editor-content {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+}
+.editor > .workflow-setup {
+  flex: 0 0 320px;
+  width: 320px;
+  border-right: 1px solid #cad6e6;
+}
+.editor-loading {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  background: #f4f7fb;
+  color: #526983;
+}
+.template-dialog {
+  width: min(760px, calc(100vw - 40px));
+  padding: 30px;
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 20px 80px #0004;
+}
+.template-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 24px;
+  justify-content: space-between;
+  margin-bottom: 22px;
+}
+.template-heading h2 {
+  margin: 0 0 8px;
+  font-size: 26px;
+}
+.template-heading p {
+  color: #526983;
+  line-height: 1.5;
+  margin: 0;
+}
+.template-heading button {
+  flex-shrink: 0;
+}
+.template-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.template-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  text-align: left;
+  padding: 24px;
+  gap: 12px;
+  border-radius: 12px;
+}
+.template-card > span {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: #eaf1ff;
+  color: #275ad5;
+  font-size: 30px;
+}
+.template-card strong {
+  font-size: 19px;
+}
+.template-card small {
+  color: #526983;
+  font-weight: 400;
+  line-height: 1.6;
 }
 .canvas-layout {
   display: flex;

@@ -16,7 +16,7 @@ describe("ordered workflow projection", () => {
       graph.nodes[0].position.x,
     );
     expect(new Set(graph.nodes.map((node) => node.position.y)).size).toBe(1);
-    expect(graph.nodes[2].data.summary).toBe("Group by ID · sum Quantity");
+    expect(graph.nodes[2].data.summary).toBe("Group by Part Number · sum Quantity");
   });
   it("represents nested branches with distinct identities", () => {
     const graph = projectWorkflow(

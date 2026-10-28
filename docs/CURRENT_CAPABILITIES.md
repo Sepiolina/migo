@@ -1,20 +1,20 @@
 # Current capabilities
 
 This describes the implementation including the Linux package builder milestone
-as of **27 October 2026**. The [implementation plan](MAI_DEV_TOOL_IMPLEMENTATION_PLAN.md)
+as of **28 October 2026**. The [implementation plan](MAI_DEV_TOOL_IMPLEMENTATION_PLAN.md)
 describes the broader roadmap; features in that plan are not all available yet.
 
 ## What you can do today
 
-Use **Mai Studio** to open a local workspace, create or edit a YAML workflow,
-configure common steps through forms, validate it, run it against Excel fixtures,
+Use **Mai Studio** to open a local workspace, create or edit a workflow with visual blocks,
+configure workbook inputs and outputs, validate it, run it against Excel fixtures,
 inspect the generated workbook, and build a Linux deployment ZIP. Use
 **MaiService** to serve workflows over HTTP, including configured SQL Server and REST/SAP enrichment. Use **migo** to
 execute a workflow from the command line without starting a server.
 
 | Component | Purpose | Current execution mode |
 | --- | --- | --- |
-| Mai Studio | Desktop workflow development with React Flow and Excel inspection | Local, offline fixture runs; external SQL/HTTP calls blocked |
+| Mai Studio | Desktop block and graph workflow editing with Excel inspection | Local, offline fixture runs; external SQL/HTTP calls blocked |
 | MaiService | Go HTTP microservice for processing uploaded workbooks | Local or server deployment; external integrations depend on configuration and connectivity |
 | migo | Go command-line workflow runner | Local execution, optional runtime configuration and SQL stub |
 
@@ -25,8 +25,8 @@ execute a workflow from the command line without starting a server.
 - Choose a local project folder through the native desktop picker.
 - Discover YAML workflows under `workflows/`, or open another workspace-relative
   YAML path, such as `examples/parts-summary.yaml`.
-- Create a workflow by editing the example and saving to an unused `.yaml` or
-  `.yml` path. The parent directory must already exist.
+- Create a workflow from **Copy a worksheet** or **Filter and summarize**, then
+  save to an unused `.yaml` or `.yml` path. The parent directory must already exist.
 - Save changes with file revision checks. If another program changed the file,
   Studio rejects the overwrite and keeps the editor contents for recovery or Save As.
 - Undo and redo source/step edits within the current session.
@@ -38,48 +38,29 @@ to the selected workspace, with path and symlink checks. These protections do no
 replace operating-system permissions or backups. There is no autosave, crash
 recovery store, collaboration, or persisted input-binding profile yet.
 
-### Visual editor
+### Visual editors
 
-The canvas displays ordered execution from left to right using larger,
-operation-specific cards with titles, icons, colours, and readable summaries.
-Branches have separate paths and connect back to the next ordered step.
+**Blocks** is the default editor. Blockly provides a snap-together typed step
+chain and expression blocks for conditions and calculations. Common steps include
+reading, filtering, setting, renaming and selecting columns, sorting, grouping,
+joining, removing duplicates, and saving datasets. Workbook setup edits the
+workflow name, input identifiers and labels, and output sheet and saved table
+names while preserving advanced settings such as styles. Changing identifiers
+requires updating matching blocks. Incomplete or disconnected blocks and pending
+workbook setup changes must be completed or discarded before saving, running,
+switching views, or closing; invalid setup cannot be applied.
 
-- Start at readable 100% scale; use **Overview** to see the full graph or
-  **Focus selected** to inspect a particular node.
-- Search the **Add node** library, append a supported operation, select it, and
-  configure its settings.
-- Move top-level steps earlier or later, or delete them. Moving a compound step
-  also moves its contained branches.
-- Show **Project & inputs** only when needed; it does not occupy the canvas by default.
-- Use **YAML source** for complete workflow definitions and complex operations.
+Unsupported, nested, or custom steps and unsupported expressions are preserved
+as opaque blocks rather than fully editable. Complex branching and other advanced
+shapes use **YAML source**. Comma-separated list fields cannot represent a single
+name containing a comma; unsupported existing shapes are preserved. Column value
+blocks offer number and text conversion; Go determines runtime types and behavior.
 
-The graph is an editor for the existing ordered YAML engine. Execution order is
-not determined by dragging cards or drawing arbitrary wires. Nested steps are
-visible, but nested authoring still uses source editing.
-
-### Guided node settings
-
-| Node | Available controls |
-| --- | --- |
-| Read data | Input/saved-table reference; structured read settings where supported, including explicit sheet name or index |
-| Filter rows | Column, comparison, text/number type, and value; expression mode for complex conditions |
-| Calculate columns | Column/expression rows |
-| Select columns | Output-name/source-column rows |
-| Rename columns | Current/new-name rows or a supported name expression |
-| Sort rows | Columns, descending order, numeric comparison |
-| Group rows | Grouping columns and supported aggregation column lists |
-| Join tables | Saved table, matching columns, join mode, normalization, and columns to add |
-| Save table | Saved dataset name |
-
-**Apply changes** records one undoable edit; **Discard changes** abandons the
-pending settings. Guided edits preserve settings outside the exposed controls.
-Shapes that cannot be represented safely—such as certain ordered numeric-looking
-mapping keys or comma-containing column names—use **Advanced YAML** instead.
-
-Other engine operations, including branching, SQL, REST, deduplication, and window
-calculations, can appear as named cards when loaded from YAML. They are not all
-available as guided forms or library entries. Calculated expressions still require
-expression syntax; this is not a complete Scratch-style block language.
+**Workflow canvas** remains available as a second view, with ordered graph cards,
+a searchable node library and guided top-level settings. Canvas connections show
+execution flow; they are not manually editable wires. Guided settings preserve
+options outside their controls and offer **Advanced YAML** for unsupported shapes.
+Go remains the authority for validation and execution.
 
 ### Validation and execution
 

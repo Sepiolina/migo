@@ -1,8 +1,6 @@
 # Mai Studio user guide
 
-![Canvas with distinct nodes and guided filter settings](assets/studio-editor.png)
-
-Mai Studio edits YAML workflows and runs them locally with the production Go
+Mai Studio builds workflows with visual blocks and runs them locally with the production Go
 engine. This milestone supports offline Excel fixtures. SQL and external REST
 connections are disabled.
 
@@ -38,12 +36,12 @@ workspace-relative YAML file in **Open path** and choose
 is a built-in parts-summary example. Workflow controls and input bindings are in
 **Project & inputs**.
 
-To create a workflow, edit that document or replace its YAML, enter a new
-workspace-relative **Save path**, and choose **Save workflow**. For example, use
-`workflows/summary.yaml`; create the `workflows` directory outside Studio first if
-it does not exist. Parent directories must already exist. Saving to a different,
-unused path creates a copy. An existing destination cannot be overwritten this
-way. `Ctrl/Cmd+S` saves to the current Save path.
+Choose **+ New workflow** and select **Copy a worksheet** or **Filter and
+summarize**. The template becomes the current document and suggests a Save path.
+For a new file, choose an unused workspace-relative path such as
+`workflows/summary.yaml`; create the parent directory outside Studio first if
+needed. Saving to a different unused path creates a copy; an existing destination
+cannot be overwritten this way. `Ctrl/Cmd+S` saves to the current Save path.
 
 A dot and **Unsaved** mark changes since the last successful save or load.
 Switching workflows or workspaces, or closing the native window, asks whether to
@@ -58,53 +56,60 @@ to compare the external changes. Studio has no merge dialog or force-overwrite
 control. Discovery is refreshed when opening a workspace; reopen the workspace if
 files added externally do not appear.
 
-## Edit and inspect steps
+## Build a workflow with blocks
 
-The canvas opens with the project sidebar and Excel panel hidden, leaving space
-for the workflow. **Project & inputs** and **Excel data** toggle those panels.
-Nodes show their operation, category, argument summary, and execution number in a
-horizontal flow; branch connections reflect the YAML execution structure.
+**Blocks** opens by default. In **Workbook setup**, edit the workflow display
+name, input identifiers and labels, and output sheet names and saved table names.
+Choose **Apply workbook settings** or **Discard setup changes**. Advanced output
+settings such as styles are preserved. If existing settings cannot be safely
+represented, use the advanced editor to change them. Renaming an input or table
+requires updating matching blocks yourself.
 
-Use **Readable 100%** to return to the normal node size, **Overview** to fit the
-workflow, and **Focus selected** to bring a selected node into view. Panning and
-zooming change the view, not execution order.
+In **Read source**, choose a sheet **name / first** or **number**. Leave the
+name blank for the first sheet; numbered sheets start at 1.
 
-Choose **+ Add node** to open the searchable node library. Search by operation,
-title, or description, then choose a node to append it to the workflow. Available
-operations include reading data, filtering, calculating/selecting/renaming
-columns, sorting, grouping, joining, and saving a table. The new node is selected
-so you can configure it. Defaults are starting points; fill in the required
-settings and validate before running.
+For a first workflow, choose **+ New workflow** and **Copy a worksheet**. In
+Workbook setup, keep input identifier `parts` and set the output sheet's saved
+table name to `result`. In the connected chain, set **Read source** to `parts`
+and enter a sheet name if needed; set **Save dataset as** to `result`. Apply any
+workbook setup changes. The output sheet refers to that saved dataset. Bind a
+workbook and run it as described below, then save the workflow and build a Linux
+package if needed.
 
-Select a top-level step to open its inspector. **Settings** is the default view
-and provides operation-specific fields: conditions, table names, column rows,
-sort/group columns, and join options where supported. Comma-separated column
-fields accept column names, and **Add row** adds a column mapping or calculation.
-**Apply changes** records the draft as one undoable edit; **Discard changes**
-returns to the last applied argument. Until you apply or discard
-a draft, Studio blocks Save, Run, source navigation, and other step edits.
+Drag blocks from the toolbox and snap steps into the Workflow chain. Expression
+blocks snap into compatible inputs for conditions and calculations. Common blocks
+read, filter, set, rename and select columns, sort, group, join, remove duplicates,
+and save datasets. Conditions and calculations can combine column values, text,
+numbers, booleans, comparisons, arithmetic, and logic. The column value dropdown
+can convert a value to a number or text; actual types and behavior are determined
+by the Go runtime. List fields use comma-separated names; names containing commas
+cannot be represented as individual entries there and are preserved when loaded
+in unsupported shapes.
 
-Use **Advanced YAML** for argument options or shapes the guided form cannot
-represent. Existing options outside the form fields are preserved. The inspector
-offers a fallback when guided settings are unavailable. Use **YAML source** for
-nested steps, unsupported step forms, changing operation names, and complete
-workflow definitions. YAML remains the executable source.
+Incomplete or disconnected blocks remain as a draft. Finish connecting and filling
+them, or discard block edits, before saving, running, switching views, or closing.
+Likewise, apply or discard workbook setup changes; invalid settings cannot be
+applied. Existing unsupported, nested, or custom steps appear as preserved blocks,
+and unsupported expressions as preserved custom expression blocks. They retain
+their source but are not fully editable in Blocks. Use **YAML source** for complex
+branching and other advanced shapes. Go validates and executes the workflow.
 
-Select a top-level step and use **Delete step**, **Move up**, or **Move down** to
-change execution order. Moving a compound step moves its branches with it. Canvas
-nodes cannot be dragged into a new execution order or connected manually; the
-visible ports describe the current flow. Source errors should be corrected in
-**YAML source**.
+**Workflow canvas** shows the ordered graph and offers the existing searchable
+**+ Add node** library and guided top-level settings. Select a step, edit its
+settings, and choose **Apply changes** or **Discard changes**. Canvas ports show
+the flow; they are not editable connections. **Readable 100%**, **Overview**, and
+**Focus selected** control the view. Use **Advanced YAML** or **YAML source** for
+settings that the guided forms cannot represent.
 
 **Undo** and **Redo** cover source edits and applied step changes. Loading a
-document resets this history. Outside text fields, use `Ctrl/Cmd+Z` to undo and
-`Ctrl/Cmd+Shift+Z` or `Ctrl/Cmd+Y` to redo. Other shortcuts outside text fields are
-`Alt+Insert` to open the node library, `Delete`/`Backspace` to delete the
-selected top-level step, and `Alt+Up`/`Alt+Down` to move it. Text fields retain their normal text shortcuts.
+document resets history. Outside text fields, `Ctrl/Cmd+Z` undoes and
+`Ctrl/Cmd+Shift+Z` or `Ctrl/Cmd+Y` redoes. Canvas shortcuts include `Alt+Insert`
+for the node library, `Delete`/`Backspace` to delete the selected top-level step,
+and `Alt+Up`/`Alt+Down` to move it.
 
 ## Validate, bind inputs, and run
 
-1. Choose **Validate** to check the current editor YAML with the Go parser. Errors
+1. Choose **Validate** to check the current workflow with the Go parser. Errors
    appear in the status bar. Validation populates the declared input fields.
 2. Open **Project & inputs**. Under **Input files**, bind each input name to an
    existing workbook inside the workspace. For the initial parts-summary example, bind `parts` to
@@ -124,7 +129,7 @@ SHA-256 identify the generated XLSX artifact. The preview reads actual workbook
 cell values; styling, formula metadata, and full Excel visual fidelity are not
 shown. Open the artifact in a spreadsheet application for those details.
 
-Editing YAML or changing input bindings marks the displayed output stale. Run
+Editing the workflow or changing input bindings marks the displayed output stale. Run
 again to refresh it. Changes to workbook files made outside Studio are not
 tracked automatically; rerun after changing them.
 
@@ -270,10 +275,6 @@ from starting; see the development guide for dependencies.
 
 Intermediate execution traces, cancellation controls, and live desktop
 connections are planned.
-
-For **Filter rows**, use **Build condition** to choose a column, comparison, and
-text or number value. Studio writes the expression for you. Existing complex
-conditions stay in Expression mode until you deliberately replace them.
 
 Each package also includes `release.json` with the target and available build
 provenance, and `sbom.cdx.json` with a CycloneDX Go dependency inventory. These

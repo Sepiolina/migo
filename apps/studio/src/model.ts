@@ -7,9 +7,9 @@ export const example = `name: Parts summary
 input:
   parts: {label: Parts list}
 steps:
-  - from: parts[Parts]
+  - from: {input: parts, sheet: Parts, trim: true}
   - filter: num(Quantity) > 0
-  - group: {by: [ID], sum: [Quantity]}
+  - group: {by: [Part Number], sum: [Quantity]}
   - save: summary
 output:
   sheets: {Parts: summary}
