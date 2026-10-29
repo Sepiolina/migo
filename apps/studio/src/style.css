@@ -720,3 +720,9 @@ tbody th {
 .data-open .editor {
   min-height: 120px;
 }
+.next-action { padding: 8px 20px; background: #eef5ff; color: #314f78; font-size: 14px; }
+.next-action button { padding: 3px 8px; font-size: inherit; }
+.build-view { display: flex; gap: 4px; }
+.build-view button[aria-pressed="true"] { background: #eaf1ff; border-color: #275ad5; }
+.column-suggestions { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
+.column-suggestions button { padding: 4px 8px; font-size: 13px; }

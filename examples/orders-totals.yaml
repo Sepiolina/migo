@@ -1,0 +1,12 @@
+name: Customer order totals
+input:
+  orders: {label: Orders workbook}
+steps:
+  - from: {input: orders, sheet: Orders, trim: true}
+  - filter: num(Quantity) > 0
+  - set:
+      Line total: num(Quantity) * num(col("Unit price"))
+  - group: {by: [Customer], sum: [Line total]}
+  - save: totals
+output:
+  sheets: {Totals: totals}

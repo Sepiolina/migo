@@ -17,7 +17,8 @@ const native = vi.hoisted(() => ({
   invoke: vi.fn(),
   destroy: vi.fn(async () => {}),
   closeRequested: undefined as
-    undefined | ((event: { preventDefault: () => void }) => void),
+    | undefined
+    | ((event: { preventDefault: () => void }) => void),
 }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: native.invoke }));
 // SVG rendering is checked in the browser smoke test. Keep the editor's draft
@@ -376,4 +377,59 @@ it("opens the separate package dialog and blocks native window close during a bu
       }) as HTMLButtonElement
     ).disabled,
   ).toBe(true);
+});
+
+it("adds, edits, reorders, and deletes steps through the outline", async () => {
+  const user = userEvent.setup();
+  render(<App />);
+  await user.click(screen.getByRole("button", { name: /Add step/ }));
+  await user.type(screen.getByLabelText("Search steps"), "filter");
+  await user.click(
+    screen.getByRole("button", { name: /Filter rows Keep rows/ }),
+  );
+  expect(screen.getByRole("region", { name: "Step outline" })).toBeTruthy();
+  expect(
+    screen
+      .getByRole("button", { name: /Filter rows Keep every row/ })
+      .getAttribute("aria-pressed"),
+  ).toBe("true");
+  await user.click(screen.getByRole("button", { name: "Advanced YAML" }));
+  fireEvent.change(screen.getByLabelText("Step argument"), {
+    target: { value: '"num(Quantity) > 5"' },
+  });
+  expect(
+    (screen.getByRole("button", { name: "Move up" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  await user.click(screen.getByRole("button", { name: "Apply changes" }));
+  await user.click(
+    screen.getByRole("button", {
+      name: /Filter rows Quantity is greater than 5/,
+    }),
+  );
+  await user.keyboard("{Alt>}{ArrowUp}{/Alt}");
+  expect(document.activeElement?.getAttribute("aria-pressed")).toBe("true");
+  await user.click(screen.getByRole("button", { name: "Project & inputs" }));
+  await user.keyboard("{Delete}{Alt>}{ArrowUp}{/Alt}");
+  expect(
+    screen
+      .getByRole("button", { name: /Filter rows Quantity is greater than 5/ })
+      .getAttribute("aria-pressed"),
+  ).toBe("true");
+  await user.click(screen.getByRole("button", { name: "YAML source" }));
+  const text = (
+    screen.getByLabelText("Workflow YAML source") as HTMLTextAreaElement
+  ).value;
+  expect(text.indexOf("num(Quantity) > 5")).toBeLessThan(
+    text.indexOf("save: summary"),
+  );
+  await user.click(screen.getByRole("button", { name: "Build" }));
+  await user.click(screen.getByRole("button", { name: "Delete step" }));
+  expect(document.activeElement?.getAttribute("aria-pressed")).toBe("true");
+  await user.click(screen.getByRole("button", { name: "Undo" }));
+  await user.click(screen.getByRole("button", { name: "YAML source" }));
+  expect(
+    (screen.getByLabelText("Workflow YAML source") as HTMLTextAreaElement)
+      .value,
+  ).toContain("num(Quantity) > 5");
 });

@@ -1,7 +1,7 @@
 # Current capabilities
 
 This describes the implementation including the Linux package builder milestone
-as of **28 October 2026**. The [implementation plan](MAI_DEV_TOOL_IMPLEMENTATION_PLAN.md)
+as of **29 October 2026**. The [implementation plan](MAI_DEV_TOOL_IMPLEMENTATION_PLAN.md)
 describes the broader roadmap; features in that plan are not all available yet.
 
 ## What you can do today
@@ -25,7 +25,7 @@ execute a workflow from the command line without starting a server.
 - Choose a local project folder through the native desktop picker.
 - Discover YAML workflows under `workflows/`, or open another workspace-relative
   YAML path, such as `examples/parts-summary.yaml`.
-- Create a workflow from **Copy a worksheet** or **Filter and summarize**, then
+- Create a workflow from **Copy a worksheet**, **Filter and summarize**, or **Customer order totals**, then
   save to an unused `.yaml` or `.yml` path. The parent directory must already exist.
 - Save changes with file revision checks. If another program changed the file,
   Studio rejects the overwrite and keeps the editor contents for recovery or Save As.
@@ -56,7 +56,17 @@ shapes use **YAML source**. Comma-separated list fields cannot represent a singl
 name containing a comma; unsupported existing shapes are preserved. Column value
 blocks offer number and text conversion; Go determines runtime types and behavior.
 
-**Workflow canvas** remains available as a second view, with ordered graph cards,
+**Build → Step outline** offers the same ordered workflow through readable step
+buttons and the guided inspector, with move-up/down and delete controls. **Add
+step** searches the operation catalog and appends a step, then opens its settings.
+Nested branches retain their source fallback. The next-action strip points to
+project setup, validation, running, and results; successful runs open Excel data.
+Column suggestions use an inspected first-row header and supported upstream
+transformations. They are advisory; unknown schemas still need manual names.
+The **Orders totals** starter and `examples/orders.xlsx` provide a complete
+filter/calculate/group/export walkthrough with expected totals Acme 50 and Beta 5.
+
+**Overview** (the workflow canvas) remains available as a second view, with ordered graph cards,
 a searchable node library and guided top-level settings. Canvas connections show
 execution flow; they are not manually editable wires. Guided settings preserve
 options outside their controls and offer **Advanced YAML** for unsupported shapes.

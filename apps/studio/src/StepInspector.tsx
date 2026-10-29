@@ -152,27 +152,53 @@ function ColumnsInput({
   value,
   disabled,
   onChange,
+  suggestions,
 }: {
   value: string[];
   disabled: boolean;
   onChange: (value: string[]) => void;
+  suggestions: string[];
 }) {
   const [text, setText] = useState(value.join(", "));
   return (
-    <input
-      value={text}
-      disabled={disabled}
-      onChange={(event) => {
-        const next = event.target.value;
-        setText(next);
-        onChange(
-          next
-            .split(",")
-            .map((part) => part.trim())
-            .filter(Boolean),
-        );
-      }}
-    />
+    <span>
+      <input
+        value={text}
+        disabled={disabled}
+        onChange={(event) => {
+          const next = event.target.value;
+          setText(next);
+          onChange(
+            next
+              .split(",")
+              .map((part) => part.trim())
+              .filter(Boolean),
+          );
+        }}
+      />
+      {suggestions.length > 0 && (
+        <span
+          className="column-suggestions"
+          role="group"
+          aria-label="Suggested columns"
+        >
+          {suggestions.map((name) => (
+            <button
+              type="button"
+              key={name}
+              disabled={disabled || value.includes(name)}
+              onClick={() => {
+                const next = [...value, name];
+                setText(next.join(", "));
+                onChange(next);
+              }}
+            >
+              + {name}
+            </button>
+          ))}
+        </span>
+      )}
+    </span>
   );
 }
 function SheetInput({
@@ -245,7 +271,9 @@ function GuidedField({
   disabled,
   onChange,
   onValidityChange,
+  columnSuggestions,
 }: {
+  columnSuggestions: string[];
   field: Field;
   value: unknown;
   disabled: boolean;
@@ -307,6 +335,7 @@ function GuidedField({
         </select>
       ) : field.kind === "columns" ? (
         <ColumnsInput
+          suggestions={columnSuggestions}
           value={(value ?? []) as string[]}
           disabled={disabled}
           onChange={onChange}
@@ -325,6 +354,7 @@ function GuidedField({
 export function StepInspector({
   source,
   selected,
+  columnSuggestions = [],
   onChange,
   onSource,
   disabled = false,
@@ -332,6 +362,7 @@ export function StepInspector({
   onDraftChange,
 }: {
   disabled?: boolean;
+  columnSuggestions?: string[];
   draft?: string;
   onDraftChange: (draft: string | undefined) => void;
   source: string;
@@ -406,6 +437,12 @@ export function StepInspector({
           <p>
             <b>{getOperation(detail.operation).title}</b>
           </p>
+          {columnSuggestions.length > 0 && (
+            <p className="hint">
+              Column suggestions from inspected input and supported upstream
+              steps. Go validates the result.
+            </p>
+          )}
           <div className="inspector-tabs" aria-label="Settings view">
             <button
               type="button"
@@ -434,6 +471,7 @@ export function StepInspector({
               typeof guided.value === "string" ? (
                 <SimpleCondition
                   expression={guided.value}
+                  columnSuggestions={columnSuggestions}
                   disabled={disabled}
                   onChange={(value) => changeGuided(null, value)}
                   onValidityChange={(value) =>
@@ -465,6 +503,7 @@ export function StepInspector({
                   <GuidedField
                     key={field.key}
                     field={field}
+                    columnSuggestions={columnSuggestions}
                     value={(guided.value as Record<string, unknown>)[field.key]}
                     disabled={disabled}
                     onChange={(value) => changeGuided(field.key, value)}

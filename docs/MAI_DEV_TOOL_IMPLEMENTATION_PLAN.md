@@ -871,3 +871,16 @@ First implementation commitment after plan approval: **P0 and P1**, with the wor
 example as the acceptance anchor. P2/P3 establish reliable recovery and execution
 before richer authoring increases complexity. Approval of this document does not
 claim the proposed capabilities are implemented.
+
+### Implementation progress — first workbench slice, 29 October 2026
+
+Delivered an initial P1 slice: Build with Blocks/Step outline, searchable operation
+insertion, shared inspector and document transactions, conservative column
+suggestions, a next-action strip, automatic final-output inspection, and the
+Orders totals tutorial with real Go/XLSX verification. Existing workspace guards,
+advanced views, offline mode and packaging remain available.
+
+This is not completion of P0–P7: durable IDs/recovery, source Apply/Discard
+semantics, full accessible expression authoring, richer schema contracts,
+structured execution diagnostics/cancellation, intermediate samples and key
+lifecycle work remain planned. Usability/performance targets remain unmeasured.
