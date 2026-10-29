@@ -175,11 +175,14 @@ func localPath(workspace, path string) (string, error) {
 	return target, nil
 }
 func checkWorkbook(path string) error {
+	return checkWorkbookWithLimit(path, maxWorkbookBytes)
+}
+func checkWorkbookWithLimit(path string, maxBytes int64) error {
 	st, err := os.Stat(path)
 	if err != nil {
 		return err
 	}
-	if !st.Mode().IsRegular() || st.Size() > maxWorkbookBytes {
+	if !st.Mode().IsRegular() || st.Size() > maxBytes {
 		return errors.New("Workbook must be a regular file of at most 25 MiB")
 	}
 	f, err := os.Open(path)
@@ -212,11 +215,14 @@ func checkWorkbook(path string) error {
 	return nil
 }
 func inspect(path string, p Params) (Preview, error) {
+	return inspectWithLimit(path, p, maxWorkbookBytes)
+}
+func inspectWithLimit(path string, p Params, maxBytes int64) (Preview, error) {
 	preview := Preview{Rows: [][]string{}}
 	if p.Offset < 0 || p.Limit < 0 || p.Limit > 1000 {
 		return preview, errors.New("Offset must be nonnegative and limit at most 1000")
 	}
-	if err := checkWorkbook(path); err != nil {
+	if err := checkWorkbookWithLimit(path, maxBytes); err != nil {
 		return preview, err
 	}
 	book, err := openPreview(path)
@@ -296,6 +302,10 @@ func (offlineTransport) RoundTrip(*http.Request) (*http.Response, error) {
 	return nil, errors.New("External HTTP is disabled in desktop offline runs")
 }
 func run(ctx context.Context, p Params) (any, error) {
+	return runWithInspect(ctx, p, inspect)
+}
+
+func runWithInspect(ctx context.Context, p Params, inspectOutput func(string, Params) (Preview, error)) (any, error) {
 	wf, err := workflow.Parse([]byte(p.YAML))
 	if err != nil {
 		return nil, err
@@ -348,10 +358,6 @@ func run(ctx context.Context, p Params) (any, error) {
 	if err := wf.Run(ctx, rt, inputs, output); err != nil {
 		return nil, err
 	}
-	preview, err := inspect(output, Params{Limit: 100})
-	if err != nil {
-		return nil, err
-	}
 	f, err := os.Open(output)
 	if err != nil {
 		return nil, err
@@ -365,6 +371,15 @@ func run(ctx context.Context, p Params) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	result := map[string]any{"path": filepath.ToSlash(rel), "sha256": hex.EncodeToString(h.Sum(nil))}
+	preview, err := inspectOutput(output, Params{Limit: 100})
+	if err != nil {
+		result["previewWarning"] = err.Error()
+	} else if encoded, err := json.Marshal(preview); err != nil || len(encoded) > MaxFrameBytes/2 {
+		result["previewWarning"] = "Workbook preview is too large to display"
+	} else {
+		result["preview"] = preview
+	}
 	success = true
-	return map[string]any{"path": filepath.ToSlash(rel), "sha256": hex.EncodeToString(h.Sum(nil)), "preview": preview}, nil
+	return result, nil
 }

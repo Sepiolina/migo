@@ -31,6 +31,7 @@ import { PackageBuilder } from "./PackageBuilder";
 import { WorkflowSetup } from "./WorkflowSetup";
 import { readWorkbookSettings } from "./workbookSettings";
 import { workflowTemplates } from "./workflowTemplates";
+import { DiscardChangesDialog } from "./DiscardChangesDialog";
 import { WorkflowTemplatePicker } from "./WorkflowTemplatePicker";
 import {
   isDesktop,
@@ -376,7 +377,9 @@ export default function App() {
       setInspectPath(result.path);
       setLoadedInspectPath(result.path);
       setMessage(
-        "Run completed. Inspect the generated workbook in Excel data.",
+        result.previewWarning
+          ? `Run completed; workbook saved. Preview unavailable: ${result.previewWarning}`
+          : "Run completed. Inspect the generated workbook in Excel data.",
       );
     });
   }
@@ -1051,32 +1054,14 @@ export default function App() {
         />
       )}
       {pendingDiscard && (
-        <div className="dialog-backdrop">
-          <section
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="discard-title"
-            className="discard-dialog"
-          >
-            <h2 id="discard-title">Discard unsaved workflow changes?</h2>
-            <p>
-              Save your workflow and apply any argument draft first to keep
-              these edits.
-            </p>
-            <button autoFocus onClick={() => setPendingDiscard(undefined)}>
-              Keep editing
-            </button>
-            <button
-              onClick={() => {
-                const action = pendingDiscard;
-                setPendingDiscard(undefined);
-                action();
-              }}
-            >
-              Discard changes and continue
-            </button>
-          </section>
-        </div>
+        <DiscardChangesDialog
+          onCancel={() => setPendingDiscard(undefined)}
+          onDiscard={() => {
+            const action = pendingDiscard;
+            setPendingDiscard(undefined);
+            action();
+          }}
+        />
       )}
       <footer role="status" aria-live="polite" className={error ? "error" : ""}>
         <span>{busy ? `${busy}…` : message}</span>

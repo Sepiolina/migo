@@ -64,7 +64,9 @@ export function suggestColumns(
           arg?.start
         )
           continue;
-        columns = (inspection.rows[0] ?? []).filter(Boolean);
+        columns = (inspection.rows[0] ?? []).filter(
+          (name) => name.trim() !== "",
+        );
         if (typeof arg?.row_number === "string") columns.push(arg.row_number);
       } else if (op === "save" && typeof value === "string")
         saved.set(value, [...columns]);
@@ -75,14 +77,42 @@ export function suggestColumns(
         columns = columns.map((name) =>
           typeof arg[name] === "string" ? (arg[name] as string) : name,
         );
-      else if (
-        op === "group" &&
-        arg &&
-        columns.length &&
-        Object.keys(arg).every((key) => ["by", "sum"].includes(key))
-      )
-        columns = [...(names(arg.by) ?? []), ...(names(arg.sum) ?? [])];
-      else columns = []; // Unknown transformations invalidate guesses rather than inventing a schema.
+      else if (op === "group" && arg && columns.length) {
+        const aggregates = [
+          "sum",
+          "count",
+          "mean",
+          "min",
+          "max",
+          "first",
+          "last",
+          "join",
+        ];
+        const keys = Object.keys(arg);
+        if (
+          keys.some(
+            (key) => !["by", ...aggregates].includes(key) || !names(arg[key]),
+          )
+        ) {
+          columns = [];
+          continue;
+        }
+        const by = names(arg.by) ?? [];
+        const aggregated = aggregates.flatMap((key) => names(arg[key]) ?? []);
+        const all = [...by, ...aggregated];
+        if (
+          !aggregated.length ||
+          new Set(all).size !== all.length ||
+          all.some((name) => !columns.includes(name))
+        ) {
+          columns = [];
+          continue;
+        }
+        columns = [
+          ...by,
+          ...columns.filter((name) => aggregated.includes(name)),
+        ];
+      } else columns = []; // Unknown transformations invalidate guesses rather than inventing a schema.
     }
     return [...new Set(columns)];
   } catch {

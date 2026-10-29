@@ -345,3 +345,21 @@ Each package also includes `release.json` with the target and available build
 provenance, and `sbom.cdx.json` with a CycloneDX Go dependency inventory. These
 files are covered by the checksum manifest/signature. The inventory is not a
 vulnerability audit. Avoid editing saved source or inputs during compilation.
+
+## Recover from editing and preview problems
+
+- If a setting is invalid, correct it or choose **Discard changes** before
+  switching to Advanced YAML. Invalid fields stay visible and keep save/run
+  protection active. Column names with commas or surrounding spaces require
+  Advanced YAML in comma-separated settings.
+- The unsaved-changes dialog keeps keyboard focus inside the confirmation.
+  **Escape** chooses **Keep editing** and returns focus to the previous control.
+- **Workbook saved; preview unavailable** means execution succeeded and the XLSX
+  was retained. Copy its displayed workspace-relative path and open the file in
+  Excel. Its SHA-256 still identifies the generated artifact. Retry inspection
+  when appropriate; files beyond preview size limits need an external viewer.
+  This is distinct from a failed workflow run, which does not publish a result.
+
+Preview limits apply to generated workbooks as well as inputs: currently 25 MiB
+compressed and 64 MiB expanded XLSX. A large embedded preview can also exceed the
+runner response budget; Studio then keeps the output and reports the limitation.

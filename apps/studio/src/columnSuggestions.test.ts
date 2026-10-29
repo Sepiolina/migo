@@ -64,4 +64,26 @@ describe("advisory column suggestions", () => {
     expect(suggestions("steps: [")).toEqual([]);
     expect(suggestions(source, "step.1.then.0")).toEqual([]);
   });
+  it("matches group output ordering and rejects invalid group schemas", () => {
+    expect(
+      suggestions(
+        source.replace(
+          "sum: [Line total]",
+          "sum: [Line total], first: [Quantity]",
+        ),
+      ),
+    ).toEqual(["Customer", "Quantity", "Line total"]);
+    expect(
+      suggestions(source.replace("sum: [Line total]", "sum: Missing")),
+    ).toEqual([]);
+    expect(
+      suggestions(source.replace("sum: [Line total]", "sum: [Missing]")),
+    ).toEqual([]);
+    expect(
+      suggestions(source, "step.1", {
+        ...preview,
+        rows: [["Customer", "  ", "Quantity"]],
+      }),
+    ).toEqual(["Customer", "Quantity"]);
+  });
 });

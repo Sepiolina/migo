@@ -174,7 +174,11 @@ export function WorkbookPanel({
         </>
       ) : (
         <div className="empty">
-          <strong>Choose an input workbook or run your workflow</strong>
+          <strong>
+            {artifact && loadedPath === artifact.path && artifact.previewWarning
+              ? "Workbook saved; preview unavailable"
+              : "Choose an input workbook or run your workflow"}
+          </strong>
           <p>
             Use the tabs above to inspect input and output in the same place.
           </p>
@@ -182,6 +186,14 @@ export function WorkbookPanel({
       )}
       {artifact && (
         <div className="artifact">
+          {artifact.previewWarning &&
+            loadedPath === artifact.path &&
+            !inspection && (
+              <p role="status">
+                {artifact.previewWarning} The generated file is kept at the path
+                below. Open it in Excel or retry inspection.
+              </p>
+            )}
           Generated: {artifact.path}
           <span title={artifact.sha256}>
             SHA-256 {artifact.sha256.slice(0, 16)}…
