@@ -242,7 +242,8 @@ output:
         join(root, "examples/orders-totals.yaml"),
         "utf8",
       );
-      assert.equal(savedYaml, template.source);
+      // Git may check text files out with CRLF on Windows; YAML semantics match.
+      assert.equal(savedYaml.replace(/\r\n/g, "\n"), template.source);
       const savedRun = request("run", { yaml: savedYaml, inputs });
       assert.deepEqual(
         request("inspectWorkbook", { path: savedRun.path, sheet: "Totals" })
