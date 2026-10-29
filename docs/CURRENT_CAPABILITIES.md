@@ -82,7 +82,8 @@ Go remains the authority for validation and execution.
   remain unavailable in the desktop runner. Turning a workflow flag on does not
   enable live desktop connections.
 - Generate `.xlsx` output under `.studio/runs/<run-id>/output.xlsx` and show its
-  path and SHA-256 hash.
+  path and SHA-256 hash. If preview inspection fails or exceeds the response
+  budget, the successful output remains available with a preview warning.
 - Mark output stale when the workflow source, workspace, or bindings change.
 
 Validation cannot prove that every expression will succeed for every input row.

@@ -90,3 +90,35 @@ it("shows the complete selected cell and lets the user clear the cell inspector"
   await user.click(screen.getByRole("button", { name: "Clear" }));
   expect(screen.queryByRole("status")).toBeNull();
 });
+
+it("keeps a generated artifact accessible when its preview is unavailable", () => {
+  render(
+    <WorkbookPanel
+      artifact={{
+        path: "outputs/large.xlsx",
+        sha256: "abc123",
+        previewWarning: "Workbook exceeds preview limit",
+      }}
+      ready
+      path="outputs/large.xlsx"
+      loadedPath="outputs/large.xlsx"
+      onPath={() => {}}
+      onInspect={() => {}}
+      onClose={() => {}}
+      fullScreen={false}
+      onExpand={() => {}}
+      stale={false}
+      inputs={{}}
+    />,
+  );
+  expect(screen.getByText("Workbook saved; preview unavailable")).toBeTruthy();
+  expect(screen.getByText(/Generated: outputs\/large.xlsx/)).toBeTruthy();
+  expect(screen.getByText(/Workbook exceeds preview limit/)).toBeTruthy();
+  expect(
+    (
+      screen.getByRole("button", {
+        name: "Output workbook",
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(false);
+});

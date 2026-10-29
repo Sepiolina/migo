@@ -12,7 +12,12 @@ export type Validation = {
   inputs: { name: string; label: string }[];
   sheets: string[];
 };
-export type RunResult = { path: string; sha256: string; preview: Inspection };
+export type RunResult = {
+  path: string;
+  sha256: string;
+  preview?: Inspection;
+  previewWarning?: string;
+};
 export function isDesktop() {
   return "__TAURI_INTERNALS__" in window;
 }

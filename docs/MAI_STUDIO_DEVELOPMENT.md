@@ -214,3 +214,15 @@ Unknown transforms invalidate suggestions; Go remains authoritative.
 Run `node scripts/smoke-blockly.mjs` with Go on PATH to check all templates through
 the real engine and inspect their XLSX values. Regenerate the synthetic Orders
 workbook with `python3 scripts/generate-orders-fixture.py` from the repository root.
+
+### Document and preview error contracts
+
+Document commands use the latest committed in-memory snapshot even when React
+batches several calls before rendering. A transaction still commits atomically
+and throws transform errors synchronously; failed transforms do not change history.
+
+A successful runner result always carries `path` and `sha256`. `preview` is optional;
+`previewWarning` explains inspection or embedded-response size limits. Artifact
+hashing must succeed before reporting execution success. Treat preview failures
+separately in clients, preserving the output path and clearing an earlier preview.
+Standalone `inspectWorkbook` requests retain their existing error behavior.

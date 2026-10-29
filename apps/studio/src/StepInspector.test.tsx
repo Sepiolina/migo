@@ -198,3 +198,62 @@ it("shows a suggested column in the field and applies the same configuration", a
   await user.click(screen.getByRole("button", { name: "Apply changes" }));
   expect(parse(saved).steps[0].group.sum).toEqual(["Quantity", "Line total"]);
 });
+
+it("does not offer column names the comma-separated editor cannot represent", async () => {
+  const user = userEvent.setup();
+  function Harness() {
+    const [draft, setDraft] = useState<string>();
+    return (
+      <StepInspector
+        source={"steps:\n  - group: {by: [Customer], sum: [Quantity]}\n"}
+        selected="step.0"
+        columnSuggestions={["Last, First", "Quantity"]}
+        draft={draft}
+        onDraftChange={setDraft}
+        onChange={() => {}}
+        onSource={() => {}}
+      />
+    );
+  }
+  render(<Harness />);
+  expect(screen.queryByRole("button", { name: "+ Last, First" })).toBeNull();
+  await user.click(screen.getByRole("button", { name: "Advanced YAML" }));
+  expect(screen.getByLabelText("Step argument")).toBeTruthy();
+});
+
+it("protects an invalid row name from view changes and removal of a different row", async () => {
+  const user = userEvent.setup();
+  function Harness() {
+    const [draft, setDraft] = useState<string>();
+    return (
+      <StepInspector
+        source={"steps:\n  - select: {First: A, Second: B}\n"}
+        selected="step.0"
+        draft={draft}
+        onDraftChange={setDraft}
+        onChange={() => {}}
+        onSource={() => {}}
+      />
+    );
+  }
+  render(<Harness />);
+  const key = screen.getByLabelText("New column name 2") as HTMLInputElement;
+  await user.clear(key);
+  expect(
+    (screen.getByRole("button", { name: "Advanced YAML" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(true);
+  expect(
+    (
+      screen.getByRole("button", {
+        name: "Remove Columns to keep row 1",
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(true);
+  expect(key.value).toBe("");
+  await user.type(key, "Third");
+  expect(
+    (screen.getByRole("button", { name: "Advanced YAML" }) as HTMLButtonElement)
+      .disabled,
+  ).toBe(false);
+});

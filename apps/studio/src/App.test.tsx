@@ -433,3 +433,30 @@ it("adds, edits, reorders, and deletes steps through the outline", async () => {
       .value,
   ).toContain("num(Quantity) > 5");
 });
+
+it("reports successful output even when the run has no preview", async () => {
+  const user = userEvent.setup();
+  native.invoke.mockImplementation(async (command: string) => {
+    if (command === "choose_workspace") return { path: "/project" };
+    if (command === "list_workflows") return { paths: [] };
+    if (command === "runner_request")
+      return {
+        ok: true,
+        result: {
+          path: ".studio/runs/test/output.xlsx",
+          sha256: "abc123",
+          previewWarning: "Workbook exceeds preview limit",
+        },
+      };
+    throw new Error(command);
+  });
+  render(<App />);
+  await user.click(screen.getByRole("button", { name: "Project & inputs" }));
+  await user.click(screen.getByRole("button", { name: /Open workspace/ }));
+  await user.click(screen.getByRole("button", { name: /Run workflow/ }));
+  await screen.findByText("Workbook saved; preview unavailable");
+  expect(
+    screen.getByText(/Generated: .studio\/runs\/test\/output.xlsx/),
+  ).toBeTruthy();
+  expect(screen.getByText(/Run completed; workbook saved/)).toBeTruthy();
+});

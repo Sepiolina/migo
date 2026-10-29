@@ -482,3 +482,7 @@ using a new workflow in production.
 Further reading: [Studio user guide](docs/MAI_STUDIO_USER_GUIDE.md),
 [workflow reference](docs/WORKFLOWS.md), [extending MaiService](docs/EXTENDING.md),
 and [implementation plan](docs/MAI_DEV_TOOL_IMPLEMENTATION_PLAN.md).
+
+If Studio reports **Workbook saved; preview unavailable**, the workflow succeeded.
+Open the generated XLSX at the displayed path in Excel; preview limits do not
+delete a successful output. See [editing and preview troubleshooting](docs/MAI_STUDIO_USER_GUIDE.md#recover-from-editing-and-preview-problems).

@@ -118,7 +118,7 @@ function RowsEditor({
           </label>
           <button
             type="button"
-            disabled={disabled}
+            disabled={disabled || invalidRows.some((i) => i !== index)}
             aria-label={`Remove ${label} row ${index + 1}`}
             onClick={() => {
               setInvalidRows([]);
@@ -182,21 +182,34 @@ function ColumnsInput({
           role="group"
           aria-label="Suggested columns"
         >
-          {suggestions.map((name) => (
-            <button
-              type="button"
-              key={name}
-              disabled={disabled || value.includes(name)}
-              onClick={() => {
-                const next = [...value, name];
-                setText(next.join(", "));
-                onChange(next);
-              }}
-            >
-              + {name}
-            </button>
-          ))}
+          {suggestions
+            .filter(
+              (name) =>
+                name.length > 0 && name.trim() === name && !name.includes(","),
+            )
+            .map((name) => (
+              <button
+                type="button"
+                key={name}
+                disabled={disabled || value.includes(name)}
+                onClick={() => {
+                  const next = [...value, name];
+                  setText(next.join(", "));
+                  onChange(next);
+                }}
+              >
+                + {name}
+              </button>
+            ))}
         </span>
+      )}
+      {suggestions.some(
+        (name) => name.includes(",") || name.trim() !== name,
+      ) && (
+        <small className="hint">
+          Use Advanced YAML for column names containing commas or leading or
+          trailing spaces.
+        </small>
       )}
     </span>
   );
@@ -454,6 +467,7 @@ export function StepInspector({
             <button
               type="button"
               aria-pressed={advanced}
+              disabled={!valid}
               onClick={() => {
                 setAdvanced(true);
                 setValidity({});
@@ -462,6 +476,12 @@ export function StepInspector({
               Advanced YAML
             </button>
           </div>
+          {!valid && (
+            <p className="hint">
+              Complete or discard invalid settings before switching to Advanced
+              YAML.
+            </p>
+          )}
           {!advanced && guided ? (
             <div
               className="guided-settings"

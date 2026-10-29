@@ -3,7 +3,9 @@ package studio
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -74,6 +76,76 @@ func TestRunUsesEngineAndProducesArtifact(t *testing.T) {
 	preview := result["preview"].(Preview)
 	if preview.TotalRows < 2 {
 		t.Fatal("empty generated workbook")
+	}
+}
+func TestRunPreservesArtifactWhenPreviewExceedsLimit(t *testing.T) {
+	root := fixtureRoot(t)
+	workspace := t.TempDir()
+	data, err := os.ReadFile(filepath.Join(root, "examples/parts.xlsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "parts.xlsx"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	yaml, err := os.ReadFile(filepath.Join(root, "examples/parts-summary.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Exercise the size-limit failure using a small threshold, without creating
+	// a 25 MiB fixture. The output itself is produced by the real engine.
+	result, err := runWithInspect(context.Background(), Params{Workspace: workspace, YAML: string(yaml), Inputs: map[string]string{"parts": "parts.xlsx"}}, func(path string, p Params) (Preview, error) {
+		return inspectWithLimit(path, p, 1)
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := result.(map[string]any)
+	if _, ok := r["preview"]; ok || r["previewWarning"] != "Workbook must be a regular file of at most 25 MiB" {
+		t.Fatalf("unexpected preview result: %+v", r)
+	}
+	artifact, err := os.ReadFile(filepath.Join(workspace, r["path"].(string)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprintf("%x", sha256.Sum256(artifact)); r["sha256"] != got {
+		t.Fatalf("hash mismatch: got %v, want %s", r["sha256"], got)
+	}
+}
+func TestRunPreservesArtifactWhenPreviewExceedsFrameBudget(t *testing.T) {
+	root := fixtureRoot(t)
+	workspace := t.TempDir()
+	data, err := os.ReadFile(filepath.Join(root, "examples/parts.xlsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "parts.xlsx"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	yaml, err := os.ReadFile(filepath.Join(root, "examples/parts-summary.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := runWithInspect(context.Background(), Params{Workspace: workspace, YAML: string(yaml), Inputs: map[string]string{"parts": "parts.xlsx"}}, func(string, Params) (Preview, error) {
+		return Preview{Rows: [][]string{{strings.Repeat("x", MaxFrameBytes)}}}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := result.(map[string]any)
+	if _, ok := r["preview"]; ok || r["previewWarning"] != "Workbook preview is too large to display" {
+		t.Fatalf("unexpected preview result: %+v", r)
+	}
+	artifact, err := os.ReadFile(filepath.Join(workspace, r["path"].(string)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := fmt.Sprintf("%x", sha256.Sum256(artifact)); r["sha256"] != got {
+		t.Fatalf("hash mismatch: got %v, want %s", r["sha256"], got)
+	}
+	encoded, err := json.Marshal(Response{Version: Version, ID: "test", OK: true, Result: result})
+	if err != nil || len(encoded) > MaxFrameBytes {
+		t.Fatalf("run response exceeds frame limit: %d bytes, error %v", len(encoded), err)
 	}
 }
 func TestPathsStayInWorkspace(t *testing.T) {
