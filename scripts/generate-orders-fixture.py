@@ -42,6 +42,7 @@ def generate(destination):
     with ZipFile(destination, "w") as archive:
         for name, value in files.items():
             entry = ZipInfo(name, date_time=(2020, 1, 1, 0, 0, 0))
+            entry.create_system = 3  # Stable Unix metadata even when generated on Windows.
             entry.compress_type = ZIP_DEFLATED
             entry.external_attr = 0o644 << 16
             archive.writestr(entry, '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' + value)
