@@ -197,3 +197,20 @@ path for trusted-local packages. Installation stages a new target, decrypts with
 server-local `AGE_IDENTITY`, protects config with mode `0600`, and refuses existing
 targets. PM2 must run as a dedicated service user. In-place upgrades, automatic
 rollback, remote deployment, and signing-key lifecycle UI remain future work.
+
+### Guided workbench document model
+
+`workflowDocument.ts` owns source/CST snapshots, revisions, bounded history and
+source transactions. `useDocument` keeps the shared React interface; visual
+editors apply the same source transforms, with a grouped transaction producing
+one undo entry. Invalid source is retained. This is an in-memory model, not a
+crash-recovery store or durable step-identity implementation.
+
+`WorkbenchOutline.tsx` provides a keyboard-accessible top-level step presentation;
+`StepInspector` edits the same source. `columnSuggestions.ts` makes conservative
+name suggestions from inspected input headers and supported preceding steps.
+Unknown transforms invalidate suggestions; Go remains authoritative.
+
+Run `node scripts/smoke-blockly.mjs` with Go on PATH to check all templates through
+the real engine and inspect their XLSX values. Regenerate the synthetic Orders
+workbook with `python3 scripts/generate-orders-fixture.py` from the repository root.

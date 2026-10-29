@@ -28,7 +28,9 @@ it("retains invalid local edits when another setting is changed back to its save
   });
   await user.click(screen.getByLabelText("Trim whitespace"));
   await user.click(screen.getByLabelText("Trim whitespace"));
-  expect(screen.getByText("Enter a sheet number of 1 or greater.")).toBeTruthy();
+  expect(
+    screen.getByText("Enter a sheet number of 1 or greater."),
+  ).toBeTruthy();
   expect(screen.getByRole("button", { name: "Discard changes" })).toBeTruthy();
   expect(
     (screen.getByRole("button", { name: "Apply changes" }) as HTMLButtonElement)
@@ -169,4 +171,30 @@ it("rejects integer-like row keys before they can reorder a selection", async ()
     "First",
     "Third",
   ]);
+});
+
+it("shows a suggested column in the field and applies the same configuration", async () => {
+  const user = userEvent.setup();
+  let saved = "";
+  function Harness() {
+    const [draft, setDraft] = useState<string>();
+    return (
+      <StepInspector
+        source={"steps:\n  - group: {by: [Customer], sum: [Quantity]}\n"}
+        selected="step.0"
+        columnSuggestions={["Customer", "Quantity", "Line total"]}
+        draft={draft}
+        onDraftChange={setDraft}
+        onChange={(value) => {
+          saved = value;
+        }}
+        onSource={() => {}}
+      />
+    );
+  }
+  render(<Harness />);
+  await user.click(screen.getAllByRole("button", { name: "+ Line total" })[1]);
+  expect(screen.getByDisplayValue("Quantity, Line total")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Apply changes" }));
+  expect(parse(saved).steps[0].group.sum).toEqual(["Quantity", "Line total"]);
 });

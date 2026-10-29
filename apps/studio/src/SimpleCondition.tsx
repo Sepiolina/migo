@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 
 export type Condition = {
   column: string;
@@ -35,15 +35,18 @@ export function parseCondition(expression: string): Condition | undefined {
 
 export function SimpleCondition({
   expression,
+  columnSuggestions = [],
   disabled,
   onChange,
   onValidityChange,
 }: {
   expression: string;
+  columnSuggestions?: string[];
   disabled: boolean;
   onChange: (expression: string) => void;
   onValidityChange: (valid: boolean) => void;
 }) {
+  const columnList = useId();
   const parsed = parseCondition(expression);
   const [mode, setMode] = useState<"builder" | "expression">(
     parsed || expression === "true" ? "builder" : "expression",
@@ -104,6 +107,7 @@ export function SimpleCondition({
             Column
             <input
               value={condition.column}
+              list={columnList}
               disabled={disabled}
               placeholder="e.g. Quantity"
               onChange={(event) =>
@@ -111,6 +115,11 @@ export function SimpleCondition({
               }
             />
           </label>
+          <datalist id={columnList}>
+            {columnSuggestions.map((name) => (
+              <option key={name} value={name} />
+            ))}
+          </datalist>
           <label>
             Comparison
             <select

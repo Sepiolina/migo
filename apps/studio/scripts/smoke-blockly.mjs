@@ -118,6 +118,10 @@ output:
     join(root, "examples/parts.xlsx"),
     join(directory, "parts.xlsx"),
   );
+  copyFileSync(
+    join(root, "examples/orders.xlsx"),
+    join(directory, "orders.xlsx"),
+  );
   function request(command, params) {
     const id = `blocks-${command}`;
     const output = execFileSync(runner, [], {
@@ -174,9 +178,24 @@ output:
   // Templates must actually run against the workbook named in the user guide.
   for (const template of workflowTemplates) {
     loadWorkflow(workspace, template.source);
+    if (template.id === "orders-totals") {
+      assert.equal(
+        workspace
+          .getAllBlocks(false)
+          .some((block) =>
+            ["mai_preserved", "mai_custom_expression"].includes(block.type),
+          ),
+        false,
+        "The tutorial must be fully editable with visual blocks",
+      );
+    }
     const yaml = serializeWorkflow(workspace, template.source);
     request("validate", { yaml });
-    const output = request("run", { yaml, inputs: { parts: "parts.xlsx" } });
+    const inputs =
+      template.id === "orders-totals"
+        ? { orders: "orders.xlsx" }
+        : { parts: "parts.xlsx" };
+    const output = request("run", { yaml, inputs });
     assert.ok(
       output.preview.rows.length > 1,
       `${template.title} produced no data`,
@@ -194,9 +213,46 @@ output:
         ]),
       );
     }
+    if (template.id === "orders-totals") {
+      // Inspect the actual saved XLSX rather than trusting the run preview.
+      const workbook = request("inspectWorkbook", {
+        path: output.path,
+        sheet: "Totals",
+      });
+      assert.deepEqual(workbook.rows[0], ["Customer", "Line total"]);
+      assert.deepEqual(
+        new Map(
+          workbook.rows
+            .slice(1)
+            .map(([customer, total]) => [customer, Number(total)]),
+        ),
+        new Map([
+          ["Acme", 50],
+          ["Beta", 5],
+        ]),
+      );
+      assert.equal(
+        createHash("sha256")
+          .update(readFileSync(resolve(directory, output.path)))
+          .digest("hex"),
+        output.sha256,
+      );
+      // The reusable file must match the template and have identical results.
+      const savedYaml = readFileSync(
+        join(root, "examples/orders-totals.yaml"),
+        "utf8",
+      );
+      assert.equal(savedYaml, template.source);
+      const savedRun = request("run", { yaml: savedYaml, inputs });
+      assert.deepEqual(
+        request("inspectWorkbook", { path: savedRun.path, sheet: "Totals" })
+          .rows,
+        workbook.rows,
+      );
+    }
   }
   console.log(
-    `Blockly integration passed: ${expected.size} grouped rows, numeric calculations, a column containing spaces, and a verified XLSX artifact.`,
+    `Blockly integration passed: ${expected.size} grouped rows, numeric calculations, and verified XLSX artifacts including Orders totals Acme=50, Beta=5.`,
   );
 } finally {
   workspace.dispose();

@@ -88,6 +88,15 @@ Excel, validation, and execution features require the native desktop window.
 
 ### 3. Create and run a workflow
 
+For a complete starter with predictable results, follow the
+[customer order totals walkthrough](docs/MAI_STUDIO_USER_GUIDE.md#worked-example-customer-order-totals).
+Choose **Customer order totals** in **+ New workflow**, bind `orders` to the
+bundled `examples/orders.xlsx`, and run. It reads **Orders**, keeps positive
+quantities, calculates `Line total = Quantity × Unit price`, and groups by
+customer. The generated **Totals** sheet contains **Acme = 50** and **Beta = 5**.
+Save it under `workflows/` and bind your own workbook to reuse the starter;
+[examples/orders-totals.yaml](examples/orders-totals.yaml) is the matching YAML.
+
 1. Open **Project & inputs**, select **Open workspace**, and choose the cloned
    `migo` repository folder. Choose **+ New workflow**, then **Copy a worksheet**.
 2. In **Workbook setup**, set the workflow display name and input identifier and

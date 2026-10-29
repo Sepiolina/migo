@@ -77,7 +77,7 @@ try {
     throw new Error(
       `Blockly number edit did not reach YAML: ${await yaml.inputValue()}`,
     );
-  await page.getByRole("button", { name: "Blocks", exact: true }).click();
+  await page.getByRole("button", { name: "Build", exact: true }).click();
   await page
     .locator(".mai_number .blocklyNumberField")
     .getByText("5", { exact: true })
@@ -147,7 +147,7 @@ try {
     ).includes("Smoke test workbook")
   )
     throw new Error("Workbook setup did not update YAML.");
-  await page.getByRole("button", { name: "Blocks", exact: true }).click();
+  await page.getByRole("button", { name: "Build", exact: true }).click();
   await page.setViewportSize({ width: 980, height: 680 });
   await page.getByRole("button", { name: "Workbook setup" }).click();
   await page.getByRole("heading", { name: "Build with blocks" }).waitFor();
@@ -157,6 +157,20 @@ try {
     )
   )
     throw new Error("Studio overflows horizontally at 980px width.");
+  await page.getByRole("button", { name: "Step outline", exact: true }).click();
+  const outline = page.getByRole("region", { name: "Step outline" });
+  await outline.getByRole("button").first().click();
+  await page.getByRole("region", { name: "Step inspector" }).waitFor();
+  await page.getByRole("button", { name: "+ Add step", exact: true }).click();
+  await page.getByRole("textbox", { name: "Search steps" }).fill("filter");
+  await page.locator(".library-item").first().click();
+  if (process.env.MAI_SCREENSHOT)
+    await page.screenshot({ path: process.env.MAI_SCREENSHOT });
+  if ((await outline.getByRole("button").count()) !== 3)
+    throw new Error("Outline insertion did not update the shared document.");
+  await page.getByRole("button", { name: "YAML source", exact: true }).click();
+  if (!(await yaml.inputValue()).includes("filter:"))
+    throw new Error("Outline insertion did not reach YAML.");
   if (failures.length) throw new Error(failures.join("\n"));
   console.log("Blockly browser smoke passed.");
 } finally {

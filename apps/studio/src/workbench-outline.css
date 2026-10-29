@@ -1,0 +1,55 @@
+.workbench-outline {
+  flex: 1;
+  min-width: 0;
+  overflow: auto;
+  padding: 24px;
+  background: #f4f7fb;
+}
+.workbench-outline h2 {
+  margin: 0;
+  font-size: 20px;
+}
+.workbench-outline p {
+  color: #526983;
+}
+.workbench-outline ol {
+  max-width: 720px;
+  padding-left: 2em;
+}
+.workbench-outline li {
+  padding: 0 0 10px 6px;
+}
+.outline-step {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  text-align: left;
+}
+.outline-step span,
+.outline-step small {
+  color: #526983;
+  font-weight: 400;
+}
+.outline-step[aria-pressed="true"] {
+  border-color: #275ad5;
+  background: #eaf1ff;
+}
+.outline-layout {
+  display: flex;
+  height: 100%;
+  min-height: 0;
+}
+@media (max-width: 800px) {
+  .outline-layout {
+    flex-direction: column;
+    overflow: auto;
+  }
+  .outline-layout .workbench-outline {
+    flex: none;
+  }
+  .outline-layout .step-inspector {
+    width: 100%;
+    flex: none;
+  }
+}

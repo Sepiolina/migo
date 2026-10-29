@@ -36,8 +36,9 @@ workspace-relative YAML file in **Open path** and choose
 is a built-in parts-summary example. Workflow controls and input bindings are in
 **Project & inputs**.
 
-Choose **+ New workflow** and select **Copy a worksheet** or **Filter and
-summarize**. The template becomes the current document and suggests a Save path.
+Choose **+ New workflow** and select **Copy a worksheet**, **Filter and
+summarize**, or **Customer order totals**. The template becomes the current
+document and suggests a Save path.
 For a new file, choose an unused workspace-relative path such as
 `workflows/summary.yaml`; create the parent directory outside Studio first if
 needed. Saving to a different unused path creates a copy; an existing destination
@@ -56,9 +57,73 @@ to compare the external changes. Studio has no merge dialog or force-overwrite
 control. Discovery is refreshed when opening a workspace; reopen the workspace if
 files added externally do not appear.
 
+## Worked example: customer order totals
+
+This starter uses synthetic data bundled in [examples/orders.xlsx](../examples/orders.xlsx).
+Its **Orders** sheet contains:
+
+| Customer | Quantity | Unit price |
+| --- | ---: | ---: |
+| Acme | 2 | 10 |
+| Acme | 3 | 10 |
+| Beta | 1 | 5 |
+| Acme | 0 | 999 |
+| Beta | -2 | 100 |
+
+1. Open the repository root as your workspace. Choose **+ New workflow**, then
+   **Customer order totals**. Alternatively, open path
+   `examples/orders-totals.yaml` in **Project & inputs**.
+2. In **Blocks**, follow the connected steps: read input `orders`, sheet
+   `Orders`; filter `Quantity` as a number greater than `0`; calculate
+   `Line total` as numeric `Quantity` multiplied by numeric `Unit price`;
+   group by `Customer` and sum `Line total`; save as `totals`.
+3. **Workbook setup** declares input `orders` and output sheet `Totals`, which
+   reads the saved table `totals`. Choose **Validate**, then bind `orders` to
+   `examples/orders.xlsx` under **Project & inputs**.
+4. Choose **Run workflow**, then **Excel data** → **Output workbook** and sheet
+   **Totals**. The real generated workbook must have the following values
+   (row order may vary):
+
+   | Customer | Line total |
+   | --- | ---: |
+   | Acme | 50 |
+   | Beta | 5 |
+
+   The zero and negative quantities were removed before the totals were summed.
+   The output path identifies the XLSX you can open in Excel.
+5. Save the workflow to an unused path such as `workflows/customer-totals.yaml`.
+   To reuse it, copy your workbook inside the workspace, preserve the three
+   column headers and **Orders** sheet name, and update the input binding.
+   Change the Read source sheet name if your workbook uses another sheet.
+   Rerun after each change; bindings are session settings and must be supplied
+   again when reopening the workflow.
+
+The matching [starter YAML](../examples/orders-totals.yaml) also runs from the
+repository root without the desktop:
+
+```sh
+go run ./cmd/migo -in orders=examples/orders.xlsx -out outputs/customer-totals.xlsx examples/orders-totals.yaml
+```
+
+The fixture can be regenerated without spreadsheet software or Python packages:
+`python3 scripts/generate-orders-fixture.py`. The existing parts examples remain
+available for other workflows.
+
 ## Build a workflow with blocks
 
-**Blocks** opens by default. In **Workbook setup**, edit the workflow display
+**Build** opens with **Blocks** by default. For a keyboard-friendly alternative,
+choose **Step outline**, select a step, and edit its settings in the inspector.
+Apply or discard settings before selecting another step. Use **Add step** to search
+and append an operation; **Move up**, **Move down**, and **Delete step** change the
+selected top-level step. With focus inside the outline, Alt+Up/Down and Delete
+provide keyboard alternatives. Undo reverses these edits. Nested branches retain
+their Advanced YAML fallback. Column suggestions appear after inspecting the bound
+input's first page, for supported header and upstream-step shapes.
+
+**Next** points to project/input setup, validation, running, or results. A successful
+run opens **Excel data** automatically; close it to return space to authoring.
+
+In **Workbook setup**, edit the workflow display
 name, input identifiers and labels, and output sheet names and saved table names.
 Choose **Apply workbook settings** or **Discard setup changes**. Advanced output
 settings such as styles are preserved. If existing settings cannot be safely
@@ -91,14 +156,14 @@ them, or discard block edits, before saving, running, switching views, or closin
 Likewise, apply or discard workbook setup changes; invalid settings cannot be
 applied. Existing unsupported, nested, or custom steps appear as preserved blocks,
 and unsupported expressions as preserved custom expression blocks. They retain
-their source but are not fully editable in Blocks. Use **YAML source** for complex
+their source but are not fully editable in Blocks. Use **Advanced YAML** for complex
 branching and other advanced shapes. Go validates and executes the workflow.
 
-**Workflow canvas** shows the ordered graph and offers the existing searchable
+**Overview** shows the ordered graph and offers the existing searchable
 **+ Add node** library and guided top-level settings. Select a step, edit its
 settings, and choose **Apply changes** or **Discard changes**. Canvas ports show
 the flow; they are not editable connections. **Readable 100%**, **Overview**, and
-**Focus selected** control the view. Use **Advanced YAML** or **YAML source** for
+**Focus selected** control the view. Use **Advanced YAML** or **Advanced YAML** for
 settings that the guided forms cannot represent.
 
 **Undo** and **Redo** cover source edits and applied step changes. Loading a

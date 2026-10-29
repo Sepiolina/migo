@@ -25,6 +25,8 @@ import { operations } from "./operationCatalog";
 import { addOperation } from "./nodeAuthoring";
 import { WorkbookPanel } from "./WorkbookPanel";
 import { StepInspector } from "./StepInspector";
+import { WorkbenchOutline } from "./WorkbenchOutline";
+import { suggestColumns } from "./columnSuggestions";
 import { PackageBuilder } from "./PackageBuilder";
 import { WorkflowSetup } from "./WorkflowSetup";
 import { readWorkbookSettings } from "./workbookSettings";
@@ -49,6 +51,7 @@ export default function App() {
   const [showData, setShowData] = useState(false);
   const [fullData, setFullData] = useState(false);
   const [showLibrary, setShowLibrary] = useState(false);
+  const [buildView, setBuildView] = useState<"blocks" | "outline">("blocks");
   const [showSetup, setShowSetup] = useState(false);
   const [showTemplates, setShowTemplates] = useState(false);
   const [editorGeneration, setEditorGeneration] = useState(0);
@@ -57,6 +60,7 @@ export default function App() {
   const [loadedInspectPath, setLoadedInspectPath] = useState("");
   const { source, setSource } = document;
   const [selected, setSelected] = useState<string>();
+  const [outlineFocusRequest, setOutlineFocusRequest] = useState(0);
   const [argumentDraft, setArgumentDraft] = useState<string>();
   const [blockDraft, setBlockDraft] = useState(false);
   const [setupDraft, setSetupDraft] = useState(false);
@@ -261,11 +265,20 @@ export default function App() {
   function mutateSteps(action: "add" | "delete" | "up" | "down") {
     if (hasDraft) return;
     try {
-      setSource(changeSteps(source, action, selectedIndex));
+      document.transact(action, (current) =>
+        changeSteps(current, action, selectedIndex),
+      );
       if (action === "add") setSelected(`step.${count}`);
-      else if (action === "delete") setSelected(undefined);
+      else if (action === "delete")
+        setSelected(
+          count > 1 && selectedIndex !== undefined
+            ? `step.${Math.min(selectedIndex, count - 2)}`
+            : undefined,
+        );
       else if (selectedIndex !== undefined)
         setSelected(`step.${selectedIndex + (action === "up" ? -1 : 1)}`);
+      if (tab === "blocks" && buildView === "outline")
+        setOutlineFocusRequest((value) => value + 1);
     } catch (e) {
       setError(true);
       setMessage(String(e));
@@ -296,7 +309,7 @@ export default function App() {
         !typing &&
         !busy &&
         !hasDraft &&
-        tab === "graph" &&
+        (tab === "graph" || (tab === "blocks" && buildView === "outline")) &&
         event.altKey &&
         event.key === "Insert"
       ) {
@@ -306,7 +319,9 @@ export default function App() {
         !typing &&
         !busy &&
         !hasDraft &&
-        tab === "graph" &&
+        !showLibrary &&
+        !!target.closest(".workbench-outline, .canvas") &&
+        (tab === "graph" || (tab === "blocks" && buildView === "outline")) &&
         selectedIndex !== undefined
       ) {
         if (event.key === "Delete" || event.key === "Backspace") {
@@ -355,12 +370,13 @@ export default function App() {
         inputs: bindings,
       });
       setArtifact(result);
+      setShowData(true);
       setInspection(result.preview);
       setRunIdentity(currentIdentity);
       setInspectPath(result.path);
       setLoadedInspectPath(result.path);
       setMessage(
-        "Run completed. Open Excel data to inspect the generated workbook.",
+        "Run completed. Inspect the generated workbook in Excel data.",
       );
     });
   }
@@ -575,25 +591,26 @@ export default function App() {
               disabled={hasDraft}
               onClick={() => {
                 setTab("blocks");
-                setSelected(undefined);
                 setShowLibrary(false);
               }}
             >
-              Blocks
+              Build
             </button>
             <button
               className={tab === "graph" ? "active" : ""}
+              aria-label="Workflow canvas"
               disabled={hasDraft}
               onClick={() => setTab("graph")}
             >
-              Workflow canvas
+              Overview
             </button>
             <button
               className={tab === "source" ? "active" : ""}
+              aria-label="YAML source"
               disabled={hasDraft}
               onClick={() => setTab("source")}
             >
-              YAML source
+              Advanced YAML
             </button>
             <span>
               {count} connected steps ·{" "}
@@ -602,12 +619,6 @@ export default function App() {
                 : "Ordered workflow"}
             </span>
           </nav>
-          {document.dirty && !hasDraft && (
-            <div className="notice" role="status">
-              Save workflow changes before building a Linux package. Packages
-              include saved files from disk.
-            </div>
-          )}
           {hasDraft && (
             <div className="notice" role="status">
               {blockDraft ? (
@@ -623,6 +634,26 @@ export default function App() {
               )}
             </div>
           )}
+          <div className="next-action">
+            <strong>Next:</strong>{" "}
+            {!workspace ? (
+              <button onClick={() => setShowProject(true)}>
+                Set up project and inputs
+              </button>
+            ) : (workbookSettings?.inputs ?? []).some(
+                (input) => !bindings[input.id]?.trim(),
+              ) ? (
+              <button onClick={() => setShowProject(true)}>
+                Choose input files
+              </button>
+            ) : validatedSource !== source ? (
+              <span>Check inputs and steps, then validate.</span>
+            ) : !artifact || runIdentity !== currentIdentity ? (
+              <span>Run workflow locally.</span>
+            ) : (
+              <button onClick={() => setShowData(true)}>View results</button>
+            )}
+          </div>
           <div className="authoring-toolbar">
             <button
               disabled={!document.canUndo || !!busy || hasDraft}
@@ -650,7 +681,25 @@ export default function App() {
             >
               Workbook setup
             </button>
-            {tab === "graph" && (
+            {tab === "blocks" && (
+              <div className="build-view" aria-label="Build view">
+                <button
+                  aria-pressed={buildView === "blocks"}
+                  disabled={hasDraft || !!busy}
+                  onClick={() => setBuildView("blocks")}
+                >
+                  Blocks
+                </button>
+                <button
+                  aria-pressed={buildView === "outline"}
+                  disabled={hasDraft || !!busy}
+                  onClick={() => setBuildView("outline")}
+                >
+                  Step outline
+                </button>
+              </div>
+            )}
+            {(tab === "graph" || tab === "blocks") && (
               <>
                 <button
                   disabled={!!graph.error || !!busy || hasDraft}
@@ -658,39 +707,45 @@ export default function App() {
                   aria-expanded={showLibrary}
                   title="Choose a node from the library"
                 >
-                  + Add node
+                  + Add step
                 </button>
-                <button
-                  disabled={
-                    selectedIndex === undefined ||
-                    selectedIndex === 0 ||
-                    !!busy ||
-                    hasDraft
-                  }
-                  onClick={() => mutateSteps("up")}
-                  title="Alt+↑"
-                >
-                  Move up
-                </button>
-                <button
-                  disabled={
-                    selectedIndex === undefined ||
-                    selectedIndex >= count - 1 ||
-                    !!busy ||
-                    hasDraft
-                  }
-                  onClick={() => mutateSteps("down")}
-                  title="Alt+↓"
-                >
-                  Move down
-                </button>
-                <button
-                  disabled={selectedIndex === undefined || !!busy || hasDraft}
-                  onClick={() => mutateSteps("delete")}
-                  title="Delete"
-                >
-                  Delete step
-                </button>
+                {(tab === "graph" || buildView === "outline") && (
+                  <>
+                    <button
+                      disabled={
+                        selectedIndex === undefined ||
+                        selectedIndex === 0 ||
+                        !!busy ||
+                        hasDraft
+                      }
+                      onClick={() => mutateSteps("up")}
+                      title="Alt+↑"
+                    >
+                      Move up
+                    </button>
+                    <button
+                      disabled={
+                        selectedIndex === undefined ||
+                        selectedIndex >= count - 1 ||
+                        !!busy ||
+                        hasDraft
+                      }
+                      onClick={() => mutateSteps("down")}
+                      title="Alt+↓"
+                    >
+                      Move down
+                    </button>
+                    <button
+                      disabled={
+                        selectedIndex === undefined || !!busy || hasDraft
+                      }
+                      onClick={() => mutateSteps("delete")}
+                      title="Delete"
+                    >
+                      Delete step
+                    </button>
+                  </>
+                )}
               </>
             )}
           </div>
@@ -698,7 +753,7 @@ export default function App() {
             <section className="node-library" aria-label="Node library">
               <div className="library-heading">
                 <div>
-                  <strong>Add a node</strong>
+                  <strong>Add a step</strong>
                   <p>
                     Choose what happens next. Settings open after insertion.
                   </p>
@@ -708,9 +763,9 @@ export default function App() {
                 </button>
               </div>
               <input
-                aria-label="Search nodes"
+                aria-label="Search steps"
                 autoFocus
-                placeholder="Search nodes: read, filter, group…"
+                placeholder="Search steps: read, filter, group…"
                 value={nodeSearch}
                 onChange={(event) => setNodeSearch(event.target.value)}
               />
@@ -728,15 +783,18 @@ export default function App() {
                       disabled={hasDraft || !!busy}
                       onClick={() => {
                         try {
-                          setSource(
+                          document.transact("Add step", (current) =>
                             addOperation(
-                              source,
+                              current,
                               op.operation,
                               op.defaultArgument,
                             ),
                           );
                           setSelected(`step.${count}`);
-                          setTab("graph");
+                          if (tab === "blocks") {
+                            setBuildView("outline");
+                            setOutlineFocusRequest((value) => value + 1);
+                          }
                           setShowLibrary(false);
                         } catch (error) {
                           setError(true);
@@ -748,6 +806,12 @@ export default function App() {
                       <span>
                         <strong>{op.title}</strong>
                         <small>{op.description}</small>
+                        {(op.operation === "sql" ||
+                          op.operation === "rest") && (
+                          <small>
+                            Service only · unavailable in local runs
+                          </small>
+                        )}
                       </span>
                     </button>
                   ))}
@@ -765,7 +829,45 @@ export default function App() {
               />
             )}
             <div className="editor-content">
-              {tab === "blocks" ? (
+              {tab === "blocks" && buildView === "outline" ? (
+                <div className="outline-layout">
+                  {graph.error ? (
+                    <div className="workbench-outline" role="alert">
+                      {graph.error}{" "}
+                      <button
+                        disabled={hasDraft}
+                        onClick={() => setTab("source")}
+                      >
+                        Fix in YAML
+                      </button>
+                    </div>
+                  ) : (
+                    <WorkbenchOutline
+                      nodes={graph.nodes}
+                      selected={selected}
+                      focusRequest={outlineFocusRequest}
+                      disabled={hasDraft || !!busy}
+                      onSelect={setSelected}
+                    />
+                  )}
+                  <StepInspector
+                    columnSuggestions={suggestColumns(
+                      source,
+                      selected,
+                      inspection,
+                      loadedInspectPath,
+                      bindings,
+                    )}
+                    draft={argumentDraft}
+                    onDraftChange={setArgumentDraft}
+                    disabled={!!busy || setupDraft}
+                    source={source}
+                    selected={selected}
+                    onChange={setSource}
+                    onSource={() => setTab("source")}
+                  />
+                </div>
+              ) : tab === "blocks" ? (
                 <Suspense
                   fallback={
                     <div className="editor-loading" role="status">
@@ -870,6 +972,13 @@ export default function App() {
                   </div>
                   {selected && (
                     <StepInspector
+                      columnSuggestions={suggestColumns(
+                        source,
+                        selected,
+                        inspection,
+                        loadedInspectPath,
+                        bindings,
+                      )}
                       draft={argumentDraft}
                       onDraftChange={setArgumentDraft}
                       disabled={!!busy || setupDraft}

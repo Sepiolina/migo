@@ -1,5 +1,19 @@
 import { example } from "./model";
 
+export const ordersTotalsExample = `name: Customer order totals
+input:
+  orders: {label: Orders workbook}
+steps:
+  - from: {input: orders, sheet: Orders, trim: true}
+  - filter: num(Quantity) > 0
+  - set:
+      Line total: num(Quantity) * num(col("Unit price"))
+  - group: {by: [Customer], sum: [Line total]}
+  - save: totals
+output:
+  sheets: {Totals: totals}
+`;
+
 export const workflowTemplates = [
   {
     id: "copy-workbook",
@@ -24,5 +38,13 @@ output:
     description:
       "Keep rows with a positive quantity, group by part number, and total the quantities.",
     source: example,
+  },
+  {
+    id: "orders-totals",
+    title: "Customer order totals",
+    icon: "▦",
+    description:
+      "Try the Orders tutorial: filter quantities, calculate line totals, and total each customer's orders. Use examples/orders.xlsx.",
+    source: ordersTotalsExample,
   },
 ];
