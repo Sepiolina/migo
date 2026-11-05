@@ -479,6 +479,8 @@ from the workflow definition. It does not implement Excel formula recalculation.
 Keep a copy of original inputs and verify representative outputs in Excel before
 using a new workflow in production.
 
+Interactive documentation: open [`docs/mai-studio-guide.html`](docs/mai-studio-guide.html) in a browser for the searchable, offline-friendly Mai Studio field guide, with platform setup tabs and a customer-totals walkthrough. The walkthrough illustrates the bundled fixture; real workflow execution requires the native app or CLI.
+
 Further reading: [Studio user guide](docs/MAI_STUDIO_USER_GUIDE.md),
 [workflow reference](docs/WORKFLOWS.md), [extending MaiService](docs/EXTENDING.md),
 and [implementation plan](docs/MAI_DEV_TOOL_IMPLEMENTATION_PLAN.md).
