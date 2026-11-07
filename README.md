@@ -488,3 +488,5 @@ and [implementation plan](docs/MAI_DEV_TOOL_IMPLEMENTATION_PLAN.md).
 If Studio reports **Workbook saved; preview unavailable**, the workflow succeeded.
 Open the generated XLSX at the displayed path in Excel; preview limits do not
 delete a successful output. See [editing and preview troubleshooting](docs/MAI_STUDIO_USER_GUIDE.md#recover-from-editing-and-preview-problems).
+
+For a step-by-step explanation of the BOM rules, open [the BOM HTML guide](docs/bom-workflow-guide.html) in a browser.

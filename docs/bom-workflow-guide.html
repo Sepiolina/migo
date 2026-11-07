@@ -1,0 +1,388 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BOM.yaml explained — Mai Studio</title><style>
+:root{--bg:#f7f8fa;--surface:#fff;--ink:#202a34;--muted:#64717e;--line:#e3e8eb;--accent:#167765;--soft:#e7f3ed;--nav:#f1f4f5;--code:#162a2c;--shadow:0 16px 45px #213b3610}*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:90px}body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}button,input{font:inherit}a{color:var(--accent);text-underline-offset:4px}button,a,input,summary{outline-offset:5px}button{cursor:pointer}button:disabled{cursor:default;opacity:.4}[hidden]{display:none!important}.skip{position:fixed;top:-70px;left:20px;z-index:100;background:var(--surface);padding:12px}.skip:focus{top:10px}.sidebar{position:fixed;inset:0 auto 0 0;width:250px;border-right:1px solid var(--line);padding:33px 24px;background:var(--surface);display:flex;flex-direction:column;z-index:40}.brand{display:flex;align-items:center;gap:11px;color:var(--ink);text-decoration:none;font-size:22px;font-weight:750;letter-spacing:-1px}.brandmark{width:34px;height:34px;background:var(--accent);border-radius:10px;color:white;display:grid;place-items:center;letter-spacing:-4px;padding-right:4px;font-size:23px}.brand small{font-weight:400;color:var(--muted)}.edition{font-size:11px;letter-spacing:1.2px;color:var(--muted);margin:18px 0 30px}.nav-label,.eyebrow{font-size:10px;letter-spacing:1.8px;text-transform:uppercase;font-weight:750;color:var(--muted)}nav a{display:flex;align-items:center;gap:11px;border-radius:7px;padding:10px 12px;margin:4px 0;color:var(--muted);text-decoration:none;font-size:13px}nav a.active,nav a:hover{color:var(--accent);background:var(--soft)}nav a span{font:11px ui-monospace,monospace;opacity:.65}.side-bottom{margin-top:auto;padding-top:25px;font-size:12px;color:var(--muted)}.side-bottom a{display:block;margin-top:8px}.status-dot{display:inline-block;width:6px;height:6px;background:#33987c;border-radius:50%;margin-right:6px}.shell{margin-left:250px}.topbar{height:73px;position:sticky;top:0;z-index:30;display:flex;align-items:center;justify-content:space-between;padding:0 44px;background:var(--surface);border-bottom:1px solid var(--line);gap:20px}.crumb{font-size:12px;color:var(--muted)}.crumb b{color:var(--ink);font-weight:500}.tools{display:flex;gap:9px;align-items:center}.searchbox{display:flex;align-items:center;gap:8px;border:1px solid var(--line);background:var(--bg);border-radius:7px;padding:6px 10px}.searchbox input{width:165px;border:0;background:transparent;color:var(--ink);outline:none;font-size:12px}.key{font:10px ui-monospace,monospace;color:var(--muted);border:1px solid var(--line);padding:1px 4px;border-radius:4px}.icon-btn{border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:7px;padding:6px 11px}.menu{display:none}.content{max-width:1210px;margin:auto;padding:46px 48px 30px}.badge{font-size:10px;letter-spacing:1px;text-transform:uppercase;padding:5px 9px;border:1px solid #bcd9ce;border-radius:5px;color:var(--accent);background:var(--soft);display:inline-block;font-weight:700}.hero{display:grid;grid-template-columns:1.1fr 1fr;gap:34px;align-items:center;padding:16px 0 38px}.hero h1{font-size:clamp(37px,4.1vw,62px);line-height:1.08;letter-spacing:-2.8px;margin:20px 0}.hero h1 em{font-style:normal;color:var(--accent)}.hero p{max-width:410px;color:var(--muted);font-size:15px;line-height:1.8}.actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:26px}.btn{display:inline-flex;justify-content:center;align-items:center;gap:14px;text-decoration:none;border-radius:7px;padding:10px 17px;font-size:12px;font-weight:650;border:1px solid var(--line);background:var(--surface);color:var(--ink)}.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}.micro{font-size:11px;color:var(--muted);margin-top:15px}.hero-art{background:linear-gradient(145deg,#e7eeea,#f0f4ec);border:1px solid #dde6df;border-radius:18px;padding:22px;position:relative;overflow:hidden;min-height:310px}.art-top{display:flex;justify-content:space-between;align-items:center;font-size:10px;color:#527569;letter-spacing:.5px}.dots{letter-spacing:3px;color:#96b5a6}.mini-canvas{margin:22px auto 17px;max-width:285px;background:#f9fbf8;border:1px solid #d8e4da;border-radius:10px;box-shadow:0 10px 30px #2d534416;padding:18px 22px;color:#24483e}.mini-caption{font-size:9px;color:#7a9487;margin-bottom:14px;letter-spacing:1.4px}.mini-node{display:flex;align-items:center;gap:12px;border:1px solid #dbe5df;border-radius:6px;background:white;padding:9px;font-size:11px;position:relative}.mini-node+.mini-node{margin-top:16px}.mini-node+.mini-node:before{content:'';position:absolute;width:1px;height:16px;background:#9ebdb0;top:-17px;left:23px}.node-icon{background:#e7f2eb;border-radius:5px;width:27px;height:27px;display:grid;place-items:center;color:#2b7c63;font-size:13px}.mini-node small{display:block;font-size:9px;color:#809187}.art-foot{display:flex;justify-content:space-between;font:10px ui-monospace,monospace;color:#607c6c}.path-strip{display:grid;grid-template-columns:repeat(3,1fr);border:1px solid var(--line);border-radius:9px;background:var(--surface);margin:10px 0 44px}.path-strip div{padding:17px 22px;font-size:11px;color:var(--muted)}.path-strip div+div{border-left:1px solid var(--line)}.path-strip b{display:block;font-size:12px;font-weight:650;color:var(--ink);margin-bottom:3px}.path-strip i{font-style:normal;color:var(--accent);margin-right:8px}section{margin-bottom:52px;scroll-margin-top:95px}.section-head{display:flex;flex-wrap:wrap;align-items:flex-start;justify-content:space-between;gap:15px;margin-bottom:22px}.section-head h2{font-size:26px;letter-spacing:-.8px;margin:4px 0 3px;line-height:1.3}.section-head p{margin:6px 0 0;color:var(--muted);font-size:13px}.chapter{font:10px ui-monospace,monospace;color:var(--accent);text-transform:uppercase;letter-spacing:1px}.card{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:24px;box-shadow:var(--shadow)}.two-col>*{min-width:0}.two-col{display:grid;grid-template-columns:1fr 1fr;gap:18px}.card h3{font-size:15px;margin:0 0 9px;letter-spacing:-.2px}.card p,.card li{font-size:13px;color:var(--muted)}.card p:last-child{margin-bottom:0}.tabs{display:flex;gap:3px;padding:4px;background:var(--nav);border-radius:7px;width:fit-content;margin-bottom:20px}.tabs button{border:0;background:none;color:var(--muted);font-size:12px;border-radius:5px;padding:7px 15px}.tabs button[aria-selected=true]{background:var(--surface);color:var(--accent);box-shadow:0 1px 4px #0000000c}.prereq{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin:16px 0}.prereq span{border:1px solid var(--line);border-radius:5px;font-size:12px;padding:8px 10px;color:var(--muted)}.prereq b{color:var(--ink);font-weight:600}.code{position:relative;background:var(--code);border-radius:7px;margin:14px 0;overflow:hidden}.code pre{font:12px/1.9 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre;overflow:auto;margin:0;padding:22px 70px 22px 18px;color:#d9eee4}.copy{position:absolute;right:8px;top:8px;background:#ffffff12;color:#c8e0d4;border:1px solid #ffffff23;border-radius:4px;font-size:10px;padding:3px 7px}.note{border-left:3px solid #6aab92;padding:12px 15px;background:var(--soft);font-size:12px;color:var(--ink);border-radius:0 6px 6px 0;margin:16px 0}.note strong{font-weight:650}.checklist{display:grid;gap:10px;margin:16px 0}.checklist label{display:block;font-size:13px;color:var(--muted);cursor:pointer}.checklist input{accent-color:var(--accent);margin:5px 8px 0 0}.progress-line{height:4px;border-radius:3px;background:var(--line);overflow:hidden}.progress-line span{height:100%;background:var(--accent);display:block;transition:width .3s}.progress-meta{display:flex;justify-content:space-between;font-size:11px;color:var(--muted);margin:14px 0 7px}.text-btn{background:none;border:0;padding:0;color:var(--accent);font-size:11px}.lab{padding:0;overflow:hidden}.lab-bar{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding:15px 22px;background:var(--nav);font-size:11px}.lab-bar b{font-weight:600}.lab-grid{display:grid;grid-template-columns:210px 1fr;min-height:365px}.steps{padding:16px;border-right:1px solid var(--line);display:flex;flex-direction:column;gap:7px}.step{display:flex;gap:10px;align-items:center;text-align:left;background:none;border:1px solid transparent;border-radius:7px;color:var(--muted);font-size:12px;padding:10px}.step[aria-current=step]{border-color:#b7d9cb;background:var(--soft);color:var(--accent)}.step-num{width:25px;height:25px;border:1px solid var(--line);border-radius:50%;display:grid;place-items:center;font:11px ui-monospace,monospace;flex-shrink:0}.step[aria-current=step] .step-num{background:var(--accent);color:#fff;border-color:var(--accent)}.lab-body{padding:24px 27px;min-width:0}.lab-body h3{font-size:20px;margin:4px 0 8px;letter-spacing:-.5px}.lab-body p{min-height:46px;font-size:13px}.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:7px;margin-top:18px}table{border-collapse:collapse;width:100%;font-size:12px;text-align:left}th{font-weight:600;background:var(--nav);color:var(--muted)}th,td{padding:9px 13px;border-bottom:1px solid var(--line);white-space:nowrap}tr:last-child td{border-bottom:0}.removed{color:var(--muted);text-decoration:line-through;opacity:.55}.lab-controls{display:flex;justify-content:space-between;align-items:center;margin-top:20px}.lab-controls .btn{padding:6px 12px}.lab-controls span{font:10px ui-monospace,monospace;color:var(--muted)}.flow{display:flex;flex-wrap:wrap;gap:7px;margin:17px 0}.flow span{font-size:11px;color:var(--accent);background:var(--soft);padding:5px 9px;border:1px solid var(--line);border-radius:5px}.numbered{list-style:none;padding:0;counter-reset:inst}.numbered li{position:relative;padding-left:34px;margin:16px 0;counter-increment:inst}.numbered li:before{content:counter(inst,decimal-leading-zero);position:absolute;left:0;top:1px;font:11px ui-monospace,monospace;color:var(--accent)}.numbered b{color:var(--ink);font-weight:600}code{font-family:ui-monospace,Consolas,monospace;font-size:.9em;background:var(--nav);padding:2px 4px;border-radius:3px;overflow-wrap:anywhere}.code code{padding:0;background:none}.features{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}.features .card{padding:20px}.feature-icon{height:32px;width:32px;display:grid;place-items:center;background:var(--soft);border-radius:8px;color:var(--accent);margin-bottom:16px;font-size:16px}.shortcuts{display:grid;grid-template-columns:1fr 1fr;gap:10px 26px;margin-top:20px}.shortcut{display:flex;justify-content:space-between;gap:15px;align-items:center;font-size:12px;border-bottom:1px solid var(--line);padding:9px 0;color:var(--muted)}kbd{font:10px ui-monospace,monospace;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:3px 6px;color:var(--ink);white-space:nowrap;background:var(--surface)}details{border-bottom:1px solid var(--line)}details:last-child{border:0}summary{list-style:none;cursor:pointer;font-size:13px;font-weight:600;padding:17px 25px 17px 0;position:relative}summary:after{content:'+';position:absolute;right:2px;color:var(--accent);font-size:18px;top:12px}details[open] summary:after{content:'−'}details p{margin:0 30px 18px 0;font-size:13px;color:var(--muted)}.faq{padding:5px 24px}.footer{border-top:1px solid var(--line);padding:23px 0;display:flex;justify-content:space-between;gap:15px;color:var(--muted);font-size:11px}.footer a{margin-left:15px}.empty{text-align:center;padding:45px;color:var(--muted)}.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--code);color:#fff;border-radius:8px;padding:10px 20px;font-size:12px;z-index:60;box-shadow:var(--shadow)}.search-summary{font-size:12px;color:var(--muted);margin-bottom:20px}.print-btn{font-size:11px}.theme-dark{--bg:#141d22;--surface:#1b272d;--ink:#e2ebe8;--muted:#a3b6b4;--line:#324147;--accent:#80cfb2;--soft:#263e37;--nav:#223036;--code:#101c1e;--shadow:none}.theme-dark .btn.primary{color:#132a24}.theme-dark .hero-art{filter:brightness(.82)}
+@media(min-width:1500px){.content{padding-top:58px}.hero{gap:70px}}@media(max-width:1100px){.sidebar{width:215px;padding:28px 17px}.shell{margin-left:215px}.content{padding:32px 28px}.topbar{padding:0 28px}.hero{gap:20px}.hero h1{font-size:44px}.hero-art{padding:14px}.lab-grid{grid-template-columns:180px 1fr}.features{grid-template-columns:1fr}.features .card{display:grid;grid-template-columns:36px 1fr;column-gap:16px}.features .feature-icon{grid-row:1/3}.features p{margin:0}}@media(max-width:780px){.sidebar{transform:translateX(-100%);transition:transform .2s;width:245px;box-shadow:10px 0 50px #0002}.sidebar.open{transform:translateX(0)}.shell{margin:0}.menu{display:block}.topbar{height:65px;padding:0 18px;gap:10px}.crumb{display:none}.tools{flex:1;justify-content:flex-end}.searchbox input{width:140px}.content{padding:24px 20px}.hero{grid-template-columns:1fr;padding-top:12px;gap:28px}.hero h1{font-size:49px}.hero p{max-width:100%}.hero-art{min-height:270px}.mini-canvas{max-width:300px}.path-strip div{padding:13px 10px;font-size:10px}.path-strip b{font-size:11px}.path-strip{margin-bottom:36px}.two-col{grid-template-columns:1fr}.lab-grid{grid-template-columns:1fr}.steps{flex-direction:row;overflow:auto;border-right:0;border-bottom:1px solid var(--line);padding:12px;gap:4px}.step{white-space:nowrap;padding:6px;font-size:11px}.step-num{width:22px;height:22px}.lab-body{padding:20px}.shortcuts{grid-template-columns:1fr}.footer{flex-direction:column}.footer a{margin-left:0;margin-right:15px}.prereq{grid-template-columns:1fr 1fr}.section-head h2{font-size:24px}.print-btn{display:none}}@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}@media print{.sidebar,.topbar,.actions,.copy,.lab-controls,.steps,.print-btn,.toast,.checklist,.progress-meta,.progress-line{display:none!important}.shell{margin:0}.content{max-width:none;padding:0}.hero{grid-template-columns:1fr 1fr}.hero h1{font-size:36px}.card{box-shadow:none;break-inside:avoid}.lab-grid{display:block}.theme-dark{--bg:white;--surface:white;--ink:#202a34;--muted:#64717e;--line:#ddd;--accent:#167765;--soft:#e7f3ed;--nav:#f1f4f5}body{background:white}.code{print-color-adjust:exact}section{margin-bottom:28px}details p{display:block}a{color:inherit}.search-summary{display:none}}
+nav a{font-size:12px}.sidebar{overflow:auto}select{font:inherit;max-width:100%;padding:7px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--ink)}li{margin-bottom:8px}</style></head><body><a class="skip" href="#main">Skip to content</a><aside class="sidebar" id="sidebar"><a class="brand" href="mai-studio-guide.html">mai <small>studio</small></a><p class="edition">BOM WORKFLOW EXPLAINED</p><nav><a href="#overview">What bom.yaml does</a><a href="#inputs">01 · Read the two workbooks</a><a href="#groups">02 · Reconstruct component groups</a><a href="#pcb">03 · Establish PCB scope and revision</a><a href="#vendors">04 · CFT-001: decide which vendors are forbidden</a><a href="#enrich">05 · Look up Forth part numbers and SAP data</a><a href="#selection">06 · CFT-002: choose MAIN and alternates</a><a href="#output">07 · Read the BOM and debug sheets</a><a href="#run">08 · Run the actual workflow</a><a href="#source">09 · Inspect the complete YAML</a></nav></aside><div class="shell"><header class="topbar"><button id="menu" class="icon-btn menu" aria-label="Toggle navigation" aria-expanded="false">☰</button><span class="crumb">Workflow documentation / BOM</span><div class="tools"><label class="searchbox"><input id="search" type="search" placeholder="Search explanation…" aria-label="Search explanation"></label><button id="theme" class="icon-btn" aria-label="Toggle theme">◐</button></div></header><main id="main" class="content"><div class="hero" style="display:block"><span class="badge">A guide to the actual YAML</span><h1>From customer BOM<br><em>to a ranked parts list.</em></h1><p>Understand how each row becomes eligible, enriched, and selected — and where to look when the result surprises you.</p></div><section id="overview"><div class="section-head"><h2>What bom.yaml does</h2></div><div class="card"><p>This workflow combines a <b>customer bill of materials</b> with a <b>Priority workbook</b>, optionally enriches parts from SQL Server and SAP, and creates an annotated Excel workbook with <b>BOM</b> and <b>debug</b> sheets.</p><div class="flow"><span>Read two inputs</span><span>Reconstruct groups</span><span>Apply PCB scope</span><span>Check vendors</span><span>Enrich parts</span><span>Choose MAIN / SUB</span><span>Write XLSX</span></div><div class="note">Steps execute top to bottom on a current table. <code>save</code> keeps a named dataset; it does not write an Excel file. The final <code>output</code> section writes the workbook.</div></div></section><section id="inputs"><div class="section-head"><h2>01 · Read the two workbooks</h2></div><div class="card"><h3>Customer BOM → parts</h3><p>The first worksheet is read. Studio searches the first 15 rows for a header with at least four recognized titles. Aliases such as “part no” and “quantity” map to canonical fields. Missing matches use the fallback columns below; if no header qualifies, the standard layout applies. Cells are trimmed and rows with all selected fields blank are skipped.</p><div class="table-wrap"><table><tr><th>Fields</th><th>Fallback Excel columns</th></tr><tr><td>Level, PartNumber, PartType, Description</td><td>A, B, C, D</td></tr><tr><td>Rev, Qty, UOM</td><td>I, Z, AA</td></tr><tr><td>FindNum, RefDes</td><td>AC, AD</td></tr><tr><td>MfgName, MfrPN</td><td>AZ, BA</td></tr></table></div><h3>Priority → priorities</h3><p>The Priority workbook must contain a sheet named <b>Shortage</b>. It reads column A as ForthPN and M as Value, beginning at <b>row 168</b>. A missing sheet stops the workflow.</p><p>Keys are trimmed and uppercased with <code>norm</code>. Values 1, 1.0, 01, P1, and 01.0 become numeric P1. Other values use parseFloat; zero and non-numeric values mean no priority. Empty keys are removed; when a normalized key repeats, the <b>last row wins</b>.</p><p>For HTTP uploads, the priority filename is matched by the case-insensitive expression <code>prio|shortage</code>. CLI and Studio use explicit input identifiers <code>bom</code> and <code>priority</code>.</p></div></section><section id="groups"><div class="section-head"><h2>02 · Reconstruct component groups</h2></div><div class="card"><p>Alternate manufacturer rows often leave repeated component fields empty. <code>Eff*</code> columns carry forward the last nonblank Level, PartNumber, PartType, Description, Rev, Qty, UOM, and FindNum.</p><ul><li><b>HasAG:</b> at least one original component field from Level through UOM is populated. These names describe the logical output layout, not the input’s physical columns.</li><li><b>HasIJK:</b> RefDes, MfgName, or MfrPN is present. A later PCB rewrite also sets this flag.</li><li><b>Level0:</b> only the first processed row with the exact Level string “0” gets this flag. It does not exclude every row whose level is zero.</li></ul><p><b>GroupID</b> starts at 1. It increases when the effective find number changes. Before a find number exists, each row with HasAG starts a new group. Noncontiguous runs of the same find number can therefore have different GroupIDs.</p><div class="note">Reference and quantity repair uses a window grouped by <b>EffFindNum</b>, not GroupID. A blank RefDes takes the first nonblank reference in that find-number group. A zero or unparseable effective quantity takes the group’s largest positive quantity, or “1” if none exists. Nonzero quantities, including negative values, remain unchanged.</div></div></section><section id="pcb"><div class="section-head"><h2>03 · Establish PCB scope and revision</h2></div><div class="card"><p>A description is checked in both its original and effective forms. After trimming and uppercasing, pieces are split at comma, semicolon, colon, slash, pipe, or backslash. A piece must start with <b>PCB</b> followed by a non-alphanumeric character or the end of the piece. “PCB assembly” matches; “PCBA” does not.</p><p>The <b>last detected PCB row</b> becomes the scope boundary. Rows after it remain in the output but are excluded from enrichment and MAIN/SUB selection. If no PCB is detected, every row is in scope. Carried-down descriptions can cause continuation rows to count as PCB rows too.</p><p>For an in-scope PCB, use MfrPN, otherwise PartNumber, otherwise EffPartNumber as the base. Append <code>_REV_</code> plus the first whitespace-separated revision token when both exist. If the base already contains that exact suffix, it is left unchanged.</p><div class="code"><pre>Base: BOARD-123     Revision: A released
+Reformatted MfrPN: BOARD-123_REV_A</pre></div><p>The original MfrPN is retained as OrigMfrPN for output outside scope.</p></div></section><section id="vendors"><div class="section-head"><h2>04 · CFT-001: decide which vendors are forbidden</h2></div><div class="card"><p>Brand names and descriptions are normalized. Leading non-alphanumeric characters are removed from the manufacturer part-number key used for these exceptions.</p><div class="table-wrap"><table><tr><th>Brand rule</th><th>Allowed exception</th></tr><tr><td>TDK word match or brand starts with TDK</td><td>Description does not start CAP, or MPN starts CGA</td></tr><tr><td>Brand contains SAMSUNG or SEMCO</td><td>Description does not start CAP, or MPN matches ^CL(.{6}|.{10})P</td></tr><tr><td>Exact YAGEO CORPORATION, WALSIN TECHNOLOGY CORPORATION, KDS</td><td>No exception defined</td></tr></table></div><p>The Samsung pattern means CL, followed by exactly six or ten arbitrary characters, then P; further trailing characters are allowed. Other brands are not forbidden by this rule. All forbidden flags are limited to in-scope rows.</p><div class="note">TDK and Samsung exemptions also allow non-CAP descriptions. Their log-message wording is narrower than the actual expression. Use the expressions above to understand the rule.</div></div></section><section id="enrich"><div class="section-head"><h2>05 · Look up Forth part numbers and SAP data</h2></div><div class="card"><h3>SQL Server · controlled by db_enabled</h3><p><b>Covered</b> means in scope, not Level0, and HasIJK. Nonblank manufacturer part numbers become normalized lookup keys. The query reads MaterialNo, ZBlock, and Maker from <code>SAP_ForthFacDb.dbo.Material_Master</code>, limited to project <code>FNS - Finisar</code> and <code>ZBlock &lt;&gt; 'D'</code>.</p><p>Master rows with empty Maker are removed, and normalized duplicate Makers keep the first result. PCB rows without a primary hit can use a second lookup with <code>_SANMINA</code> appended. If the retry succeeds, that manufacturer part number is used in the output.</p><p>A covered row with no match gets <b>CREATE P/N</b>, unless forbidden, in which case that fallback becomes blank. Existing matches can remain visible even when forbidden. Uncovered rows get no Forth part number. When the database is disabled, all lookup hits are empty. SQL errors log a warning and continue with fallback values.</p><h3>SAP REST · controlled by sap_enabled</h3><p>Only in-scope, non-Level0 rows with HasIJK, an allowed vendor status, and a real Forth part number are queried. Unique sorted material numbers are batched. Defaults are 50 materials and 3 extra retries when configuration values are absent or invalid.</p><p>The request posts to <code>http://{sap_host}:{sap_port}/api/sap-rfc/call</code> with WERKS and MATNR data, optional configured tcode, and a hard-coded <code>employee_id: "106049"</code>. This is separate from the upload’s bam field.</p><p>Responses supply status, vendor name/code, and stock. Material keys are indexed with and without leading zeros; the last duplicate response wins. Status prefers the first truthy value of mmsta, mstae, zblock, status. Stock uses labst when non-null, otherwise stock.</p><p>A Z1 flag from SQL remains true even if SAP later supplies a different status. Failed SAP batches log and are skipped; they do not necessarily fail the entire workflow.</p></div></section><section id="selection"><div class="section-head"><h2>06 · CFT-002: choose MAIN and alternates</h2></div><div class="card"><p>Priority values join by normalized <b>ForthPN</b>, not manufacturer part number. Eligibility excludes rows in this order: below PCB scope, Level0, no HasIJK, Z1 blocked, then forbidden without an exemption.</p><p>Within each GroupID and normalized ForthPN, only the first eligible occurrence is a candidate. Blank ForthPN and CREATE P/N are exempt from duplicate suppression. A group with no candidates has no MAIN.</p><h3>First applicable rule wins</h3><ol class="numbered"><li><b>Exactly one P1 candidate:</b> select it.</li><li><b>P1 candidates with a vendor:</b> select their highest stock.</li><li><b>P1 candidates without a vendor match:</b> select the highest stock among P1 candidates.</li><li><b>No P1, but a vendor exists:</b> select the first vendor candidate. Stock does not decide this rule.</li><li><b>No P1 or vendor, positive stock exists:</b> select highest stock.</li><li><b>Otherwise:</b> select the first candidate.</li></ol><p>Ties go to the top-most candidate. Remaining candidates become SUB1, SUB2, … in their existing group order. Excluded duplicates and ineligible rows get a diagnostic reason instead.</p><div class="note">HasVendor uses trimmed VName, or VendorCode when the name is empty, and rejects the exact strings empty, “0”, “None”, and “-”. Vendor presence is not a case-insensitive validation rule.</div><h3>Try the decision order</h3><p>This illustration assumes three already-eligible, distinct candidates in one group. It demonstrates the pick rules only.</p><label>Scenario <select id="scenario"><option value="single">One P1 beats higher stock</option><option value="vendor">No P1: first vendor wins</option><option value="multiple">Multiple P1: vendor subset wins</option><option value="stock">No P1 or vendor: highest stock</option><option value="fallback">No signals: top-most wins</option></select></label><div class="table-wrap"><table><thead><tr><th>Candidate</th><th>P1</th><th>Vendor</th><th>Stock</th><th>Result</th></tr></thead><tbody id="candidates"></tbody></table></div><p id="decision" role="status"></p></div></section><section id="output"><div class="section-head"><h2>07 · Read the BOM and debug sheets</h2></div><div class="card"><p>The final table is saved as <code>result</code>. The BOM sheet presents effective component fields, manufacturer details, a separator, Block Status, Forth P/N, and Priority. It freezes the header and adds a thick bottom border at the last in-scope row of each group.</p><div class="table-wrap"><table><tr><th>Visual marker</th><th>Meaning</th></tr><tr><td>Yellow row</td><td>In-scope Level0 header/component row</td></tr><tr><td>Yellow Forth P/N cell</td><td>CREATE P/N, unless forbidden or Z1 without an exemption</td></tr><tr><td>Red manufacturer cells</td><td>Forbidden or Z1, without an exemption</td></tr><tr><td>Blue Priority</td><td>MAIN</td></tr><tr><td>Green Priority</td><td>SUB alternate</td></tr><tr><td>Black Priority</td><td>Duplicate Forth P/N excluded from selection</td></tr></table></div><p><b>debug</b> inherits the BOM columns and styles, then adds P1 value, SAP vendor name/code, stock, internal Forth material number, eligibility, decision reason, and GroupID. Start with Eligibility Status and Decision Reason when a row was not selected.</p><div class="note">An exemption can suppress red highlighting, but Z1 still makes a row ineligible. Color alone does not prove eligibility. Rows outside scope are retained with original MfrPN and blank visible enrichment fields; their debug eligibility explains the exclusion.</div></div></section><section id="run"><div class="section-head"><h2>08 · Run the actual workflow</h2></div><div class="card"><h3>Offline CLI example</h3><p>From the repository root with Go installed:</p><div class="code"><pre>go run ./cmd/migo -in bom=testdata/bom_basic.xlsx -in priority=testdata/prio_basic.xlsx -out out.xlsx workflows/bom.yaml</pre></div><p>Default CLI configuration disables database and SAP enrichment. This validates file processing and fallback rules, but does not reproduce live material, vendor, stock, or P1 outcomes. Use <code>-check</code> instead of keeping an output file when needed.</p><h3>In Mai Studio</h3><p>Open the repository workspace, load <code>workflows/bom.yaml</code>, validate, then bind bom and priority to the fixture paths above. Use Advanced YAML for the nested branches and expressions that visual editors preserve but cannot fully edit. Desktop runs are offline; live SQL and REST operations are unavailable.</p><h3>Through the configured service</h3><div class="code"><pre>curl --fail -F files=@testdata/bom_basic.xlsx -F files=@testdata/prio_basic.xlsx -F bam=113280 http://localhost:3081/api/bom/upload
+curl --fail -o bom-output.xlsx http://localhost:3081/api/bom/download</pre></div><p>The service must already be running with the intended configuration. Download returns the latest result for the workflow. Open the actual XLSX in Excel to inspect formatting; Studio’s preview shows cell values.</p></div></section><section id="source"><div class="section-head"><h2>09 · Inspect the complete YAML</h2></div><div class="card"><p>Embedded from the repository file used to write this explanation. Expand to inspect the exact rules.</p><details><summary>Show workflows/bom.yaml</summary><div class="code"><pre># BOM processor: a customer BOM plus a Priority workbook in, the annotated
+# BOM (BOM + debug sheets) out. Every rule is in this file; the steps are the
+# generic ones described in docs/WORKFLOWS.md.
+#
+# POST /api/bom/upload   files: Customer BOM + Priority (any order), bam: employee number
+# GET  /api/bom/download latest result of this workflow
+name: BOM
+input:
+  bom: {label: Customer BOM}
+  priority: {label: Priority, match: &quot;(?i)prio|shortage&quot;}
+
+steps:
+  # ---- read the customer BOM ------------------------------------------------
+  # First sheet. The header row is the first of the top 15 rows where at least
+  # 4 columns carry a known title; otherwise the standard layout applies.
+  - from:
+      input: bom
+      header:
+        search: 15
+        min: 4
+        columns:
+          Level: [level, lvl, item level]
+          PartNumber: [part number, part no, item number, internal pn, p/n]
+          PartType: [part type, type, category]
+          Description: [description, desc, part description]
+          Rev: [rev, revision, item rev]
+          Qty: [bom.qty, qty, quantity, bom qty]
+          UOM: [bom.uom, uom, unit of measure, unit]
+          FindNum: [bom.find num, find num, find no, find, line item, item]
+          RefDes: [bom.ref des, ref des, reference designator, designator, refdes]
+          MfgName: [manufacturers.mfg name, mfg name, manufacturer, mfr name, maker, vendor]
+          MfrPN: [manufacturers.mfr. part number, manufacturers.mfr part number, mfr part number, mfr. part number, mpn, mfr pn]
+        fallback: {Level: A, PartNumber: B, PartType: C, Description: D, Rev: I, Qty: Z, UOM: AA, FindNum: AC, RefDes: AD, MfgName: AZ, MfrPN: BA}
+      trim: true
+      skip_blank: true
+      empty: The selected BOM file is empty.
+  - save: parts
+
+  # ---- read the Priority workbook: Forth P/N (A) -&gt; priority (M), from row 168
+  - fail:
+      when: &#x27;&quot;Shortage&quot; not in sheets(&quot;priority&quot;)&#x27;
+      message: Priority workbook has no sheet named &quot;Shortage&quot;
+  - from: {input: priority, sheet: Shortage, columns: {ForthPN: A, Value: M}, start: 168}
+  - set:
+      Key: norm(ForthPN)
+      # 1, 1.0, 01, P1 mean P1; otherwise the number (0 and non-numbers: none)
+      P: &#x27;norm(Value) in [&quot;1&quot;, &quot;1.0&quot;, &quot;01&quot;, &quot;P1&quot;, &quot;01.0&quot;] ? 1 : (parseFloat(Value) == 0 ? nil : parseFloat(Value))&#x27;
+  - filter: Key != &quot;&quot;
+  - dedupe: {by: [Key], keep: last}
+  - log: Loaded {len(rows)} Priority entries.
+  - save: priorities
+
+  # ---- groups ---------------------------------------------------------------
+  - from: parts
+  - set:
+      HasAG: &#x27;!blank(Level) || !blank(PartNumber) || !blank(PartType) || !blank(Description) || !blank(Rev) || !blank(Qty) || !blank(UOM)&#x27;
+      HasIJK: &#x27;!blank(RefDes) || !blank(MfgName) || !blank(MfrPN)&#x27;
+      Level0: index == 0 &amp;&amp; Level == &quot;0&quot;
+      # Effective values: the row&#x27;s own, else carried down from above.
+      EffLevel: Level
+      EffPartNumber: PartNumber
+      EffPartType: PartType
+      EffDescription: Description
+      EffRev: Rev
+      EffQty: Qty
+      EffUOM: UOM
+      EffFindNum: FindNum
+  - fill: [EffLevel, EffPartNumber, EffPartType, EffDescription, EffRev, EffQty, EffUOM, EffFindNum]
+  # A new group starts when the find number changes (or, before any find
+  # number, on every row with A-G data).
+  - set:
+      GroupID: &#x27;index == 0 ? 1 : prev(&quot;GroupID&quot;) + (EffFindNum != &quot;&quot; ? (prev(&quot;EffFindNum&quot;) != EffFindNum ? 1 : 0) : (HasAG ? 1 : 0))&#x27;
+  - window:
+      by: [EffFindNum]
+      set:
+        # a blank ref des takes the first one of its find number
+        EffRefDes: &#x27;RefDes != &quot;&quot; ? RefDes : first(filter(group, #.RefDes != &quot;&quot;))?.RefDes ?? &quot;&quot;&#x27;
+        # a zero quantity becomes the find number&#x27;s largest, or 1
+        EffQty: &gt;-
+          toNumber(EffQty, 0) != 0 ? EffQty :
+          (let m = max(map(group, toNumber(#.EffQty, 0)));
+           m &gt; 0 ? first(filter(group, toNumber(#.EffQty, 0) == m)).EffQty : &quot;1&quot;)
+
+  # ---- PCB scope and reformat --------------------------------------------------
+  # A PCB row: a description piece (split at , ; : / | \) starting with &quot;PCB&quot;
+  # not followed by a letter or digit.
+  - set:
+      IsPCB: &#x27;any([Description, EffDescription], {any(splitAny(norm(#), &quot;,;:/|\\&quot;), {trim(#) matches &quot;^PCB([^A-Z0-9]|$)&quot;})})&#x27;
+  # Rows below the last PCB row are out of scope.
+  - set: {LastPCB: &#x27;IsPCB ? index : index == 0 ? -1 : prev(&quot;LastPCB&quot;)&#x27;}
+  - window: {set: {InScope: &#x27;let end = last(group).LastPCB; end &lt; 0 || index &lt;= end&#x27;}}
+  # In-scope PCB rows: the MPN becomes &lt;MPN, else part number&gt;_REV_&lt;first word of rev&gt;.
+  - set:
+      OrigMfrPN: MfrPN
+      RevToken: &#x27;first(fields(Rev != &quot;&quot; ? Rev : EffRev)) ?? &quot;&quot;&#x27;
+      NewMfrPN: &gt;-
+        let base = MfrPN != &quot;&quot; ? MfrPN : (PartNumber != &quot;&quot; ? PartNumber : EffPartNumber ?? &quot;&quot;);
+        InScope &amp;&amp; IsPCB &amp;&amp; base != &quot;&quot; &amp;&amp; RevToken != &quot;&quot;
+          ? (base contains &quot;_REV_&quot; + RevToken ? base : base + &quot;_REV_&quot; + RevToken)
+          : MfrPN
+  - log:
+      when: &#x27;any(rows, #.NewMfrPN != #.MfrPN)&#x27;
+      message: &#x27;Reformatted Column K for {len(filter(rows, #.NewMfrPN != #.MfrPN))} PCB row(s).&#x27;
+  - set:
+      HasIJK: HasIJK || NewMfrPN != MfrPN
+      MfrPN: NewMfrPN
+
+  # ---- CFT-001: forbidden vendors ----------------------------------------------
+  - set:
+      Brand: norm(MfgName)
+      MPNKey: &#x27;replaceRe(norm(MfrPN), &quot;^[^A-Z0-9]+&quot;, &quot;&quot;)&#x27;
+      Desc: &#x27;norm(blank(EffDescription) ? Description : EffDescription)&#x27;
+      # Brands that are banned unless the row is allowed:
+      Exception: &gt;-
+        Brand matches &quot;\\bTDK\\b&quot; || Brand startsWith &quot;TDK&quot; ? &quot;TDK&quot; :
+        Brand contains &quot;SAMSUNG&quot; || Brand contains &quot;SEMCO&quot; ? &quot;SAMSUNG&quot; : &quot;&quot;
+      Exempt: &gt;-
+        Exception == &quot;TDK&quot; ? (Desc not startsWith &quot;CAP&quot; || MPNKey startsWith &quot;CGA&quot;) :
+        Exception == &quot;SAMSUNG&quot; ? (Desc not startsWith &quot;CAP&quot; || MPNKey matches &quot;(?s)^CL(.{6}|.{10})P&quot;) :
+        false
+      Forbidden: &gt;-
+        InScope &amp;&amp; (Exception != &quot;&quot; ? !Exempt :
+          Brand in [&quot;YAGEO CORPORATION&quot;, &quot;WALSIN TECHNOLOGY CORPORATION&quot;, &quot;KDS&quot;])
+  - log:
+      when: &#x27;any(rows, #.InScope &amp;&amp; #.Exception == &quot;TDK&quot; &amp;&amp; #.Exempt)&#x27;
+      message: &#x27;TDK Exception: {len(filter(rows, #.InScope &amp;&amp; #.Exception == &quot;TDK&quot; &amp;&amp; #.Exempt))} TDK CAP (CGA series) row(s) confirmed valid.&#x27;
+  - log:
+      when: &#x27;any(rows, #.InScope &amp;&amp; #.Exception == &quot;SAMSUNG&quot; &amp;&amp; #.Exempt)&#x27;
+      message: &#x27;Samsung Exception: {len(filter(rows, #.InScope &amp;&amp; #.Exception == &quot;SAMSUNG&quot; &amp;&amp; #.Exempt))} Samsung MLCC (CL...P...) row(s) confirmed valid.&#x27;
+  - log: &#x27;CFT-001: {len(filter(rows, #.Forbidden))} row(s) flagged as forbidden.&#x27;
+
+  # ---- Forth P/N from Material_Master (SQL Server) ------------------------------
+  # Rows looked up: in scope, not level 0, with I-K data. PCB rows that miss
+  # are tried again with _SANMINA appended.
+  - set:
+      Covered: InScope &amp;&amp; !Level0 &amp;&amp; HasIJK
+      LookupKey: norm(MfrPN)
+      RetryMfrPN: &#x27;MfrPN == &quot;&quot; || norm(MfrPN) endsWith &quot;_SANMINA&quot; ? MfrPN : MfrPN + &quot;_SANMINA&quot;&#x27;
+      RetryKey: &#x27;IsPCB ? norm(RetryMfrPN) : &quot;&quot;&#x27;
+  - if: truthy(config(&quot;db_enabled&quot;))
+    then:
+      - sql:
+          connection: db
+          query: |
+            SELECT MaterialNo, ISNULL(ZBlock, &#x27;&#x27;) AS ZBlock, Maker
+            FROM SAP_ForthFacDb.dbo.Material_Master
+            WHERE ZBlock &lt;&gt; &#x27;D&#x27; AND Project = &#x27;FNS - Finisar&#x27;
+              AND UPPER(LTRIM(RTRIM(Maker))) IN (@mpns)
+          params:
+            mpns: &gt;-
+              uniq(concat(
+                map(filter(rows, #.Covered &amp;&amp; #.MfrPN != &quot;&quot;), #.LookupKey),
+                map(filter(rows, #.Covered &amp;&amp; #.MfrPN != &quot;&quot; &amp;&amp; #.RetryKey != &quot;&quot;), #.RetryKey)))
+          columns: [MaterialNo, ZBlock, Maker]
+          on_error: &#x27;WARNING: MSSQL connection/lookup failed ({error}) -- skipping DB lookup and using fallback Forth P/N.&#x27;
+          save: master
+      - save: parts
+      - from: master
+      - filter: &#x27;!blank(Maker)&#x27;
+      - dedupe: {by: [Maker], keep: first, normalize: true}
+      - save: master
+      - from: parts
+      - join: {with: master, on: [LookupKey], right_on: [Maker], normalize: true, take: {HitMaker: Maker, HitNo: MaterialNo, HitZ: ZBlock}}
+      - join: {with: master, on: [RetryKey], right_on: [Maker], normalize: true, take: {RetryMaker: Maker, RetryNo: MaterialNo, RetryZ: ZBlock}}
+    else:   # no database: nothing is found, every looked-up row asks for a new P/N
+      - set: {HitMaker: nil, HitNo: nil, HitZ: nil, RetryMaker: nil, RetryNo: nil, RetryZ: nil}
+  - set:
+      Lookup: Covered &amp;&amp; MfrPN != &quot;&quot;
+      UseRetry: Lookup &amp;&amp; HitMaker == nil &amp;&amp; IsPCB &amp;&amp; RetryMaker != nil
+      Found: Lookup &amp;&amp; (HitMaker != nil || UseRetry)
+      ForthPN: &gt;-
+        !Covered ? &quot;&quot; :
+        MfrPN == &quot;&quot; ? (Forbidden ? &quot;&quot; : &quot;CREATE P/N&quot;) :
+        (let pn = Found ? str(UseRetry ? RetryNo : HitNo) : &quot;CREATE P/N&quot;;
+         Forbidden &amp;&amp; pn == &quot;CREATE P/N&quot; ? &quot;&quot; : pn)
+      BlockStatus: &#x27;Lookup &amp;&amp; Found ? str(UseRetry ? RetryZ : HitZ) : &quot;&quot;&#x27;
+      Z1: norm(BlockStatus) == &quot;Z1&quot;
+      MfrPN: &#x27;UseRetry ? RetryMfrPN : MfrPN&#x27;
+      VName: &#x27;&quot;&quot;&#x27;
+      VendorCode: &#x27;&quot;&quot;&#x27;
+      Stock: &#x27;0&#x27;
+
+  # ---- block status, vendor and stock from SAP (REST) -----------------------------
+  - if: truthy(config(&quot;sap_enabled&quot;))
+    then:
+      - set:
+          SapRow: &#x27;InScope &amp;&amp; !Level0 &amp;&amp; HasIJK &amp;&amp; (!Forbidden || Exempt) &amp;&amp; ForthPN not in [&quot;&quot;, &quot;CREATE P/N&quot;]&#x27;
+      - if: &#x27;!any(rows, #.SapRow)&#x27;
+        then:
+          - log: &#x27;SAP enrichment: no eligible Forth P/N rows to query.&#x27;
+        else:
+          - rest:
+              url: &#x27;http://{config(&quot;sap_host&quot;)}:{config(&quot;sap_port&quot;)}/api/sap-rfc/call&#x27;
+              method: POST
+              each: &#x27;sort(uniq(map(filter(rows, #.SapRow), #.ForthPN)))&#x27;
+              # whole numbers from config; 0, missing or invalid: the default
+              batch: &#x27;let f = parseFloat(str(config(&quot;api_batch_size&quot;))) ?? 0; f &gt;= 1 &amp;&amp; f &lt; 1e9 ? int(f) : 50&#x27;
+              retries: &#x27;let f = parseFloat(str(config(&quot;api_retries&quot;))) ?? 0; f &gt;= 1 &amp;&amp; f &lt; 1e9 ? int(f) : 3&#x27;
+              body: &gt;-
+                let data = concat([{WERKS: config(&quot;sap_werks&quot;)}], map(batch, ({MATNR: #})));
+                config(&quot;sap_tcode&quot;) == nil
+                  ? {employee_id: &quot;106049&quot;, DATA: data}
+                  : {tcode: config(&quot;sap_tcode&quot;), employee_id: &quot;106049&quot;, DATA: data}
+              # the answer is a list, {tables: [{rows: [...]}]}, or a list under DATA, data or rows
+              rows: &gt;-
+                type(response) == &quot;array&quot; ? response :
+                type(response) != &quot;map&quot; ? [] :
+                type(response.tables) == &quot;array&quot; ? flatten(map(response.tables, type(#) == &quot;map&quot; &amp;&amp; type(#.rows) == &quot;array&quot; ? #.rows : [])) :
+                type(response.DATA) == &quot;array&quot; ? response.DATA :
+                type(response.data) == &quot;array&quot; ? response.data :
+                type(response.rows) == &quot;array&quot; ? response.rows : []
+              keys: lower
+              columns: [matnr, mmsta, mstae, zblock, status, vname, lifnr, labst, stock]
+              on_error: &#x27;WARN: SAP batch {batch_number} failed after {retries} retries: {error}&#x27;
+              save: sap
+          - save: parts
+          # One answer per material number, with and without leading zeros (the last answer wins).
+          - from: sap
+          - filter: truthy(matnr)
+          - set:
+              K1: norm(str(matnr))
+              K2: &#x27;norm(replaceRe(trim(str(matnr)), &quot;^0+&quot;, &quot;&quot;))&#x27;
+              SapStatus: &#x27;trim(str(coalesce(mmsta, mstae, zblock, status) ?? &quot;&quot;))&#x27;
+              SapVName: &#x27;truthy(vname) ? trim(str(vname)) : &quot;&quot;&#x27;
+              SapVCode: &#x27;truthy(lifnr) ? trim(str(lifnr)) : &quot;&quot;&#x27;
+              SapStock: toNumber(labst ?? stock, 0)
+          - stack: {columns: [K1, K2], into: Key}
+          - dedupe: {by: [Key], keep: last}
+          - save: sap
+          - from: parts
+          - set:
+              PN1: norm(ForthPN)
+              PN2: &#x27;norm(replaceRe(norm(ForthPN), &quot;^0+&quot;, &quot;&quot;))&#x27;
+          - join: {with: sap, on: [PN1], right_on: [Key], take: {A_Hit: Key, A_Status: SapStatus, A_VName: SapVName, A_VCode: SapVCode, A_Stock: SapStock}}
+          - join: {with: sap, on: [PN2], right_on: [Key], take: {B_Hit: Key, B_Status: SapStatus, B_VName: SapVName, B_VCode: SapVCode, B_Stock: SapStock}}
+          - set:   # rows found in SAP take its status, vendor and stock; Z1 blocks
+              SapHit: SapRow &amp;&amp; (A_Hit != nil || B_Hit != nil)
+              SapStatus: &#x27;A_Hit != nil ? A_Status : B_Status&#x27;
+              SapZ1: &#x27;SapHit &amp;&amp; norm(SapStatus != &quot;&quot; ? SapStatus : BlockStatus) == &quot;Z1&quot;&#x27;
+              BlockStatus: &#x27;SapZ1 ? &quot;Z1&quot; : SapHit &amp;&amp; SapStatus != &quot;&quot; ? SapStatus : BlockStatus&#x27;
+              Z1: Z1 || SapZ1
+              ForthPN: &#x27;SapZ1 &amp;&amp; ForthPN == &quot;CREATE P/N&quot; ? &quot;&quot; : ForthPN&#x27;
+              VName: &#x27;SapHit ? (A_Hit != nil ? A_VName : B_VName) : VName&#x27;
+              VendorCode: &#x27;SapHit ? (A_Hit != nil ? A_VCode : B_VCode) : VendorCode&#x27;
+              Stock: &#x27;SapHit ? (A_Hit != nil ? A_Stock : B_Stock) : Stock&#x27;
+          - log: &#x27;SAP enrichment: matched {len(filter(rows, #.SapHit))} / {len(filter(rows, #.SapRow))} rows.&#x27;
+
+  # ---- CFT-002: one MAIN per group, the other candidates SUB1, SUB2... ---------------
+  - set:
+      PKey: norm(ForthPN)
+  - join: {with: priorities, on: [PKey], right_on: [Key], take: {PV: P}}
+  - set:
+      PriorityValue: &#x27;InScope ? PV : nil&#x27;
+      Eligible: &gt;-
+        !InScope ? &quot;Ineligible (Below PCB Scope)&quot; :
+        Level0 ? &quot;Ineligible (Level 0)&quot; :
+        !HasIJK ? &quot;Ineligible (No I,J,K)&quot; :
+        Z1 ? &quot;Ineligible (Z1 Blocked)&quot; :
+        Forbidden &amp;&amp; !Exempt ? &quot;Ineligible (CFT-001 Forbidden)&quot; :
+        &quot;Eligible&quot;
+      HasVendor: &#x27;let v = trim(VName) != &quot;&quot; ? trim(VName) : trim(VendorCode); v not in [&quot;&quot;, &quot;0&quot;, &quot;None&quot;, &quot;-&quot;]&#x27;
+      VendorLabel: &#x27;VName != &quot;&quot; ? VName : VendorCode&#x27;
+      # A Forth P/N used twice in a group: only the top-most row stays a candidate.
+      DupKey: &#x27;norm(ForthPN) == &quot;CREATE P/N&quot; ? &quot;&quot; : norm(ForthPN)&#x27;
+      Dup: &#x27;false&#x27;
+  - window:
+      by: [GroupID, DupKey]
+      where: Eligible == &quot;Eligible&quot;
+      set: {Dup: DupKey != &quot;&quot; &amp;&amp; index &gt; 0}
+  - set:
+      Candidate: Eligible == &quot;Eligible&quot; &amp;&amp; !Dup
+  - pick:
+      by: [GroupID]
+      where: Candidate
+      mark: Main
+      reason: Reason
+      rules:   # the first rule with matching rows decides; ties go to the top-most row
+        - rows: PriorityValue == 1
+          when: size == 1
+          reason: &#x27;MAIN (Cond A: Single P1 match)&#x27;
+        - rows: PriorityValue == 1 &amp;&amp; HasVendor
+          best: Stock
+          reason: &#x27;MAIN (Cond B: Multiple P1 &amp; Vendors -&gt; Highest Stock: {best} [{tied &gt; 1 ? str(tied) + &quot; tied, top-most: &quot; : &quot;&quot;}{chosen.VendorLabel}])&#x27;
+        - rows: PriorityValue == 1
+          best: Stock
+          reason: &#x27;MAIN (Cond B: Multiple P1, No Vendor -&gt; Highest Stock: {best} [{tied} tied, top-most])&#x27;
+        - rows: HasVendor
+          reason: &#x27;MAIN (Cond C: No P1 -&gt; Vendor match [{chosen.VendorLabel}, top-most])&#x27;
+        - rows: &#x27;true&#x27;
+          best: Stock
+          when: best &gt; 0
+          reason: &#x27;MAIN (Cond C: No P1, No Vendor -&gt; Highest Stock: {best} [{tied} tied, top-most])&#x27;
+        - rows: &#x27;true&#x27;
+          reason: &#x27;MAIN (Cond D: No P1, No Vendor, No Stock -&gt; Fallback top-most row)&#x27;
+  - set:
+      Priority: &#x27;Main == true ? &quot;MAIN&quot; : &quot;&quot;&#x27;
+  - window:
+      by: [GroupID]
+      where: Candidate &amp;&amp; Main != true
+      set:
+        Priority: &#x27;&quot;SUB&quot; + str(index + 1)&#x27;
+        Reason: &#x27;&quot;SUB&quot; + str(index + 1) + &quot; (Alternate in group)&quot;&#x27;
+  - set:
+      Reason: &gt;-
+        !InScope ? &quot;Out of Scope&quot; :
+        Eligible != &quot;Eligible&quot; ? Eligible :
+        Dup ? &quot;Duplicate Forth P/N (excluded from MAIN/SUB)&quot; : Reason
+  - log: &#x27;CFT-002: assigned MAIN to {len(filter(rows, #.Main == true))} group(s).&#x27;
+  - window:   # the last row of each group gets a thick bottom border
+      by: [GroupID]
+      where: InScope
+      set: {GroupEnd: index == size - 1}
+  - save: result
+
+output:
+  sheets:
+    - name: BOM
+      from: result
+      freeze: true
+      header_height: 28
+      style: {align: center}
+      header: {bold: true, font: {size: 10}}
+      columns:
+        - {header: Level, column: EffLevel, width: 6}
+        - {header: Part Number, column: EffPartNumber, width: 14}
+        - {header: Part Type, column: EffPartType, width: 10}
+        - {header: Description, column: EffDescription, width: 34}
+        - {header: Rev, column: EffRev, width: 14}
+        - {header: BOM.Qty, column: EffQty, width: 8}
+        - {header: BOM.UOM, column: EffUOM, width: 8}
+        - {header: BOM.Find Num, column: EffFindNum, width: 12}
+        - {header: BOM.Ref Des, column: EffRefDes, width: 12}
+        - {header: Manufacturers.Mfg Name, id: mfg, column: MfgName, width: 24}
+        - {header: Manufacturers.Mfr. Part Number, id: mpn, value: &#x27;InScope ? MfrPN : OrigMfrPN&#x27;, width: 20}
+        - {header: &quot;&quot;, id: sep, value: &#x27;&quot;&quot;&#x27;, width: 4}
+        - {header: Block Status, id: block, value: &#x27;InScope ? (Z1 ? &quot;Z1&quot; : BlockStatus == &quot;FORBIDDEN&quot; ? &quot;&quot; : BlockStatus) : &quot;&quot;&#x27;, width: 12}
+        - header: Forth P/N
+          id: forth
+          width: 16
+          value: &gt;-
+            !InScope || !HasIJK || Level0 ? &quot;&quot; :
+            (Forbidden || Z1) &amp;&amp; !Exempt &amp;&amp; ForthPN == &quot;CREATE P/N&quot; ? &quot;&quot; : ForthPN
+        - {header: Priority, id: prio, value: &#x27;InScope &amp;&amp; HasIJK &amp;&amp; !Level0 ? Priority : &quot;&quot;&#x27;, width: 10}
+      styles:
+        - {when: InScope, columns: [sep], fill: &quot;#000000&quot;}
+        - {when: InScope &amp;&amp; Level0, columns: [Level, Part Number, Part Type, Description, Rev, BOM.Qty, BOM.UOM, BOM.Find Num, BOM.Ref Des, mfg, mpn, sep, block, forth, prio], fill: &quot;#FFFF00&quot;}
+        - {when: &#x27;InScope &amp;&amp; HasIJK &amp;&amp; !Level0 &amp;&amp; ForthPN == &quot;CREATE P/N&quot; &amp;&amp; !((Forbidden || Z1) &amp;&amp; !Exempt)&#x27;, columns: [forth], fill: &quot;#FFFF00&quot;}
+        - {when: InScope &amp;&amp; (Forbidden || Z1) &amp;&amp; !Exempt, columns: [mfg, mpn], fill: &quot;#FF0000&quot;, font: {color: &quot;#FFFFFF&quot;, bold: true}}
+        - {when: &#x27;InScope &amp;&amp; Priority == &quot;MAIN&quot;&#x27;, columns: [prio], fill: &quot;#0070C0&quot;, font: {color: &quot;#FFFFFF&quot;, bold: true}}
+        - {when: &#x27;InScope &amp;&amp; Priority startsWith &quot;SUB&quot;&#x27;, columns: [prio], fill: &quot;#2E7D32&quot;, font: {color: &quot;#FFFFFF&quot;, bold: true}}
+        - {when: InScope &amp;&amp; Dup, columns: [prio], fill: &quot;#000000&quot;, font: {color: &quot;#FFFFFF&quot;, bold: true}}
+        - {when: GroupEnd == true, columns: [Level, Part Number, Part Type, Description, Rev, BOM.Qty, BOM.UOM, BOM.Find Num, BOM.Ref Des, mfg, mpn, sep, block, forth, prio], border: {bottom: thick}}
+
+    - name: debug
+      like: BOM
+      columns:
+        - {header: &quot;&quot;, id: s1, value: &#x27;&quot;&quot;&#x27;, width: 2}
+        - {header: &quot;&quot;, id: s2, value: &#x27;&quot;&quot;&#x27;, width: 2}
+        - {header: &quot;&quot;, id: s3, value: &#x27;&quot;&quot;&#x27;, width: 2}
+        - {header: &quot;&quot;, id: s4, value: &#x27;&quot;&quot;&#x27;, width: 2}
+        - header: &quot;Debug: Priority (P1)&quot;
+          id: p1
+          width: 16
+          header_style: {fill: &quot;#2C3E50&quot;, font: {color: &quot;#FFFFFF&quot;, bold: true}}
+          value: &#x27;!InScope ? &quot;-&quot; : PriorityValue == 1 ? &quot;P1 (1.0)&quot; : PriorityValue != nil ? &quot;Val (&quot; + str(PriorityValue) + &quot;)&quot; : &quot;None&quot;&#x27;
+        - {header: &quot;Debug: SAP Vendor Name&quot;, id: vname, value: &#x27;!InScope ? &quot;-&quot; : trim(VName) != &quot;&quot; ? trim(VName) : &quot;No Vendor&quot;&#x27;, width: 28, header_style: {fill: &quot;#2C3E50&quot;, font: {color: &quot;#FFFFFF&quot;, bold: true}}}
+        - {header: &quot;Debug: SAP Vendor Code&quot;, id: vcode, value: &#x27;!InScope ? &quot;-&quot; : trim(VendorCode) != &quot;&quot; ? trim(VendorCode) : &quot;-&quot;&#x27;, width: 16, header_style: {fill: &quot;#2C3E50&quot;, font: {color: &quot;#FFFFFF&quot;, bold: true}}}
+        - {header: &quot;Debug: SAP Stock Qty&quot;, id: stock, value: &#x27;InScope ? Stock : &quot;-&quot;&#x27;, number_format: &quot;#,##0&quot;, width: 16, header_style: {fill: &quot;#2C3E50&quot;, font: {color: &quot;#FFFFFF&quot;, bold: true}}}
+        - {header: &quot;Debug: Forth Material No&quot;, id: dforth, value: &#x27;InScope ? ForthPN : OrigMfrPN&#x27;, width: 20, header_style: {fill: &quot;#2C3E50&quot;, font: {color: &quot;#FFFFFF&quot;, bold: true}}}
+        - {header: &quot;Debug: Eligibility Status&quot;, id: elig, column: Eligible, width: 24, header_style: {fill: &quot;#2C3E50&quot;, font: {color: &quot;#FFFFFF&quot;, bold: true}}}
+        - {header: &quot;Debug: Decision Reason&quot;, id: reason, column: Reason, width: 48, header_style: {fill: &quot;#2C3E50&quot;, font: {color: &quot;#FFFFFF&quot;, bold: true}}}
+        - {header: &quot;Debug: Group ID&quot;, id: gid, value: &#x27;InScope ? str(GroupID) : &quot;-&quot;&#x27;, width: 12, header_style: {fill: &quot;#2C3E50&quot;, font: {color: &quot;#FFFFFF&quot;, bold: true}}}
+      styles:
+        - {columns: [p1, vname, vcode, stock, dforth, elig, reason, gid], font: {size: 9, color: &quot;#212121&quot;}, border: {left: thin, right: thin, top: thin, bottom: thin, color: &quot;#E0E0E0&quot;}}
+        - {when: GroupEnd == true, columns: [p1, vname, vcode, stock, dforth, elig, reason, gid], border: {bottom: thick, color: &quot;#000000&quot;}}
+        - {when: &#x27;Eligible == &quot;Eligible&quot;&#x27;, columns: [elig], fill: &quot;#E8F5E9&quot;, font: {bold: true, color: &quot;#2E7D32&quot;}}
+        - {when: &#x27;Eligible contains &quot;Ineligible&quot; &amp;&amp; Eligible not contains &quot;Scope&quot;&#x27;, columns: [elig], fill: &quot;#FFEBEE&quot;, font: {bold: true, color: &quot;#C62828&quot;}}
+        - {when: &#x27;!InScope&#x27;, columns: [elig], fill: &quot;#F5F5F5&quot;, font: {color: &quot;#757575&quot;}}
+        - {when: &#x27;Reason startsWith &quot;MAIN&quot;&#x27;, columns: [reason], fill: &quot;#E3F2FD&quot;, font: {bold: true, color: &quot;#1565C0&quot;}}
+        - {when: &#x27;Reason startsWith &quot;SUB&quot;&#x27;, columns: [reason], fill: &quot;#F1F8E9&quot;, font: {color: &quot;#33691E&quot;}}
+        - {when: &#x27;InScope &amp;&amp; PriorityValue == 1&#x27;, columns: [p1], fill: &quot;#FFF8E1&quot;, font: {bold: true, color: &quot;#E65100&quot;}}
+        - {when: &#x27;InScope &amp;&amp; Stock &gt; 0&#x27;, columns: [stock], font: {bold: true, color: &quot;#1565C0&quot;}}
+</pre></div></details></div></section><footer class="footer">Source: workflows/bom.yaml · <a href="mai-studio-guide.html">Mai Studio field guide</a></footer></main></div><script>const cases={single:[[true,false,0],[false,true,100],[false,false,200]],vendor:[[false,true,1],[false,true,100],[false,false,200]],multiple:[[true,false,100],[true,true,1],[false,true,200]],stock:[[false,false,1],[false,false,100],[false,false,20]],fallback:[[false,false,0],[false,false,0],[false,false,0]]};function render(){let rows=cases[document.querySelector('#scenario').value];let ids=[0,1,2],p=ids.filter(i=>rows[i][0]),v=p.filter(i=>rows[i][1]),allv=ids.filter(i=>rows[i][1]);let pool,reason;if(p.length===1){pool=p;reason='Rule 1: the only P1 candidate.'}else if(v.length){pool=v;reason='Rule 2: highest stock among P1 candidates with vendors.'}else if(p.length){pool=p;reason='Rule 3: highest stock among P1 candidates.'}else if(allv.length){pool=[allv[0]];reason='Rule 4: first vendor candidate, regardless of stock.'}else{pool=ids;reason=rows.some(r=>r[2]>0)?'Rule 5: highest positive stock.':'Rule 6: top-most candidate.'}let winner=pool.reduce((a,b)=>rows[b][2]>rows[a][2]?b:a),sub=0;document.querySelector('#candidates').innerHTML=rows.map((r,i)=>'<tr><td>'+String.fromCharCode(65+i)+'</td><td>'+(r[0]?'Yes':'No')+'</td><td>'+(r[1]?'Yes':'No')+'</td><td>'+r[2]+'</td><td>'+(i===winner?'MAIN':'SUB'+(++sub))+'</td></tr>').join('');document.querySelector('#decision').textContent=reason}document.querySelector('#scenario').addEventListener('change',render);render();document.querySelector('#search').addEventListener('input',e=>{let q=e.target.value.toLowerCase().trim();document.querySelectorAll('main section').forEach(s=>s.hidden=!s.textContent.toLowerCase().includes(q))});document.querySelector('#theme').onclick=()=>document.body.classList.toggle('theme-dark');document.querySelector('#menu').onclick=()=>{let o=document.querySelector('#sidebar').classList.toggle('open');document.querySelector('#menu').setAttribute('aria-expanded',o)};document.querySelectorAll('nav a').forEach(a=>a.onclick=()=>{document.querySelector('#sidebar').classList.remove('open');document.querySelector('#menu').setAttribute('aria-expanded','false');document.querySelector('#search').value='';document.querySelectorAll('section').forEach(s=>s.hidden=false)});</script></body></html>
