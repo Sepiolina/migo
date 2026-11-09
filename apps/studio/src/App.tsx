@@ -16,7 +16,9 @@ import {
   type ReactFlowInstance,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import "./theme.css";
 import "./style.css";
+import "./modern.css";
 import { example, projectWorkflow, type WorkflowGraphNode } from "./model";
 import { changeSteps, topLevelCount } from "./authoring";
 import { useDocument } from "./useDocument";
@@ -42,8 +44,54 @@ import {
 } from "./api";
 const BlockEditor = lazy(() => import("./BlockEditor"));
 
+type ThemeChoice = "system" | "light" | "dark";
+const themeIcons: Record<ThemeChoice, React.ReactNode> = {
+  system: (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <path d="M8 2a6 6 0 0 1 0 12z" fill="currentColor" />
+    </svg>
+  ),
+  light: (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+      <circle cx="8" cy="8" r="3" fill="currentColor" />
+      <path
+        d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.4 1.4M11.6 11.6 13 13M3 13l1.4-1.4M11.6 4.4 13 3"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  ),
+  dark: (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M13.5 10.2A6 6 0 0 1 5.8 2.5a6 6 0 1 0 7.7 7.7z" fill="currentColor" />
+    </svg>
+  ),
+};
+function readTheme(): ThemeChoice {
+  try {
+    const saved = localStorage.getItem("mai-theme");
+    return saved === "light" || saved === "dark" ? saved : "system";
+  } catch {
+    return "system";
+  }
+}
+function applyTheme(choice: ThemeChoice) {
+  if (choice === "system") delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = choice;
+  try {
+    localStorage.setItem("mai-theme", choice);
+  } catch {
+    /* storage unavailable */
+  }
+}
+
 export default function App() {
   const document = useDocument(example);
+  const [themeChoice, setThemeChoice] = useState<ThemeChoice>(readTheme);
+  useEffect(() => applyTheme(themeChoice), [themeChoice]);
+  const [libraryCategory, setLibraryCategory] = useState("All");
   const [showPackageBuilder, setShowPackageBuilder] = useState(false);
   const [packagePending, setPackagePending] = useState(false);
   const packagePendingRef = useRef(false);
@@ -419,13 +467,13 @@ export default function App() {
             disabled={!!busy || packagePending}
             onClick={() => setShowTemplates(!showTemplates)}
           >
-            + New workflow
+            + New<span className="label-optional">workflow</span>
           </button>
           <button
             aria-expanded={showProject}
             onClick={() => setShowProject(!showProject)}
           >
-            Project & inputs
+            Project<span className="label-optional">& inputs</span>
           </button>
           <button
             aria-expanded={showData}
@@ -442,9 +490,22 @@ export default function App() {
                 : "Build an offline Linux deployment ZIP"
             }
           >
-            Build Linux package
+            <span className="label-optional">Build</span>Linux package
           </button>
+          <span className="divider" aria-hidden="true" />
           <span className="mode">● Offline</span>
+          <button
+            className="ghost theme-toggle"
+            aria-label={`Theme: ${themeChoice}. Switch theme`}
+            title={`Theme: ${themeChoice}`}
+            onClick={() =>
+              setThemeChoice(
+                themeChoice === "system" ? "light" : themeChoice === "light" ? "dark" : "system",
+              )
+            }
+          >
+            {themeIcons[themeChoice]}
+          </button>
           <button disabled={!ready || hasDraft} onClick={validate}>
             ✓ Validate
           </button>
@@ -453,7 +514,7 @@ export default function App() {
             disabled={!ready || !!graph.error || hasDraft}
             onClick={run}
           >
-            ▶ Run workflow
+            ▶ Run<span className="label-optional">workflow</span>
           </button>
         </div>
       </header>
@@ -776,12 +837,25 @@ export default function App() {
                 value={nodeSearch}
                 onChange={(event) => setNodeSearch(event.target.value)}
               />
+              <div className="library-filters" role="group" aria-label="Step categories">
+                {["All", ...new Set(operations.map((op) => op.category))].map((category) => (
+                  <button
+                    key={category}
+                    aria-pressed={libraryCategory === category}
+                    onClick={() => setLibraryCategory(category)}
+                  >
+                    {category}
+                  </button>
+                ))}
+              </div>
               <div className="library-items">
                 {operations
-                  .filter((op) =>
-                    `${op.title} ${op.operation} ${op.description}`
-                      .toLowerCase()
-                      .includes(nodeSearch.toLowerCase()),
+                  .filter(
+                    (op) =>
+                      (libraryCategory === "All" || op.category === libraryCategory) &&
+                      `${op.title} ${op.operation} ${op.description}`
+                        .toLowerCase()
+                        .includes(nodeSearch.toLowerCase()),
                   )
                   .map((op) => (
                     <button
@@ -813,8 +887,7 @@ export default function App() {
                       <span>
                         <strong>{op.title}</strong>
                         <small>{op.description}</small>
-                        {(op.operation === "sql" ||
-                          op.operation === "rest") && (
+                        {op.service && (
                           <small>
                             Service only · unavailable in local runs
                           </small>
