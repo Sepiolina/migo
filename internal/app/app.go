@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"miservice/internal/config"
 	"miservice/internal/httpx"
@@ -91,13 +92,90 @@ func (a *App) closeModules() {
 	a.modules = nil
 }
 
+// localIP is the address other machines should use: the one the system
+// routes outbound traffic from, else the best interface address. Link-local
+// 169.254.x.x addresses (an adapter without a network, common on Windows)
+// are never picked; nobody else can reach them.
 func localIP() string {
-	if addrs, err := net.InterfaceAddrs(); err == nil {
+	return pickIP(routeIP(), interfaceIPs())
+}
+
+// otherIPs lists the remaining usable addresses, for the banner.
+func otherIPs(chosen string) []string {
+	var out []string
+	for _, ip := range rankIPs(interfaceIPs()) {
+		if s := ip.String(); s != chosen {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// routeIP asks the OS which local address it would use to reach a public
+// address. UDP "connect" only selects a route; no packet is sent.
+func routeIP() net.IP {
+	c, err := net.Dial("udp4", "192.0.2.1:9") // TEST-NET-1, never routed on the internet
+	if err != nil {
+		return nil
+	}
+	defer c.Close()
+	if a, ok := c.LocalAddr().(*net.UDPAddr); ok {
+		return a.IP
+	}
+	return nil
+}
+
+// interfaceIPs returns the IPv4 addresses of interfaces that are up.
+func interfaceIPs() []net.IP {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return nil
+	}
+	var out []net.IP
+	for _, ifc := range ifaces {
+		if ifc.Flags&net.FlagUp == 0 || ifc.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := ifc.Addrs()
+		if err != nil {
+			continue
+		}
 		for _, a := range addrs {
-			if ipn, ok := a.(*net.IPNet); ok && !ipn.IP.IsLoopback() && ipn.IP.To4() != nil {
-				return ipn.IP.String()
+			if ipn, ok := a.(*net.IPNet); ok {
+				if ip4 := ipn.IP.To4(); ip4 != nil {
+					out = append(out, ip4)
+				}
 			}
 		}
+	}
+	return out
+}
+
+func usable(ip net.IP) bool {
+	return ip != nil && ip.To4() != nil && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsUnspecified()
+}
+
+// rankIPs keeps the usable addresses, private LAN ranges first, in order.
+func rankIPs(ips []net.IP) []net.IP {
+	var lan, other []net.IP
+	for _, ip := range ips {
+		switch {
+		case !usable(ip):
+		case ip.IsPrivate():
+			lan = append(lan, ip)
+		default:
+			other = append(other, ip)
+		}
+	}
+	return append(lan, other...)
+}
+
+func pickIP(route net.IP, ips []net.IP) string {
+	if usable(route) {
+		return route.String()
+	}
+	if r := rankIPs(ips); len(r) > 0 {
+		return r[0].String()
 	}
 	return "127.0.0.1"
 }
@@ -109,6 +187,9 @@ func (a *App) printBanner() {
 	fmt.Printf("==================================================\n")
 	fmt.Printf(" Local Access   : http://localhost:%d\n", port)
 	fmt.Printf(" Network Access : http://%s:%d  <-- Share this IP!\n", ip, port)
+	if others := otherIPs(ip); len(others) > 0 {
+		fmt.Printf(" Other addresses: %s\n", strings.Join(others, ", "))
+	}
 	fmt.Printf("--------------------------------------------------\n")
 	fmt.Printf(" REST Endpoints:\n")
 	for _, r := range a.router.Routes() {
