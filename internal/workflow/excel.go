@@ -28,7 +28,7 @@ import (
 //     columns: [total]           # ids (default: the header); none = the whole row
 //     fill: "#FF0000"
 //     font: {color: "#FFFFFF", bold: true}
-//     border: {bottom: thick}
+//     border: {bottom: thick}   # a side may carry its own color: {left: "medium #2C3E50"}
 type SheetSpec struct {
 	Name    string
 	From    string
@@ -95,9 +95,11 @@ func (c *CellStyle) check() error {
 	if c.Border != nil {
 		colors = append(colors, c.Border.Color)
 		for _, b := range []string{c.Border.Left, c.Border.Right, c.Border.Top, c.Border.Bottom} {
-			if _, ok := borderStyles[b]; !ok {
-				return fmt.Errorf("border %q: use thin, medium, dashed, dotted, thick or double", b)
+			kind, color := borderSide(b)
+			if _, ok := borderStyles[kind]; !ok {
+				return fmt.Errorf("border %q: use thin, medium, dashed, dotted, thick or double, optionally followed by #RRGGBB", b)
 			}
+			colors = append(colors, color)
 		}
 	}
 	for _, col := range colors {
@@ -204,13 +206,16 @@ func (c CellStyle) excel() *excelize.Style {
 		}
 	}
 	if c.Border != nil {
-		color := strings.TrimPrefix(c.Border.Color, "#")
-		if color == "" {
-			color = "000000"
-		}
-		for _, b := range []struct{ side, kind string }{{"left", c.Border.Left}, {"right", c.Border.Right}, {"top", c.Border.Top}, {"bottom", c.Border.Bottom}} {
-			if s := borderStyles[b.kind]; s != 0 {
-				st.Border = append(st.Border, excelize.Border{Type: b.side, Style: s, Color: color})
+		for _, b := range []struct{ side, spec string }{{"left", c.Border.Left}, {"right", c.Border.Right}, {"top", c.Border.Top}, {"bottom", c.Border.Bottom}} {
+			kind, color := borderSide(b.spec)
+			if color == "" {
+				color = c.Border.Color
+			}
+			if color == "" {
+				color = "#000000"
+			}
+			if s := borderStyles[kind]; s != 0 {
+				st.Border = append(st.Border, excelize.Border{Type: b.side, Style: s, Color: strings.TrimPrefix(color, "#")})
 			}
 		}
 	}
@@ -219,6 +224,13 @@ func (c CellStyle) excel() *excelize.Style {
 		st.CustomNumFmt = &f
 	}
 	return st
+}
+
+// borderSide splits a border side such as "thick #000000" into its style
+// and its own color ("" when the side uses the border's color).
+func borderSide(s string) (kind, color string) {
+	kind, color, _ = strings.Cut(strings.TrimSpace(s), " ")
+	return kind, strings.TrimSpace(color)
 }
 
 func parseSheets(n *yaml.Node) ([]*SheetSpec, error) {

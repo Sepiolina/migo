@@ -230,6 +230,7 @@ output:
           fill: "#FF0000"
           font: {bold: true, color: "#FFFFFF", size: 10}
           border: {bottom: thick, color: "#000000"}   # thin, medium, thick, dashed, dotted, double
+          # a side may name its own color, which wins over color: {left: "medium #2C3E50"}
     - name: Details
       like: Report                   # Report's columns and styles, plus these
       columns: [{header: Note, column: Note}]
