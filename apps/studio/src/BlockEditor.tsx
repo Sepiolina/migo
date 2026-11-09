@@ -32,6 +32,8 @@ export function BlockEditor({
   const callbacksRef = useRef({ onChange, onDraftChange });
   const pendingRef = useRef(false);
   const loadingRef = useRef(false);
+  const [selectedHelp, setSelectedHelp] = useState("");
+  const [showHelp, setShowHelp] = useState(false);
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
   const [loadError, setLoadError] = useState("");
@@ -50,6 +52,7 @@ export function BlockEditor({
     const workspace = workspaceRef.current;
     if (!workspace) return;
     loadingRef.current = true;
+    setSelectedHelp("");
     sourceRef.current = sourceToLoad;
     Blockly.Events.disable();
     try {
@@ -102,7 +105,7 @@ export function BlockEditor({
       },
       fontStyle: {
         family: "Segoe UI, Inter, system-ui, sans-serif",
-        size: 17,
+        size: 13,
         weight: "500",
       },
     });
@@ -115,7 +118,7 @@ export function BlockEditor({
       zoom: {
         controls: false,
         wheel: true,
-        startScale: 1,
+        startScale: 0.9,
         maxScale: 2,
         minScale: 0.5,
         scaleSpeed: 1.1,
@@ -129,6 +132,11 @@ export function BlockEditor({
     workspaceRef.current = workspace;
     load(sourceRef.current);
     const listener = (event: Blockly.Events.Abstract) => {
+      if (event.type === Blockly.Events.SELECTED) {
+        const id = (event as Blockly.Events.Selected).newElementId;
+        const block = id ? workspace.getBlockById(id) : null;
+        setSelectedHelp(block?.getTooltip() || "");
+      }
       if (loadingRef.current || event.isUiEvent || !workspaceRef.current)
         return;
       // Only model changes should serialize. Viewport, selection and toolbox events do not.
@@ -177,34 +185,15 @@ export function BlockEditor({
   return (
     <section className="block-editor" aria-label="Workflow block editor">
       <div className="block-editor-heading">
-        <div>
-          <h2>Build with blocks</h2>
-          <p>
-            Drag a block from the library. Snap it into the workflow. Fill in
-            the blanks.
-          </p>
-        </div>
-        {preservedSteps > 0 && (
-          <button
-            type="button"
-            onClick={onAdvanced}
-            disabled={disabled || pending}
-          >
-            Advanced YAML
-          </button>
-        )}
+        <div><h2>Workflow canvas</h2><p>Select a block for guidance · Drag the background to pan</p></div>
+        <button aria-expanded={showHelp} onClick={() => setShowHelp(!showHelp)}>Block guide</button>
       </div>
-      <div className="block-editor-guide" aria-label="How to build a workflow">
-        <span>
-          <b>1</b> Choose a block
-        </span>
-        <span>
-          <b>2</b> Connect it
-        </span>
-        <span>
-          <b>3</b> Fill in the details
-        </span>
-      </div>
+      {showHelp && <div className="block-editor-guide" aria-label="How to build a workflow">
+        <span><b>1</b> Choose a category in the left library.</span>
+        <span><b>2</b> Drag a block and snap it below a step.</span>
+        <span><b>3</b> Fill its fields. Steps run from top to bottom.</span>
+        <span>Value blocks fit into sockets. Use Step outline for form-based editing.</span>
+      </div>}
       {preservedSteps > 0 && !loadError && (
         <p className="block-editor-note">
           {preservedSteps} {preservedSteps === 1 ? "step is" : "steps are"}{" "}
@@ -229,6 +218,7 @@ export function BlockEditor({
           </button>
         </div>
       )}
+      {selectedHelp && <div className="block-context" role="status"><strong>Selected block</strong><span>{selectedHelp}</span></div>}
       <div className="block-editor-canvas-wrap">
         <div
           className="block-editor-canvas"
@@ -238,6 +228,8 @@ export function BlockEditor({
         />
         {!loadError && (
           <div className="block-editor-zoom" aria-label="Workspace zoom">
+            <button type="button" aria-label="Zoom out" onClick={() => workspaceRef.current?.zoomCenter(-1)} disabled={disabled}>−</button>
+            <button type="button" aria-label="Zoom in" onClick={() => workspaceRef.current?.zoomCenter(1)} disabled={disabled}>+</button>
             <button
               type="button"
               onClick={() => workspaceRef.current?.setScale(1)}

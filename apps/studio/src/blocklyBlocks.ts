@@ -44,6 +44,7 @@ const definitions: object[] = [
       { type: "input_statement", name: "STEPS", check: "MaiStep" },
     ],
     colour: 220,
+    tooltip: "The workflow runs connected steps from top to bottom. Start with Read source, transform the rows, then save a dataset for an output sheet.",
   },
   {
     type: "mai_from",
@@ -263,6 +264,11 @@ const colours: Record<string, number> = {
   mai_not: 350,
 };
 const help: Record<string, string> = {
+  mai_number: "A numeric value for a calculation or comparison. Connect it to a value socket, for example Quantity greater than 0.",
+  mai_text: "A text value for a column or comparison. Connect it to a value socket; enter text without quotation marks.",
+  mai_boolean: "A true or false value. Connect it to a condition or a column value.",
+  mai_logic: "Combine two conditions. AND requires both to match; OR requires at least one to match.",
+  mai_not: "Reverse a condition: true becomes false and false becomes true.",
   mai_from:
     "Use an input identifier from Workbook setup, or a saved table name. Choose a sheet name or number (starting at 1). Leave the name blank for the first sheet.",
   mai_filter:
