@@ -219,8 +219,10 @@ Save workflow changes and apply or discard pending settings, then choose
    not an endpoint allowlist. Override filenames must be unique lowercase
    `.yaml` names starting with a letter and using letters, numbers, and hyphens.
 4. Set a new installation directory directly under `/opt`, the service name,
-   HTTP port, PM2 restart-memory threshold, and Go memory target. Defaults use
-   `/opt/maiservice`, `maiservice`, and port `3081`. Memory settings are runtime
+   PM2 restart-memory threshold, and Go memory target. Defaults use
+   `/opt/maiservice` and `maiservice`. The HTTP port is not a package setting:
+   it is the `"port"` value in the chosen `config.json`, which must be set
+   (1–65535). The package's PM2 file does not repeat it. Memory settings are runtime
    guidance; they do not reserve memory or replace capacity testing.
 5. Choose **Secure** or **Trusted local**, then choose **Build ZIP package**.
    Keep the window open; build cancellation is unavailable.
