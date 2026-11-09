@@ -18,6 +18,7 @@ validation coverage, and features still planned.
 - [Run the microservice on Windows](#run-the-microservice-on-windows)
 - [Run the microservice on Linux](#run-the-microservice-on-linux)
 - [Build a Linux deployment ZIP in Studio](#build-a-linux-deployment-zip-in-studio)
+- [Build a test folder for Linux or Windows](#build-a-test-folder-for-linux-or-windows)
 - [Deploy on Linux with PM2](#deploy-on-linux-with-pm2)
 - [Run a workflow without a server](#run-a-workflow-without-a-server)
 - [Development checks](#development-checks)
@@ -262,6 +263,47 @@ install, transfer ownership to the dedicated service user before starting PM2 as
 that user. Configuration is decrypted with server-local `AGE_IDENTITY` and stored
 with mode `0600`. Packages include their own `ecosystem.config.js`; the manual
 PM2 example below is an alternative for directly built binaries.
+
+## Build a test folder for Linux or Windows
+
+One command builds a folder you can copy to a test machine and run, with the
+PM2 configuration and a smoke test included. It works the same in PowerShell
+and Linux shells:
+
+```sh
+go run ./tools/dist
+```
+
+It asks for Linux, Windows or both. To choose on the command line instead:
+
+```sh
+go run ./tools/dist -os linux
+```
+
+Use `-os windows` or `-os all` for the other targets, `-arch arm64` for ARM
+servers and `-port 3090` for another port. On Linux, `make dist TARGET=linux`
+does the same.
+
+The result is `dist/maiservice-<os>-<arch>/`:
+
+| File | Purpose |
+| --- | --- |
+| `maiservice` / `maiservice.exe` | The HTTP service |
+| `migo` / `migo.exe` | The workflow CLI |
+| `config.json` | Local test settings with DB and SAP off. Kept when you rebuild |
+| `config.example.json` | Every config key with placeholder values |
+| `ecosystem.config.js` | PM2 process file. Its paths are relative to the folder |
+| `start.sh` / `start.cmd` | Runs the service in the foreground |
+| `smoke-test.sh` / `smoke-test.ps1` | Checks health, uploads the samples, downloads the result |
+| `samples/` | A small BOM and Priority workbook, plus `bom.yaml` for `migo` |
+| `README.txt` | These steps for the test machine |
+
+On the test machine, from that folder, start the service with `./start.sh`,
+`start.cmd` or `pm2 start ecosystem.config.js`. While it runs, run the smoke
+test in a second terminal. Rebuilding replaces the binaries and generated files
+but keeps `config.json`, `uploads/`, `outputs/` and `workflows/`. For a real
+deployment, set the DB and SAP values in `config.json` and follow the PM2
+steps below.
 
 ## Deploy on Linux with PM2
 
