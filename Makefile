@@ -3,7 +3,7 @@ GOFMT ?= gofmt
 CONFIG ?= config.json
 
 .DEFAULT_GOAL := help
-.PHONY: help build build-all linux windows test vet race fmt fmt-check workflows check run
+.PHONY: help build build-all linux windows dist test vet race fmt fmt-check workflows check run
 
 help:
 	@echo 'make build       Build the service and CLI'
@@ -13,6 +13,7 @@ help:
 	@echo 'make fmt         Format Go source files'
 	@echo 'make workflows   Validate the three example workflows without company services'
 	@echo 'make linux/windows  Cross-build a static service binary into dist/'
+	@echo 'make dist        Build a test folder with PM2 config (TARGET=linux|windows|all; asks if unset)'
 
 build:
 	$(GO) build -o maiservice ./cmd/maiservice
@@ -23,6 +24,8 @@ linux:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -ldflags="-s -w" -o dist/maiservice ./cmd/maiservice
 windows:
 	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build -ldflags="-s -w" -o dist/maiservice.exe ./cmd/maiservice
+dist:
+	$(GO) run ./tools/dist $(if $(TARGET),-os $(TARGET)) $(if $(ARCH),-arch $(ARCH))
 run:
 	$(GO) run ./cmd/maiservice -config "$(CONFIG)"
 vet:
@@ -32,9 +35,9 @@ test: vet
 race:
 	$(GO) test -race ./...
 fmt:
-	$(GOFMT) -w cmd internal workflows
+	$(GOFMT) -w cmd internal tools workflows
 fmt-check:
-	@files="$$($(GOFMT) -l cmd internal workflows)" || exit 1; \
+	@files="$$($(GOFMT) -l cmd internal tools workflows)" || exit 1; \
 	if [ -n "$$files" ]; then echo "Run make fmt to format:"; echo "$$files"; exit 1; fi
 workflows:
 	$(GO) run ./cmd/migo -check -in bom=testdata/bom_basic.xlsx -in priority=testdata/prio_basic.xlsx workflows/bom.yaml
