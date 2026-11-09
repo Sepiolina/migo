@@ -37,15 +37,13 @@ func TestRunRejectsBadFlags(t *testing.T) {
 	}
 }
 
-func TestGeneratedFiles(t *testing.T) {
-	win := target{"windows", "amd64"}
-	if eco := ecosystem(win, 4000); !strings.Contains(eco, `"maiservice.exe"`) || !strings.Contains(eco, "PORT: '4000'") {
-		t.Errorf("windows ecosystem:\n%s", eco)
+func TestEcosystemIsPortableAndPortFree(t *testing.T) {
+	for _, want := range []string{"process.platform === 'win32'", "'maiservice.exe'", "'maiservice'", "'config.json'"} {
+		if !strings.Contains(ecosystem, want) {
+			t.Errorf("ecosystem.config.js lacks %q:\n%s", want, ecosystem)
+		}
 	}
-	if eco := ecosystem(target{"linux", "arm64"}, 3081); strings.Contains(eco, ".exe") {
-		t.Errorf("linux ecosystem names an .exe:\n%s", eco)
-	}
-	if r := readme(win, 3081); !strings.Contains(r, `.\migo.exe`) || !strings.Contains(r, "smoke-test.ps1") {
-		t.Errorf("windows readme:\n%s", r)
+	if strings.Contains(ecosystem, "PORT") {
+		t.Errorf("ecosystem.config.js sets a port; it belongs in config.json only:\n%s", ecosystem)
 	}
 }
