@@ -8,7 +8,6 @@ export type PackageProfile = {
   workflows: string[];
   installDir: string;
   serviceName: string;
-  port: number;
   memoryMB: number;
   goMemoryMB: number;
   mode: "secure" | "trusted";
@@ -27,6 +26,7 @@ type PackageResult = {
   files: string[];
   validation: unknown;
   signingPublicKey?: string;
+  port?: number;
 };
 type Props = {
   workspace: string;
@@ -42,7 +42,6 @@ const defaults: PackageProfile = {
   workflows: [],
   installDir: "/opt/maiservice",
   serviceName: "maiservice",
-  port: 3081,
   memoryMB: 650,
   goMemoryMB: 400,
   mode: "secure",
@@ -64,7 +63,7 @@ function readProfiles(value: unknown): Record<string, PackageProfile> {
         !["configPath", "installDir", "serviceName"].every(
           (key) => typeof saved[key] === "string",
         ) ||
-        !["port", "memoryMB", "goMemoryMB"].every(
+        !["memoryMB", "goMemoryMB"].every(
           (key) => typeof saved[key] === "number",
         ) ||
         !Array.isArray(saved.workflows) ||
@@ -82,7 +81,6 @@ function readProfiles(value: unknown): Record<string, PackageProfile> {
             workflows: saved.workflows,
             installDir: saved.installDir,
             serviceName: saved.serviceName,
-            port: saved.port,
             memoryMB: saved.memoryMB,
             goMemoryMB: saved.goMemoryMB,
             recipient:
@@ -124,12 +122,6 @@ export function packageProfileError(
     return "Enter an installation folder directly under /opt, such as /opt/maiservice.";
   if (!/^[a-z0-9][a-z0-9-]{0,39}$/.test(profile.serviceName))
     return "Service name must use 1–40 lowercase letters, numbers or hyphens and start with a letter or number.";
-  if (
-    !Number.isInteger(profile.port) ||
-    profile.port < 1 ||
-    profile.port > 65535
-  )
-    return "Port must be a whole number between 1 and 65535.";
   if (
     !Number.isInteger(profile.memoryMB) ||
     !Number.isInteger(profile.goMemoryMB) ||
@@ -409,6 +401,7 @@ export function PackageBuilder({
                 />
                 <span className="hint">
                   Workspace-relative saved configuration; included from disk.
+                  Its "port" value sets the service port.
                 </span>
               </label>
             </div>
@@ -455,18 +448,6 @@ export function PackageBuilder({
                   value={profile.serviceName}
                   onChange={(event) =>
                     update("serviceName", event.target.value)
-                  }
-                />
-              </label>
-              <label>
-                HTTP port
-                <input
-                  type="number"
-                  min="1"
-                  max="65535"
-                  value={profile.port}
-                  onChange={(event) =>
-                    update("port", Number(event.target.value))
                   }
                 />
               </label>
@@ -607,6 +588,9 @@ export function PackageBuilder({
               </p>
               <p>
                 Architecture: {result.arch} · Mode: {result.mode}
+                {result.port
+                  ? ` · Port: ${result.port} (from config.json)`
+                  : ""}
               </p>
               <details open>
                 <summary>Included files ({result.files.length})</summary>

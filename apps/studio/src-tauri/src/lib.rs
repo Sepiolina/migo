@@ -404,7 +404,6 @@ async fn build_linux_package(
         "workflows",
         "installDir",
         "serviceName",
-        "port",
         "memoryMB",
         "goMemoryMB",
         "mode",

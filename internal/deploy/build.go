@@ -38,7 +38,6 @@ type Options struct {
 	Workflows   []string `json:"workflows"`
 	InstallDir  string   `json:"installDir"`
 	ServiceName string   `json:"serviceName"`
-	Port        int      `json:"port"`
 	MemoryMB    int      `json:"memoryMB"`
 	GoMemoryMB  int      `json:"goMemoryMB"`
 	Mode        string   `json:"mode"`
@@ -53,6 +52,7 @@ type Result struct {
 	Files            []string `json:"files"`
 	Validation       string   `json:"validation"`
 	SigningPublicKey string   `json:"signingPublicKey,omitempty"`
+	Port             int      `json:"port"`
 }
 
 var nameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
@@ -107,8 +107,8 @@ func validate(o Options) error {
 	if !dirRE.MatchString(o.InstallDir) || !nameRE.MatchString(o.ServiceName) {
 		return errors.New("invalid install directory or service name")
 	}
-	if o.Port < 1 || o.Port > 65535 || o.MemoryMB < 64 || o.MemoryMB > 65536 || o.GoMemoryMB < 32 || o.GoMemoryMB > o.MemoryMB {
-		return errors.New("invalid port or memory limits")
+	if o.MemoryMB < 64 || o.MemoryMB > 65536 || o.GoMemoryMB < 32 || o.GoMemoryMB > o.MemoryMB {
+		return errors.New("invalid memory limits")
 	}
 	if len(o.Workflows) > 100 {
 		return errors.New("at most 100 workflows are allowed")
@@ -145,6 +145,12 @@ func Build(ctx context.Context, workspace string, o Options) (Result, error) {
 	if json.Unmarshal(bytes.TrimPrefix(config, []byte("\xef\xbb\xbf")), &obj) != nil || obj == nil {
 		return result, errors.New("config.json must contain a JSON object")
 	}
+	// The port is set only in config.json; the PM2 file does not repeat it.
+	port, ok := obj["port"].(float64)
+	if !ok || port != float64(int(port)) || port < 1 || port > 65535 {
+		return result, errors.New(`config.json must set "port" to a whole number between 1 and 65535`)
+	}
+	result.Port = int(port)
 	entries := map[string][]byte{}
 	names := map[string]bool{}
 	for _, p := range o.Workflows {
@@ -246,7 +252,7 @@ func Build(ctx context.Context, workspace string, o Options) (Result, error) {
 		}
 		result.Validation = "ELF verified; local health check passed with database and SAP disabled"
 	}
-	entries["mai/ecosystem.config.js"] = []byte(fmt.Sprintf("module.exports = { apps: [{ name: %q, script: %q, cwd: %q, interpreter: 'none', exec_mode: 'fork', instances: 1, autorestart: true, min_uptime: '10s', max_restarts: 10, exp_backoff_restart_delay: 100, kill_timeout: 15000, args: ['-config', %q], env: { PORT: %q, GOMEMLIMIT: %q }, max_memory_restart: %q }] };\n", o.ServiceName, o.InstallDir+"/maiservice", o.InstallDir, o.InstallDir+"/config/config.json", fmt.Sprint(o.Port), fmt.Sprintf("%dMiB", o.GoMemoryMB), fmt.Sprintf("%dM", o.MemoryMB)))
+	entries["mai/ecosystem.config.js"] = []byte(fmt.Sprintf("module.exports = { apps: [{ name: %q, script: %q, cwd: %q, interpreter: 'none', exec_mode: 'fork', instances: 1, autorestart: true, min_uptime: '10s', max_restarts: 10, exp_backoff_restart_delay: 100, kill_timeout: 15000, args: ['-config', %q], env: { GOMEMLIMIT: %q }, max_memory_restart: %q }] };\n", o.ServiceName, o.InstallDir+"/maiservice", o.InstallDir, o.InstallDir+"/config/config.json", fmt.Sprintf("%dMiB", o.GoMemoryMB), fmt.Sprintf("%dM", o.MemoryMB)))
 	entries["mai/install.sh"] = []byte(installScript(o))
 	entries["mai/verify.sh"] = []byte(verifyScript)
 	entries["mai/DEPLOY.md"] = []byte(docs(o, pubPEM))
@@ -489,7 +495,7 @@ Protect the age identity on the target. Install age and set AGE_IDENTITY to the 
     sh ./verify.sh
     sh ./install.sh
 
-The bundled verify.sh provides an additional check after extraction; it does not establish initial trust. Installation requires a new target directory; move an existing installation aside first. Install Node.js and PM2 on the target, then start the printed PM2 command. release.json records build metadata. sbom.cdx.json lists Go modules in the compiled binary; it is not a vulnerability audit. The service reads configuration and workflow overrides from its config directory. Built-in workflows are embedded in the service; selected workflow files override them or add endpoints rather than restricting the built-in endpoints. The configured memory restart is a PM2 threshold; GOMEMLIMIT is a Go runtime soft limit. Back up existing configuration and workflows before installing.
+The bundled verify.sh provides an additional check after extraction; it does not establish initial trust. Installation requires a new target directory; move an existing installation aside first. Install Node.js and PM2 on the target, then start the printed PM2 command. release.json records build metadata. sbom.cdx.json lists Go modules in the compiled binary; it is not a vulnerability audit. The service reads configuration and workflow overrides from its config directory; its HTTP port is the "port" value in config/config.json. Built-in workflows are embedded in the service; selected workflow files override them or add endpoints rather than restricting the built-in endpoints. The configured memory restart is a PM2 threshold; GOMEMLIMIT is a Go runtime soft limit. Back up existing configuration and workflows before installing.
 `
 }
 func mustPublic(p []byte) []byte {

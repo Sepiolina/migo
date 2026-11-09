@@ -22,7 +22,7 @@ import (
 )
 
 func TestProfiles(t *testing.T) {
-	o := Options{Arch: "amd64", ConfigPath: "config.json", InstallDir: "/opt/maiservice", ServiceName: "maiservice", Port: 3081, MemoryMB: 650, GoMemoryMB: 400, Mode: "trusted"}
+	o := Options{Arch: "amd64", ConfigPath: "config.json", InstallDir: "/opt/maiservice", ServiceName: "maiservice", MemoryMB: 650, GoMemoryMB: 400, Mode: "trusted"}
 	if err := validate(o); err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestSecurePackage(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer os.RemoveAll(dir)
-	cfg := []byte(`{"db_password":"test-secret","db_enabled":true,"sap_enabled":true}`)
+	cfg := []byte(`{"port":3081,"db_password":"test-secret","db_enabled":true,"sap_enabled":true}`)
 	if err = os.WriteFile(filepath.Join(dir, "config.json"), cfg, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestSecurePackage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	o := Options{Arch: "amd64", ConfigPath: rel, InstallDir: "/opt/maiservice", ServiceName: "maiservice", Port: 3081, MemoryMB: 650, GoMemoryMB: 400, Mode: "secure", SigningKey: base64.StdEncoding.EncodeToString(priv), Recipient: identity.Recipient().String()}
+	o := Options{Arch: "amd64", ConfigPath: rel, InstallDir: "/opt/maiservice", ServiceName: "maiservice", MemoryMB: 650, GoMemoryMB: 400, Mode: "secure", SigningKey: base64.StdEncoding.EncodeToString(priv), Recipient: identity.Recipient().String()}
 	r, err := Build(context.Background(), root, o)
 	if err != nil {
 		t.Fatal(err)
@@ -138,6 +138,9 @@ func TestSecurePackage(t *testing.T) {
 		if !strings.Contains(ecosystem, setting) {
 			t.Fatalf("PM2 configuration missing %s", setting)
 		}
+	}
+	if strings.Contains(ecosystem, "PORT") {
+		t.Fatalf("PM2 configuration must leave the port to config.json:\n%s", ecosystem)
 	}
 	decrypted, err := age.Decrypt(bytes.NewReader(entries["mai/config/config.json.age"]), identity)
 	if err != nil {
@@ -238,7 +241,19 @@ func TestBuildRejectsWorkflowNamesServiceCannotLoad(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "1workflow.yaml"), wf, 0600); err != nil {
 		t.Fatal(err)
 	}
-	o := Options{Arch: "arm64", ConfigPath: "config.json", Workflows: []string{"1workflow.yaml"}, InstallDir: "/opt/maiservice", ServiceName: "maiservice", Port: 3081, MemoryMB: 650, GoMemoryMB: 400, Mode: "trusted"}
+	o := Options{Arch: "arm64", ConfigPath: "config.json", Workflows: []string{"1workflow.yaml"}, InstallDir: "/opt/maiservice", ServiceName: "maiservice", MemoryMB: 650, GoMemoryMB: 400, Mode: "trusted"}
+	// The port comes only from config.json, so a config without one is rejected.
+	for _, cfg := range []string{"{}", `{"port":0}`, `{"port":"3081"}`, `{"port":3081.5}`} {
+		if err := os.WriteFile(filepath.Join(root, "config.json"), []byte(cfg), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = Build(context.Background(), root, o); err == nil || !strings.Contains(err.Error(), `"port"`) {
+			t.Fatalf("config %s: expected a port error, got %v", cfg, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, "config.json"), []byte(`{"port":3081}`), 0600); err != nil {
+		t.Fatal(err)
+	}
 	_, err = Build(context.Background(), root, o)
 	if err == nil || !strings.Contains(err.Error(), "workflow names") {
 		t.Fatalf("expected workflow name validation error, got %v", err)

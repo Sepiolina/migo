@@ -93,7 +93,6 @@ it("defaults to secure and requires both signing identity and an age public reci
       workflows: ["workflows/a.yaml", "workflows/b.yaml"],
       installDir: "/opt/maiservice",
       serviceName: "maiservice",
-      port: 3081,
       memoryMB: 650,
       goMemoryMB: 400,
       mode: "secure",
@@ -110,14 +109,7 @@ it("requires explicit trusted selection, validates settings and reports native f
   const build = screen.getByRole("button", {
     name: "Build ZIP package",
   }) as HTMLButtonElement;
-  fireEvent.change(screen.getByLabelText("HTTP port"), {
-    target: { value: "70000" },
-  });
-  expect(build.disabled).toBe(true);
-  expect(screen.getByText(/Port must/)).toBeTruthy();
-  fireEvent.change(screen.getByLabelText("HTTP port"), {
-    target: { value: "3081" },
-  });
+  expect(screen.queryByLabelText("HTTP port")).toBeNull();
   fireEvent.change(screen.getByLabelText("Configuration file"), {
     target: { value: "../outside.json" },
   });
