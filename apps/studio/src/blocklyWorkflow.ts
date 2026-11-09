@@ -436,7 +436,7 @@ export function loadWorkflow(
   source: string,
 ): { preservedSteps: number } {
   registerWorkflowBlocks();
-  const { doc, steps } = document(source);
+  const { doc, steps } = document(source.replace(/\r\n/g, "\n"));
   workspace.clear();
   const root = newBlock(workspace, "mai_workflow");
   root.setDeletable(false);
@@ -876,7 +876,11 @@ function encodeService(doc: Doc, root: Blockly.Block): void {
   } else doc.set("service", node);
 }
 
-export function serializeWorkflow(workspace: Blockly.Workspace, baseSource: string): string {
+export function serializeWorkflow(workspace: Blockly.Workspace, source: string): string {
+  // Work on LF text and give the file back its own line endings, so a block
+  // edit of a CRLF checkout (Git on Windows) changes only the edited lines.
+  const crlf = source.includes("\r\n");
+  const baseSource = crlf ? source.replace(/\r\n/g, "\n") : source;
   const { doc, steps } = document(baseSource);
   const all = workspace.getAllBlocks(false),
     roots = all.filter((b) => b.type === "mai_workflow");
@@ -890,7 +894,8 @@ export function serializeWorkflow(workspace: Blockly.Workspace, baseSource: stri
   steps.items = chain(root.getInputTargetBlock("STEPS")).map((b) => encodeStep(doc, b));
   encodeSheets(doc, root);
   encodeService(doc, root);
-  return preserveText(baseSource, doc.toString(writeOptions));
+  const text = preserveText(baseSource, doc.toString(writeOptions));
+  return crlf ? text.replace(/\n/g, "\r\n") : text;
 }
 
 /** The registry fields of a block, for the selected-block inspector. */

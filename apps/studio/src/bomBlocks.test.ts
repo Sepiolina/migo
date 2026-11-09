@@ -120,3 +120,18 @@ describe("service block", () => {
     expect(parse(serializeWorkflow(reopened, added)).service).toBeUndefined();
   });
 });
+describe("line endings", () => {
+  it("keeps CRLF files CRLF with a one-line diff", () => {
+    const crlf = bom.replace(/\r?\n/g, "\r\n");
+    const { ws } = open(crlf);
+    expect(serializeWorkflow(ws, crlf)).toBe(crlf);
+    const dedupe = ws
+      .getAllBlocks(false)
+      .find((b) => b.type === "mai_dedupe" && b.getFieldValue("BY") === "Key")!;
+    dedupe.setFieldValue("first", "KEEP");
+    const output = serializeWorkflow(ws, crlf);
+    expect(output.split("\r\n").length).toBe(crlf.split("\r\n").length);
+    expect(output.replace(/\r\n/g, "").includes("\n")).toBe(false);
+    expect(changedLines(crlf, output)).toBe(1);
+  });
+});
