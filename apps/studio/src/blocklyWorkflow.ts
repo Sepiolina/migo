@@ -480,7 +480,20 @@ export function loadWorkflow(
     for (const b of chain(root.getInputTargetBlock("SHEETS"))) b.dispose(false);
     form = "opaque";
   }
-  memory.set(root, { sheets: form });
+  // service: how MaiService exposes the workflow (one optional block).
+  const service: unknown = doc.get("service", true);
+  if (service !== undefined) {
+    try {
+      connectChain(root.getInput("SERVICE"), [
+        decodeObject(workspace, itemByType.get("mai_service")!, service),
+      ]);
+    } catch (error) {
+      if (!(error instanceof Unrepresentable)) throw error;
+      root.getInput("SERVICE")!.setVisible(false);
+      memory.set(root, { serviceOpaque: true });
+    }
+  }
+  memory.set(root, { ...memory.get(root), sheets: form });
   if (form === "opaque") {
     root.getInput("SHEETS")!.setVisible(false);
     root.getInput("LABEL_SHEETS")!.appendField("· preserved, edit in YAML");
@@ -840,6 +853,29 @@ function encodeSheets(doc: Doc, root: Blockly.Block): void {
   (doc.get("output", true) as YAMLMap).set("sheets", next);
 }
 
+function encodeService(doc: Doc, root: Blockly.Block): void {
+  if (memory.get(root)?.serviceOpaque) return;
+  const blocks = chain(root.getInputTargetBlock("SERVICE"));
+  if (blocks.length > 1) throw new Error("A workflow has at most one service block.");
+  const original: unknown = doc.get("service", true);
+  if (!blocks.length) {
+    if (original !== undefined) doc.delete("service");
+    return;
+  }
+  const node = encodeObject(doc, blocks[0], itemByType.get("mai_service")!);
+  if (original !== undefined && same(original, node)) return;
+  if (isMap(node) && !node.items.length) {
+    if (original !== undefined) doc.delete("service");
+    return;
+  }
+  if (original === undefined) {
+    // Keep it beside the name, where readers look first.
+    const root = doc.contents as YAMLMap;
+    const at = Math.max(0, root.items.findIndex((p) => str(p.key) === "name") + 1);
+    root.items.splice(at, 0, new Pair(new Scalar("service"), node));
+  } else doc.set("service", node);
+}
+
 export function serializeWorkflow(workspace: Blockly.Workspace, baseSource: string): string {
   const { doc, steps } = document(baseSource);
   const all = workspace.getAllBlocks(false),
@@ -853,6 +889,7 @@ export function serializeWorkflow(workspace: Blockly.Workspace, baseSource: stri
     throw new Error("Enable or remove disabled blocks before saving.");
   steps.items = chain(root.getInputTargetBlock("STEPS")).map((b) => encodeStep(doc, b));
   encodeSheets(doc, root);
+  encodeService(doc, root);
   return preserveText(baseSource, doc.toString(writeOptions));
 }
 

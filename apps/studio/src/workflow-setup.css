@@ -46,7 +46,7 @@
   border-radius: 6px;
 }
 .workflow-setup button {
-  var(--surface)-space: normal;
+  white-space: normal;
 }
 .workflow-setup-actions {
   display: flex;

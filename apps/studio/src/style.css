@@ -102,7 +102,7 @@ label select {
   justify-content: flex-end;
 }
 .toolbar button {
-  var(--surface)-space: nowrap;
+  white-space: nowrap;
 }
 .brand strong {
   font-size: 16px;
@@ -130,7 +130,7 @@ small,
 }
 .mode {
   color: var(--text);
-  var(--surface)-space: nowrap;
+  white-space: nowrap;
 }
 .notice {
   padding: 10px 22px;
@@ -206,12 +206,12 @@ hr {
 .documentbar strong {
   overflow: hidden;
   text-overflow: ellipsis;
-  var(--surface)-space: nowrap;
+  white-space: nowrap;
 }
 .state {
   font-size: 12px;
   color: var(--text);
-  var(--surface)-space: nowrap;
+  white-space: nowrap;
 }
 nav {
   min-height: 36px;
@@ -478,7 +478,7 @@ nav > span {
   text-align: left;
   align-items: flex-start;
   gap: 12px;
-  var(--surface)-space: normal;
+  white-space: normal;
   padding: 15px;
 }
 .library-icon {
@@ -568,7 +568,7 @@ th,
 td {
   border: 1px solid var(--border);
   text-align: left;
-  var(--surface)-space: nowrap;
+  white-space: nowrap;
 }
 th {
   padding: 9px 14px;
@@ -606,7 +606,7 @@ tbody th {
 }
 .cell-inspector output {
   flex: 1;
-  var(--surface)-space: pre-wrap;
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
   max-height: 130px;
   overflow: auto;

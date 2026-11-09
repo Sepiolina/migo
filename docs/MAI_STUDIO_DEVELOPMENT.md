@@ -39,13 +39,49 @@ The browser development server supports frontend work, but native workspace and
 runner operations require the Tauri application. A browser-only build must never
 pretend to have successfully executed a workflow.
 
-## Checks
+## Visual editor architecture
 
-The visual editor separates block definitions and copy/paste state in
-`src/blocklyBlocks.ts`, the restricted expression grammar in
-`src/blocklyExpressions.ts`, and YAML round-trip editing in
-`src/blocklyWorkflow.ts`. `BlockEditor.tsx` owns the canvas lifecycle;
-`workbookSettings.ts` preserves workbook metadata when the setup form changes.
+Every block is generated from **`src/stepRegistry.ts`**: one `StepSpec` per
+workflow step and one `ItemSpec` per nested item (set entries, header titles,
+pick rules, output sheets, columns and styles, the service block). From it:
+
+- `blocklyBlocks.ts` builds the Blockly definitions and the toolbox;
+- `blocklyWorkflow.ts` reads and writes YAML generically: unchanged parts are
+  written back as they were, changed fields are patched in place, and anything
+  a spec cannot represent opens as a preserved block;
+- `yamlSplice.ts` keeps the original text of unchanged mappings after an edit,
+  so a one-field change is a one-line diff;
+- `operationCatalog.ts` (the **Add step** library) and `BlockInspector.tsx`
+  (the selected-block panel with full-size text boxes) read the same specs.
+
+`blocklyExpressions.ts` turns simple conditions and arithmetic into visual
+blocks; any other expression opens as an editable **ƒx** code block.
+`BlockEditor.tsx` owns the canvas lifecycle; `workbookSettings.ts` preserves
+workbook metadata when the setup form changes. `theme.css` holds the design
+tokens (light and dark); `modern.css` the shell layout and breakpoints.
+
+### Add a step to Studio
+
+1. Add a `StepSpec` to `steps` in `src/stepRegistry.ts`:
+
+   ```ts
+   {
+     op: "upper", type: "mai_upper", title: "Upper-case columns",
+     heading: "Upper-case", category: "Columns", icon: "A",
+     description: "Upper-case text in columns.", help: "Column titles separated by commas.",
+     form: "map", list: "", fields: [list("", "", { name: "COLUMNS" })],
+     example: "[Column]",
+   },
+   ```
+   `form` says where fields live (`map`, `entries` for a whole-map argument,
+   `inline` for if/then/else); `scalar`/`list` name the field a short form fills.
+   Field kinds: `text`, `template`, `number`, `bool`, `enum`, `list`, `expr`,
+   `entries`, `items`, `steps`, `yaml`. Mark rarely used ones `advanced`.
+2. For nested structures add an `ItemSpec` and point an `entries` or `items`
+   field at it.
+3. `npm test` checks every registry example round-trips (`bomBlocks.test.ts`).
+
+## Checks
 
 From the repository root, `make check` runs Go formatting, vet, compilation, race
 tests, and the existing example workflows. From `apps/studio`, run `npm ci`,

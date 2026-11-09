@@ -91,7 +91,7 @@
   overflow-wrap: anywhere;
 }
 .package-builder pre {
-  var(--surface)-space: pre-wrap;
+  white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-size: 12px;
 }

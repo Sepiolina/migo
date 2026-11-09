@@ -94,3 +94,29 @@ describe("inspector expression editing", () => {
     expect(parse(serializeWorkflow(ws, source)).steps[0].filter).toBe("norm(Code) in ['A', 'B']");
   });
 });
+describe("service block", () => {
+  const base = "name: Parts\ninput: {parts: {}}\nsteps:\n  - from: parts\n  - save: out\noutput: {sheets: {Out: out}}\n";
+  it("adds, edits and removes the service section", () => {
+    const ws = new Blockly.Workspace();
+    loadWorkflow(ws, base);
+    const root = ws.getAllBlocks(false).find((b) => b.type === "mai_workflow")!;
+    const service = ws.newBlock("mai_service");
+    service.setFieldValue("parts-v2", "ROUTE");
+    service.setFieldValue("false", "OWNER_REQUIRED");
+    root.getInput("SERVICE")!.connection!.connect(service.previousConnection!);
+    const added = serializeWorkflow(ws, base);
+    expect(added.split("\n")[1]).toBe("service: {route: parts-v2, owner_required: false}");
+    const reopened = new Blockly.Workspace();
+    loadWorkflow(reopened, added);
+    expect(serializeWorkflow(reopened, added)).toBe(added);
+    const block = reopened.getAllBlocks(false).find((b) => b.type === "mai_service")!;
+    block.setFieldValue("Clean parts.", "DESCRIPTION");
+    expect(parse(serializeWorkflow(reopened, added)).service).toEqual({
+      route: "parts-v2",
+      owner_required: false,
+      description: "Clean parts.",
+    });
+    block.dispose(false);
+    expect(parse(serializeWorkflow(reopened, added)).service).toBeUndefined();
+  });
+});

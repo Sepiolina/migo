@@ -9,7 +9,14 @@ about any particular process.
 
 | File | Endpoints |
 | --- | --- |
-| `workflows/<name>.yaml` | `POST /api/<name>/upload`, `GET /api/<name>/download` |
+| `workflows/<name>.yaml` | `POST /api/<name>/upload`, `GET /api/<name>/download`, `POST /api/<name>/run`, `GET /api/<name>` |
+| (all files) | `GET /api/workflows` |
+
+- `upload` runs the workflow and keeps the result for `download` (the original contract, unchanged).
+- `run` takes the same form and answers with the workbook itself. Nothing is kept, so concurrent
+  callers never see each other's result: use it from scripts and other services.
+- `GET /api/<name>` describes the workflow: inputs, output sheets, owner field, upload limit and routes.
+- `GET /api/workflows` lists every workflow plus the step names this build supports.
 
 All workflows use the same request and response. Upload sends multipart
 `files` (one per input, in any order) plus `bam` (the employee number). The
@@ -26,6 +33,21 @@ Where the files come from:
 - A file in `<config dir>/workflows/` replaces the built-in one with the same name, or adds a new endpoint.
 
 Names use lowercase letters, digits and `-`. Results go to `outputs/<name>/`.
+
+**Service settings.** An optional `service:` section changes how a workflow is exposed;
+without it everything behaves as above:
+
+```yaml
+service:
+  route: bom-v2               # URL segment instead of the file name
+  description: Annotated BOM with Forth P/N and MAIN/SUB.
+  owner_field: bam            # the form field with the requester id
+  owner_required: false       # default true; a missing owner becomes "anonymous"
+  max_upload_mb: 40           # per-file limit for this workflow (default 25)
+```
+
+Two files using the same route, or the reserved route `workflows`, stop startup.
+To publish a second version of a process, copy the file, change it, and give it a new route.
 
 Everything is checked when the file loads: step arguments, expressions, and
 input and dataset names. A bad file stops startup; it never fails a request

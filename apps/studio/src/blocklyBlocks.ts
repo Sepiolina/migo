@@ -28,6 +28,8 @@ export type Memory = {
   expanded?: boolean;
   /** The root block: the output sheets form, or "opaque" when not editable. */
   sheets?: "seq" | "map" | "opaque" | "none";
+  /** The root block: a service section the service block cannot show. */
+  serviceOpaque?: boolean;
 };
 export const blockMemory = new WeakMap<Blockly.Block, Memory>();
 
@@ -162,6 +164,8 @@ const fixedDefinitions: object[] = [
     args2: [{ type: "input_dummy", name: "LABEL_SHEETS" }],
     message3: "%1",
     args3: [{ type: "input_statement", name: "SHEETS", check: "MaiSheet" }],
+    message4: "service %1",
+    args4: [{ type: "input_statement", name: "SERVICE", check: "MaiService" }],
     colour: "#334155",
     tooltip:
       "The workflow runs connected steps from top to bottom. Start with Read, transform the rows, save a dataset, then write it as an output sheet.",
@@ -384,6 +388,7 @@ export function registerWorkflowBlocks(): void {
           texts: saved.yaml,
           expanded: saved.expanded,
           sheets: saved.sheets,
+          serviceOpaque: saved.serviceOpaque,
         };
       };
       this.loadExtraState = (state: {
@@ -473,7 +478,7 @@ export const workflowToolbox: Blockly.utils.toolbox.ToolboxDefinition = {
       kind: "category",
       name: "Output",
       colour: categoryColours.Output,
-      contents: ["mai_sheet", "mai_out_column", "mai_out_style"].map((t) => sample(t)),
+      contents: ["mai_sheet", "mai_out_column", "mai_out_style", "mai_service"].map((t) => sample(t)),
     },
     {
       kind: "category",

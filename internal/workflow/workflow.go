@@ -36,10 +36,11 @@ import (
 
 // Workflow is a loaded, compiled workflow file.
 type Workflow struct {
-	Name   string
-	Inputs []Input // upload order
-	Sheets []*SheetSpec
-	steps  []step
+	Name    string
+	Inputs  []Input // upload order
+	Sheets  []*SheetSpec
+	Service Service // how the HTTP service exposes it
+	steps   []step
 }
 
 // Input is one uploaded file. Match (a regexp on the uploaded filename) lets
@@ -119,10 +120,11 @@ func Load(path string) (*Workflow, error) {
 }
 
 type document struct {
-	Name   string    `yaml:"name"`
-	Input  yaml.Node `yaml:"input"`
-	Steps  yaml.Node `yaml:"steps"`
-	Output struct {
+	Name    string    `yaml:"name"`
+	Input   yaml.Node `yaml:"input"`
+	Steps   yaml.Node `yaml:"steps"`
+	Service yaml.Node `yaml:"service"`
+	Output  struct {
 		Sheets yaml.Node `yaml:"sheets"`
 	} `yaml:"output"`
 }
@@ -143,6 +145,9 @@ func Parse(data []byte) (*Workflow, error) {
 		return nil, fmt.Errorf("name must not be blank")
 	}
 	if wf.Inputs, err = parseInputs(&doc.Input); err != nil {
+		return nil, err
+	}
+	if wf.Service, err = parseService(&doc.Service); err != nil {
 		return nil, err
 	}
 	sc := &scope{inputs: map[string]bool{}, saved: map[string]bool{}}
