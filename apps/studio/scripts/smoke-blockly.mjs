@@ -29,6 +29,8 @@ try {
     "blocklyExpressions.ts",
     "blocklyBlocks.ts",
     "blocklyWorkflow.ts",
+    "stepRegistry.ts",
+    "yamlSplice.ts",
     "workflowTemplates.ts",
     "model.ts",
     "operationCatalog.ts",
@@ -68,7 +70,11 @@ output:
   const connectValue = (parent, name, child) =>
     parent.getInput(name).connection.connect(child.outputConnection);
   const read = create("mai_from", { SOURCE: "parts", SHEET: "Parts" });
-  const calculate = create("mai_set", { COLUMN: "Total quantity" });
+  const calculate = create("mai_set");
+  const assignment = create("mai_assign", { COLUMN: "Total quantity" });
+  calculate
+    .getInput("ENTRIES")
+    .connection.connect(assignment.previousConnection);
   const arithmetic = create("mai_arithmetic", { OP: "*" });
   connectValue(
     arithmetic,
@@ -76,7 +82,7 @@ output:
     create("mai_column", { NAME: "Quantity", MODE: "number" }),
   );
   connectValue(arithmetic, "RIGHT", create("mai_number", { VALUE: "2" }));
-  connectValue(calculate, "VALUE", arithmetic);
+  connectValue(assignment, "VALUE", arithmetic);
   const filter = create("mai_filter");
   const compare = create("mai_compare", { OP: ">" });
   connectValue(
@@ -86,10 +92,12 @@ output:
   );
   connectValue(compare, "RIGHT", create("mai_number", { VALUE: "0" }));
   connectValue(filter, "VALUE", compare);
-  const group = create("mai_group", {
-    BY: "Part Number",
-    SUM: "Total quantity",
+  const group = create("mai_group", { BY: "Part Number" });
+  const sum = create("mai_aggregate", {
+    AGGREGATE: "sum",
+    COLUMNS: "Total quantity",
   });
+  group.getInput("AGGREGATES").connection.connect(sum.previousConnection);
   const sort = create("mai_sort", {
     COLUMNS: "Part Number",
     DIRECTION: "false",
@@ -183,7 +191,7 @@ output:
         workspace
           .getAllBlocks(false)
           .some((block) =>
-            ["mai_preserved", "mai_custom_expression"].includes(block.type),
+            block.type === "mai_preserved",
           ),
         false,
         "The tutorial must be fully editable with visual blocks",
@@ -252,6 +260,29 @@ output:
       );
     }
   }
+  // The production BOM workflow: every step opens as a block, an untouched
+  // round trip is byte-identical, and a block edit still runs in the engine.
+  const bom = readFileSync(join(root, "workflows/bom.yaml"), "utf8");
+  const opened = loadWorkflow(workspace, bom);
+  assert.equal(opened.preservedSteps, 0, "BOM must open without preserved steps");
+  assert.equal(serializeWorkflow(workspace, bom), bom);
+  for (const name of ["bom_basic.xlsx", "prio_basic.xlsx"])
+    copyFileSync(join(root, "testdata", name), join(directory, name));
+  const bomInputs = { bom: "bom_basic.xlsx", priority: "prio_basic.xlsx" };
+  const bomRun = request("run", { yaml: bom, inputs: bomInputs });
+  const keep = workspace
+    .getAllBlocks(false)
+    .find((b) => b.type === "mai_dedupe" && b.getFieldValue("BY") === "Key");
+  keep.setFieldValue("last", "KEEP");
+  const log = workspace
+    .getAllBlocks(false)
+    .find((b) => b.type === "mai_log" && /Priority entries/.test(b.getFieldValue("MESSAGE")));
+  log.setFieldValue("Loaded {len(rows)} Priority rows.", "MESSAGE");
+  const editedBom = serializeWorkflow(workspace, bom);
+  assert.notEqual(editedBom, bom);
+  request("validate", { yaml: editedBom });
+  const editedRun = request("run", { yaml: editedBom, inputs: bomInputs });
+  assert.deepEqual(editedRun.preview.rows, bomRun.preview.rows);
   console.log(
     `Blockly integration passed: ${expected.size} grouped rows, numeric calculations, and verified XLSX artifacts including Orders totals Acme=50, Beta=5.`,
   );

@@ -119,7 +119,7 @@ describe("Blockly workflow codec", () => {
         .getAllBlocks(false)
         .some(
           (b) =>
-            b.type === "mai_custom_expression" &&
+            b.type === "mai_code" &&
             b.getParent()?.type === "mai_compare",
         ),
     ).toBe(true);
@@ -128,26 +128,28 @@ describe("Blockly workflow codec", () => {
     for (const expr of ['trim(Name) == "x"', "Flag ? X : Y && Z"]) {
       const source = `steps:\n  - filter: '${expr}'\n`;
       const ws = opened(source);
-      expect(step(ws, "mai_filter").getInputTargetBlock("VALUE")?.type).toBe(
-        "mai_custom_expression",
-      );
+      const code = step(ws, "mai_filter").getInputTargetBlock("VALUE")!;
+      expect(code.type).toBe("mai_code");
+      expect(code.getFieldValue("CODE")).toBe(expr);
+      expect(code.isEditable()).toBe(true);
       expect(parse(serializeWorkflow(ws, source))).toEqual(parse(source));
     }
   });
   it("patches known fields while preserving comments, options and custom expressions", () => {
-    const source = `name: Demo\nsteps:\n  # Read the workbook\n  - from: {input: parts, sheet: Old, trim: true}\n  - set: {Result: 'trim(col("Name"))'}\n  - group: {by: [Result], sum: [Qty], first: [Other]}\n  - sql: {query: SELECT 1}\noutput: {sheets: []}\n`;
+    const source = `name: Demo\nsteps:\n  # Read the workbook\n  - from: {input: parts, sheet: Old, trim: true}\n  - set: {Result: 'trim(col("Name"))'}\n  - group: {by: [Result], sum: [Qty], first: [Other]}\n  - sql: {query: SELECT 1, save: one}\noutput: {sheets: []}\n`;
     const ws = opened(source);
     step(ws, "mai_from").setFieldValue("New", "SHEET");
-    step(ws, "mai_group").setFieldValue("Amount", "SUM");
+    step(ws, "mai_aggregate").setFieldValue("Amount", "COLUMNS");
+    step(ws, "mai_sql").setFieldValue("SELECT 2", "QUERY");
     const output = serializeWorkflow(ws, source);
     expect(parse(output).steps).toEqual([
       { from: { input: "parts", sheet: "New", trim: true } },
       { set: { Result: 'trim(col("Name"))' } },
       { group: { by: ["Result"], sum: ["Amount"], first: ["Other"] } },
-      { sql: { query: "SELECT 1" } },
+      { sql: { query: "SELECT 2", save: "one" } },
     ]);
     expect(output).toContain("# Read the workbook");
-    expect(step(ws, "mai_custom_expression").isEditable()).toBe(false);
+    expect(output).toContain("- set: {Result: 'trim(col(\"Name\"))'}");
   });
   it("serializes connected visual expressions in pipeline order", () => {
     const source = "steps: []\n";
@@ -203,7 +205,6 @@ describe("Blockly workflow codec", () => {
     );
   });
   it.each([
-    'select: {"A, B": "A, B"}',
     'sort: {by: ["A, B"]}',
     'group: {by: ["A, B"], sum: [Qty]}',
     'join: {with: prior, on: ["A, B"]}',
@@ -217,7 +218,7 @@ describe("Blockly workflow codec", () => {
       expect(parse(serializeWorkflow(ws, source))).toEqual(parse(source));
     },
   );
-  it("validates grouping against both visible and preserved aggregates", () => {
+  it("validates grouping summaries", () => {
     const source = "steps: []\n",
       ws = opened(source);
     const group = ws.newBlock("mai_group");
@@ -226,24 +227,29 @@ describe("Blockly workflow codec", () => {
       .connection!.connect(group.previousConnection!);
     group.setFieldValue("Key", "BY");
     expect(() => serializeWorkflow(ws, source)).toThrow(/at least one/);
-    group.setFieldValue("Key", "SUM");
+    const sum = ws.newBlock("mai_aggregate");
+    group.getInput("AGGREGATES")!.connection!.connect(sum.previousConnection!);
+    sum.setFieldValue("Key", "COLUMNS");
     expect(() => serializeWorkflow(ws, source)).toThrow(/distinct/);
-    group.setFieldValue("Qty", "SUM");
-    expect(parse(serializeWorkflow(ws, source)).steps[0].group.sum).toEqual([
-      "Qty",
-    ]);
+    sum.setFieldValue("Qty", "COLUMNS");
+    expect(parse(serializeWorkflow(ws, source)).steps[0].group).toEqual({
+      by: ["Key"],
+      sum: ["Qty"],
+    });
 
     const existing = "steps:\n  - group: {by: [Key], first: [Description]}\n";
     const loaded = opened(existing);
+    expect(step(loaded, "mai_aggregate").getFieldValue("AGGREGATE")).toBe("first");
     step(loaded, "mai_group").setFieldValue("Other", "BY");
-    expect(
-      parse(serializeWorkflow(loaded, existing)).steps[0].group.first,
-    ).toEqual(["Description"]);
+    expect(parse(serializeWorkflow(loaded, existing)).steps[0].group).toEqual({
+      by: ["Other"],
+      first: ["Description"],
+    });
     step(loaded, "mai_group").setFieldValue("Description", "BY");
     expect(() => serializeWorkflow(loaded, existing)).toThrow(/distinct/);
   });
   it("copies hidden step options and opaque expressions with duplicated blocks", () => {
-    const source = `steps:\n  - join: {with: prior, on: [ID], right_on: [OtherID], normalize: true, take: {Result: Name}}\n  - set: {Clean: 'trim(col("Name"))'}\n  - sql: {query: SELECT 1}\n`;
+    const source = `steps:\n  - join: {with: prior, on: [ID], right_on: [OtherID], normalize: true, take: {Result: Name}}\n  - set: {Clean: 'trim(col("Name"))'}\n  - custom_step: {query: SELECT 1}\n`;
     const ws = opened(source);
     const duplicate = (block: Blockly.Block) =>
       Blockly.serialization.blocks.append(
@@ -255,6 +261,8 @@ describe("Blockly workflow codec", () => {
       );
     const join = step(ws, "mai_join");
     const set = step(ws, "mai_set");
+    const assign = () =>
+      ws.getAllBlocks(false).filter((b) => b.type === "mai_assign").at(-1)!;
     const preserved = step(ws, "mai_preserved");
     const joinCopy = duplicate(join),
       setCopy = duplicate(set),
@@ -263,7 +271,7 @@ describe("Blockly workflow codec", () => {
     joinCopy.nextConnection!.connect(setCopy.previousConnection!);
     setCopy.nextConnection!.connect(preservedCopy.previousConnection!);
     joinCopy.setFieldValue("inner", "HOW");
-    setCopy.setFieldValue("CleanCopy", "COLUMN");
+    assign().setFieldValue("CleanCopy", "COLUMN");
     const steps = parse(serializeWorkflow(ws, source)).steps;
     expect(steps[3].join).toEqual({
       with: "prior",
@@ -274,6 +282,6 @@ describe("Blockly workflow codec", () => {
       how: "inner",
     });
     expect(steps[4].set).toEqual({ CleanCopy: 'trim(col("Name"))' });
-    expect(steps[5].sql).toEqual({ query: "SELECT 1" });
+    expect(steps[5].custom_step).toEqual({ query: "SELECT 1" });
   });
 });

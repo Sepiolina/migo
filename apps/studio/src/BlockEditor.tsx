@@ -7,7 +7,52 @@ import {
   serializeWorkflow,
   workflowToolbox,
 } from "./blocklyWorkflow";
+import { BlockInspector } from "./BlockInspector";
 import "./block-editor.css";
+
+const light = {
+  workspaceBackgroundColour: "#f8fafc",
+  toolboxBackgroundColour: "#ffffff",
+  toolboxForegroundColour: "#1e293b",
+  flyoutBackgroundColour: "#f1f5f9",
+  flyoutForegroundColour: "#1e293b",
+  flyoutOpacity: 1,
+  scrollbarColour: "#94a3b8",
+  scrollbarOpacity: 0.5,
+  insertionMarkerColour: "#4f46e5",
+  insertionMarkerOpacity: 0.35,
+  cursorColour: "#4f46e5",
+  gridColour: "#e2e8f0",
+};
+const dark = {
+  ...light,
+  workspaceBackgroundColour: "#0f172a",
+  toolboxBackgroundColour: "#111827",
+  toolboxForegroundColour: "#e2e8f0",
+  flyoutBackgroundColour: "#1e293b",
+  flyoutForegroundColour: "#e2e8f0",
+  scrollbarColour: "#475569",
+  insertionMarkerColour: "#a5b4fc",
+  cursorColour: "#a5b4fc",
+  gridColour: "#1e293b",
+};
+function theme(mode: "light" | "dark") {
+  const { gridColour: _grid, ...componentStyles } = mode === "dark" ? dark : light;
+  return Blockly.Theme.defineTheme(`mai-${mode}`, {
+    name: `mai-${mode}`,
+    base: Blockly.Themes.Classic,
+    componentStyles,
+    fontStyle: {
+      family: "Inter, \"Segoe UI\", system-ui, sans-serif",
+      size: 12,
+      weight: "500",
+    },
+  });
+}
+const prefersDark = () =>
+  typeof window !== "undefined" &&
+  !!window.matchMedia?.("(prefers-color-scheme: dark)").matches &&
+  document.documentElement.dataset.theme !== "light";
 
 interface BlockEditorProps {
   source: string;
@@ -38,6 +83,9 @@ export function BlockEditor({
   const [message, setMessage] = useState("");
   const [loadError, setLoadError] = useState("");
   const [preservedSteps, setPreservedSteps] = useState(0);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [revision, setRevision] = useState(0);
+  const [inspectorOpen, setInspectorOpen] = useState(true);
   callbacksRef.current = { onChange, onDraftChange };
 
   function updatePending(value: boolean) {
@@ -87,34 +135,17 @@ export function BlockEditor({
     }
     Blockly.setLocale(messages);
     registerWorkflowBlocks();
-    const theme = Blockly.Theme.defineTheme("migo-workflow", {
-      name: "migo-workflow",
-      base: Blockly.Themes.Classic,
-      componentStyles: {
-        workspaceBackgroundColour: "#f7f9fd",
-        toolboxBackgroundColour: "#ffffff",
-        toolboxForegroundColour: "#243854",
-        flyoutBackgroundColour: "#f0f4fa",
-        flyoutForegroundColour: "#243854",
-        flyoutOpacity: 1,
-        scrollbarColour: "#aebed3",
-        scrollbarOpacity: 0.6,
-        insertionMarkerColour: "#315fba",
-        insertionMarkerOpacity: 0.35,
-        cursorColour: "#275ad5",
-      },
-      fontStyle: {
-        family: "Segoe UI, Inter, system-ui, sans-serif",
-        size: 13,
-        weight: "500",
-      },
-    });
     const workspace = Blockly.inject(hostRef.current, {
       toolbox: workflowToolbox,
-      theme,
-      renderer: "geras",
+      theme: theme(prefersDark() ? "dark" : "light"),
+      renderer: "thrasos",
       media: "/blockly/",
-      grid: { spacing: 24, length: 2, colour: "#d5dfed", snap: true },
+      grid: {
+        spacing: 24,
+        length: 2,
+        colour: (prefersDark() ? dark : light).gridColour,
+        snap: true,
+      },
       zoom: {
         controls: false,
         wheel: true,
@@ -136,7 +167,10 @@ export function BlockEditor({
         const id = (event as Blockly.Events.Selected).newElementId;
         const block = id ? workspace.getBlockById(id) : null;
         setSelectedHelp(block?.getTooltip() || "");
+        setSelectedId(block && block.type !== "mai_workflow" ? block.id : null);
+        if (block) setInspectorOpen(true);
       }
+      if (!event.isUiEvent) setRevision((value) => value + 1);
       if (loadingRef.current || event.isUiEvent || !workspaceRef.current)
         return;
       // Only model changes should serialize. Viewport, selection and toolbox events do not.
@@ -165,9 +199,13 @@ export function BlockEditor({
         ? null
         : new ResizeObserver(() => Blockly.svgResize(workspace));
     observer?.observe(hostRef.current);
+    const media = window.matchMedia?.("(prefers-color-scheme: dark)");
+    const onScheme = () => workspace.setTheme(theme(prefersDark() ? "dark" : "light"));
+    media?.addEventListener?.("change", onScheme);
     Blockly.svgResize(workspace);
     return () => {
       observer?.disconnect();
+      media?.removeEventListener?.("change", onScheme);
       workspace.removeChangeListener(listener);
       workspace.dispose();
       workspaceRef.current = null;
@@ -218,7 +256,12 @@ export function BlockEditor({
           </button>
         </div>
       )}
-      {selectedHelp && <div className="block-context" role="status"><strong>Selected block</strong><span>{selectedHelp}</span></div>}
+      {selectedHelp && !(inspectorOpen && selectedId) && (
+        <div className="block-context" role="status">
+          <strong>Selected block</strong>
+          <span>{selectedHelp}</span>
+        </div>
+      )}
       <div className="block-editor-canvas-wrap">
         <div
           className="block-editor-canvas"
@@ -259,6 +302,14 @@ export function BlockEditor({
         )}
         {disabled && (
           <div className="block-editor-disabled" aria-hidden="true" />
+        )}
+        {inspectorOpen && selectedId && !loadError && (
+          <BlockInspector
+            block={workspaceRef.current?.getBlockById(selectedId) ?? null}
+            revision={revision}
+            disabled={disabled}
+            onClose={() => setInspectorOpen(false)}
+          />
         )}
       </div>
     </section>

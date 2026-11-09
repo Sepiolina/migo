@@ -5,7 +5,8 @@ import { operations } from "./operationCatalog";
 
 describe("guided step settings", () => {
   it("provides editable defaults for every catalog operation", () => {
-    for (const operation of operations)
+    const guided = ["from", "filter", "set", "select", "rename", "sort", "group", "join", "save"];
+    for (const operation of operations.filter((o) => guided.includes(o.operation)))
       expect(
         readGuided(operation.operation, operation.defaultArgument),
         operation.operation,

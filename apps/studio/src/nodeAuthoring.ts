@@ -12,6 +12,12 @@ export function addOperation(
   if (!isSeq(steps)) throw new Error("The workflow needs a steps list.");
   const arg = parseDocument(argument);
   if (arg.errors.length) throw new Error(arg.errors[0].message);
-  steps.add(doc.createNode({ [operation]: arg.toJS({ maxAliasCount: 0 }) }));
+  const value = arg.toJS({ maxAliasCount: 0 });
+  // if/then/else keeps its branches beside the condition, not under it.
+  steps.add(
+    doc.createNode(
+      operation === "if" ? { if: value, then: [] } : { [operation]: value },
+    ),
+  );
   return doc.toString();
 }

@@ -14,17 +14,6 @@ steps:
       - save: other
 output: {sheets: {Parts: positive}} # output comment
 `;
-const defaults: Record<string, unknown> = {
-  from: "",
-  filter: "true",
-  set: {},
-  select: {},
-  rename: {},
-  sort: { by: [] },
-  group: { by: [] },
-  join: { with: "", on: [] },
-  save: "",
-};
 describe("node library append", () => {
   it.each(operations)(
     "appends $operation with its intended YAML type and preserves the existing workflow",
@@ -37,9 +26,12 @@ describe("node library append", () => {
       const before = parse(source);
       const after = parse(appended);
       expect(after.steps.slice(0, -1)).toEqual(before.steps);
-      expect(after.steps.at(-1)).toEqual({
-        [operation.operation]: defaults[operation.operation],
-      });
+      const value = parse(operation.defaultArgument);
+      expect(after.steps.at(-1)).toEqual(
+        operation.operation === "if"
+          ? { if: value, then: [] }
+          : { [operation.operation]: value },
+      );
       expect(after.output).toEqual(before.output);
       for (const comment of [
         "workflow comment",
