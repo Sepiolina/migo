@@ -284,6 +284,15 @@ Use `-os windows` or `-os all` for the other targets, `-arch arm64` for ARM
 servers and `-port 3090` for another port. On Linux, `make dist TARGET=linux`
 does the same.
 
+On Windows you can also double-click `build-dist.bat` in the repository folder.
+It asks for the target and keeps the window open at the end. From a terminal,
+give the target and any flags:
+
+```powershell
+.\build-dist.bat windows
+.\build-dist.bat linux -arch arm64
+```
+
 The result is `dist/maiservice-<os>-<arch>/`:
 
 | File | Purpose |

@@ -1,0 +1,5 @@
+# Windows batch files are stored with CRLF line endings (cmd.exe misreads
+# labels and goto in LF-only files), also for ZIP downloads, so git must not
+# convert them.
+*.bat -text
+*.cmd -text

@@ -61,7 +61,7 @@ try {
       failures.push(`HTTP ${response.status()}: ${response.url()}`);
   });
   await page.goto("http://127.0.0.1:1422/", { waitUntil: "networkidle" });
-  await page.getByRole("heading", { name: "Build with blocks" }).waitFor();
+  await page.getByRole("heading", { name: "Workflow canvas" }).waitFor();
   const numberField = page.locator(".mai_number .blocklyNumberField");
   await numberField.getByText("0", { exact: true }).waitFor();
   await numberField.dblclick();
@@ -131,7 +131,7 @@ try {
     throw new Error("Discard did not clear the draft.");
   await page.getByRole("button", { name: "+ New workflow" }).click();
   await page.getByRole("button", { name: /Copy a worksheet/ }).click();
-  await page.getByRole("heading", { name: "Build with blocks" }).waitFor();
+  await page.getByRole("heading", { name: "Workflow canvas" }).waitFor();
   await page
     .locator(".mai_save")
     .getByText("result", { exact: true })
@@ -150,7 +150,7 @@ try {
   await page.getByRole("button", { name: "Build", exact: true }).click();
   await page.setViewportSize({ width: 980, height: 680 });
   await page.getByRole("button", { name: "Workbook setup" }).click();
-  await page.getByRole("heading", { name: "Build with blocks" }).waitFor();
+  await page.getByRole("heading", { name: "Workflow canvas" }).waitFor();
   if (
     await page.evaluate(
       () => document.documentElement.scrollWidth > window.innerWidth,
