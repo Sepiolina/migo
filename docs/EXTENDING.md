@@ -145,7 +145,28 @@ when it is generic, meaning not tied to one process.
    ```
 2. Register it in `ops` (`workflow.go`): `"upper": tableStep(compileUpper)`.
    Everything is compiled when a file loads, so check the argument there.
-3. Test it in `internal/workflow/workflow_test.go` (`TestTableSteps` runs a
+
+   A step can also live outside the engine package. Call
+   `workflow.RegisterTableStep` from an `init` function of any package linked
+   into the binary (for example one imported by `internal/app/modules.go`):
+
+   ```go
+   func init() {
+       workflow.RegisterTableStep("upper", func(arg *yaml.Node) (workflow.TableFunc, error) {
+           var cols []string
+           if err := arg.Decode(&cols); err != nil {
+               return nil, err
+           }
+           return func(t *workflow.Table) (*workflow.Table, error) { /* change t */ return t, nil }, nil
+       })
+   }
+   ```
+   `GET /api/workflows` lists the registered step names.
+3. Make it editable in Mai Studio: add one entry to `steps` in
+   `apps/studio/src/stepRegistry.ts` (see the Studio development guide).
+   Blocks, toolbox, step library and inspector are generated from it; until
+   then the step still round-trips as a preserved block.
+4. Test it in `internal/workflow/workflow_test.go` (`TestTableSteps` runs a
    small workflow on `testdata/parts.xls`), and document it in `docs/WORKFLOWS.md`.
 
 **After touching the engine or `bom.yaml`, run `go test ./...`.** It includes
@@ -171,7 +192,8 @@ Elsewhere:
 | Change | Where |
 | --- | --- |
 | SAP / DB connection, batch size, retries | `config.json` (read with `config("...")`) |
-| Upload size limit | `MaxUploadMB` in `internal/modules/workflows/module.go` |
+| Upload size limit | `service.max_upload_mb` in the workflow, or `MaxUploadMB` in `internal/modules/workflows/module.go` for all |
+| Route, owner field, description | the workflow's `service:` section |
 | Output retention | constants at the top of `internal/storage/outputstore.go` |
 
 ## 5. Conventions

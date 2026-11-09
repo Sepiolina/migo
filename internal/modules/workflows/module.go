@@ -1,7 +1,13 @@
-// Package workflows serves every workflow file as its own endpoint pair:
+// Package workflows serves every workflow file as its own set of endpoints:
 //
+//	GET  /api/workflows        catalog: every workflow, its inputs and routes
+//	GET  /api/<name>           this workflow's description
 //	POST /api/<name>/upload    multipart "files" (one per input) + "bam"
 //	ANY  /api/<name>/download  the latest result of this workflow
+//	POST /api/<name>/run       same form; responds with the workbook itself
+//
+// <name> is the file name, or the workflow's service.route. Adding a
+// workflow file adds its endpoints; no Go change is needed.
 //
 // Files come from the built-in set (repo folder workflows/, embedded in the
 // binary) and from <config dir>/workflows/*.yaml, which override built-ins
@@ -14,7 +20,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -41,7 +46,8 @@ type Module struct {
 
 // endpoint is one workflow file and its routes.
 type endpoint struct {
-	name      string
+	name      string // the URL segment
+	file      string // the workflow file name without .yaml
 	wf        *workflow.Workflow
 	rt        workflow.Runtime
 	store     *storage.OutputStore
@@ -53,8 +59,6 @@ type endpoint struct {
 	mu     sync.Mutex
 	latest string // path of the most recent output
 }
-
-var endpointName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,39}$`)
 
 // New is the module.Factory.
 func New(s module.Services) (module.Module, error) {
@@ -75,23 +79,36 @@ func New(s module.Services) (module.Module, error) {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	for _, name := range names {
-		if !endpointName.MatchString(name) {
+	routes := map[string]string{} // route -> file
+	for _, file := range names {
+		if !workflow.ValidRoute(file) {
 			_ = db.Close()
-			return nil, fmt.Errorf("workflow file %q: name it with lowercase letters, digits and hyphens (1-40 characters)", name+".yaml")
+			return nil, fmt.Errorf("workflow file %q: name it with lowercase letters, digits and hyphens (1-40 characters)", file+".yaml")
 		}
-		wf, err := workflow.Parse(files[name])
+		wf, err := workflow.Parse(files[file])
 		if err != nil {
 			_ = db.Close()
-			return nil, fmt.Errorf("workflow %s.yaml: %w", name, err)
+			return nil, fmt.Errorf("workflow %s.yaml: %w", file, err)
 		}
+		name := file
+		if wf.Service.Route != "" {
+			name = wf.Service.Route
+		}
+		if other, dup := routes[name]; dup || name == "workflows" {
+			_ = db.Close()
+			if name == "workflows" {
+				return nil, fmt.Errorf("workflow %s.yaml: the route \"workflows\" is reserved for the catalog", file)
+			}
+			return nil, fmt.Errorf("workflows %s.yaml and %s.yaml both use the route %q", other, file, name)
+		}
+		routes[name] = file
 		store, err := storage.NewOutputStore(filepath.Join(s.Store.OutputDir, name))
 		if err != nil {
 			_ = db.Close()
 			return nil, fmt.Errorf("workflow %s output store: %w", name, err)
 		}
 		m.endpoints = append(m.endpoints, &endpoint{
-			name: name, wf: wf, rt: rt, store: store, gate: s.Gate, log: s.Log,
+			name: name, file: file, wf: wf, rt: rt, store: store, gate: s.Gate, log: s.Log,
 			uploadDir: s.UploadDir, uploads: s.Uploads,
 		})
 	}
@@ -143,11 +160,15 @@ func workflowFiles(dir string) (map[string][]byte, error) {
 
 func (*Module) Name() string { return "workflows" }
 
-// Routes registers /api/<name>/upload and /api/<name>/download per workflow.
+// Routes registers the catalog and, per workflow, its description,
+// upload, download and run endpoints.
 func (m *Module) Routes(r *httpx.Router) {
+	r.GET("/api/workflows", m.catalog)
 	for _, e := range m.endpoints {
+		r.GET("/api/"+e.name, e.describe)
 		r.POST("/api/"+e.name+"/upload", e.upload)
 		r.Any("/api/"+e.name+"/download", e.download)
+		r.POST("/api/"+e.name+"/run", e.run)
 	}
 }
 

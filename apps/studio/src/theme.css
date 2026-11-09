@@ -1,0 +1,97 @@
+/*
+ * Design tokens. Every stylesheet uses these variables, so the whole app
+ * follows the light or dark palette. data-theme on <html> overrides the
+ * system preference (set by the header theme switch).
+ */
+:root {
+  color-scheme: light;
+  --font: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --mono: "JetBrains Mono", "Cascadia Code", ui-monospace, "SFMono-Regular", Consolas, monospace;
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --shadow-sm: 0 1px 2px rgb(15 23 42 / 0.06);
+  --shadow: 0 4px 16px rgb(15 23 42 / 0.08);
+  --shadow-lg: 0 16px 48px rgb(15 23 42 / 0.16);
+  --ring: 0 0 0 3px color-mix(in srgb, var(--accent) 28%, transparent);
+  --header-height: 56px;
+
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #f8fafc;
+  --surface-3: #f1f5f9;
+  --border: #e2e8f0;
+  --border-subtle: #eef2f6;
+  --text: #0f172a;
+  --text-muted: #64748b;
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-soft: #eef2ff;
+  --accent-border: #c7d2fe;
+  --accent-text: #4338ca;
+  --on-accent: #ffffff;
+  --danger: #dc2626;
+  --danger-soft: #fef2f2;
+  --warn: #b45309;
+  --warn-soft: #fffbeb;
+  --warn-border: #fcd34d;
+  --success: #15803d;
+  --success-soft: #f0fdf4;
+  --violet: #7c3aed;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0b1120;
+    --surface: #111827;
+    --surface-2: #0f172a;
+    --surface-3: #1e293b;
+    --border: #273449;
+    --border-subtle: #1a2436;
+    --text: #e5e7eb;
+    --text-muted: #94a3b8;
+    --accent: #818cf8;
+    --accent-hover: #a5b4fc;
+    --accent-soft: #1e1b4b;
+    --accent-border: #3730a3;
+    --accent-text: #a5b4fc;
+    --on-accent: #0b1120;
+    --danger: #f87171;
+    --danger-soft: #2a1215;
+    --warn: #fbbf24;
+    --warn-soft: #2a2111;
+    --warn-border: #92400e;
+    --success: #4ade80;
+    --success-soft: #0f2a1a;
+    --violet: #a78bfa;
+    --shadow: 0 4px 16px rgb(0 0 0 / 0.4);
+    --shadow-lg: 0 16px 48px rgb(0 0 0 / 0.5);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0b1120;
+  --surface: #111827;
+  --surface-2: #0f172a;
+  --surface-3: #1e293b;
+  --border: #273449;
+  --border-subtle: #1a2436;
+  --text: #e5e7eb;
+  --text-muted: #94a3b8;
+  --accent: #818cf8;
+  --accent-hover: #a5b4fc;
+  --accent-soft: #1e1b4b;
+  --accent-border: #3730a3;
+  --accent-text: #a5b4fc;
+  --on-accent: #0b1120;
+  --danger: #f87171;
+  --danger-soft: #2a1215;
+  --warn: #fbbf24;
+  --warn-soft: #2a2111;
+  --warn-border: #92400e;
+  --success: #4ade80;
+  --success-soft: #0f2a1a;
+  --violet: #a78bfa;
+  --shadow: 0 4px 16px rgb(0 0 0 / 0.4);
+  --shadow-lg: 0 16px 48px rgb(0 0 0 / 0.5);
+}

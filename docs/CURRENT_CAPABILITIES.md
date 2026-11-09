@@ -50,8 +50,13 @@ requires updating matching blocks. Incomplete or disconnected blocks and pending
 workbook setup changes must be completed or discarded before saving, running,
 switching views, or closing; invalid setup cannot be applied.
 
-Unsupported, nested, or custom steps and unsupported expressions are preserved
-as opaque blocks rather than fully editable. Complex branching and other advanced
+Every engine step has a block, including `if`/`split` branches, `window`,
+`pick` rules, `sql`, `rest`, header detection, output sheets, columns and
+conditional styles, and the `service` settings: `workflows/bom.yaml` opens with no
+preserved steps. Expressions beyond simple comparisons and arithmetic open as
+editable ƒx code blocks; select a block to edit its settings, SQL and expressions
+in the inspector. Unknown steps and shapes a block cannot show are preserved as
+opaque blocks. Complex branching and other advanced
 shapes use **YAML source**. Comma-separated list fields cannot represent a single
 name containing a comma; unsupported existing shapes are preserved. Column value
 blocks offer number and text conversion; Go determines runtime types and behavior.
