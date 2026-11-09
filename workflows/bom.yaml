@@ -34,6 +34,16 @@ steps:
       trim: true
       skip_blank: true
       empty: The selected BOM file is empty.
+  # Exports often turn the dashes in a part number into "?" (ADM6?60?01.5 ->
+  # ADM6-60-01.5); Unicode dashes (‐ ‑ ‒ – — ― −) become a plain "-" too, so
+  # the Material_Master lookup finds the part.
+  - set:
+      CleanMfrPN: 'replaceRe(MfrPN, "[?\\x{2010}-\\x{2015}\\x{2212}]", "-")'
+  - log:
+      when: 'any(rows, #.CleanMfrPN != #.MfrPN)'
+      message: 'Fixed dashes in Mfr. Part Number for {len(filter(rows, #.CleanMfrPN != #.MfrPN))} row(s).'
+  - set:
+      MfrPN: CleanMfrPN
   - save: parts
 
   # ---- read the Priority workbook: Forth P/N (A) -> priority (M), from row 168

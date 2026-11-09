@@ -91,3 +91,56 @@ func readAll(t *testing.T, path string) map[string][][]string {
 	}
 	return res
 }
+
+// Exports can turn the dashes of a part number into "?" or Unicode dashes;
+// the BOM workflow writes a plain "-" and looks the part up with it.
+func TestBOMFixesDashesInMfrPN(t *testing.T) {
+	dir := t.TempDir()
+	f, err := excelize.OpenFile("../../testdata/bom_basic.xlsx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sheet := f.GetSheetList()[0]
+	for cell, v := range map[string]string{
+		"BA3": "ADM6?60?01.5?L?4?2?A-TR",
+		"BA4": "ADM6‐60‑01.5–L‒4—2−A-TR",
+	} {
+		if err := f.SetCellStr(sheet, cell, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bom := filepath.Join(dir, "bom.xlsx")
+	if err := f.SaveAs(bom); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	master := &Table{Columns: []string{"MaterialNo", "ZBlock", "Maker"}, Rows: [][]any{{"F9001", "", "ADM6-60-01.5-L-4-2-A-TR"}}}
+	var logs []string
+	rt := Runtime{
+		Cfg: cfg(t, `{"db_enabled": true}`),
+		SQL: func(context.Context, string, string, []any) (*Table, error) { return master, nil },
+		Log: func(s string) { logs = append(logs, s) },
+	}
+	out := filepath.Join(dir, "out.xlsx")
+	inputs := map[string]string{"bom": bom, "priority": "../../testdata/prio_basic.xlsx"}
+	if err := loadBOM(t).Run(context.Background(), rt, inputs, out); err != nil {
+		t.Fatalf("%v\n%v", err, logs)
+	}
+	rows := readAll(t, out)["BOM"]
+	for _, r := range []int{2, 3} { // output rows 3 and 4 (index 0 is the header)
+		if got := rows[r][10]; got != "ADM6-60-01.5-L-4-2-A-TR" {
+			t.Errorf("row %d Mfr. Part Number = %q", r+1, got)
+		}
+		if got := rows[r][13]; got != "F9001" { // Forth P/N from the lookup
+			t.Errorf("row %d Forth P/N = %q", r+1, got)
+		}
+	}
+	found := false
+	for _, l := range logs {
+		found = found || l == "Fixed dashes in Mfr. Part Number for 2 row(s)."
+	}
+	if !found {
+		t.Errorf("no dash log line in %q", logs)
+	}
+}
