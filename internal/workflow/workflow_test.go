@@ -229,6 +229,8 @@ func TestOutputStyles(t *testing.T) {
         - {header: Qty, value: num(Quantity), number_format: "0.00", id: q}
       styles:
         - {when: num(Quantity) > 2, columns: [q], fill: "#FF0000", border: {bottom: thick}}
+        - {columns: [Code], border: {left: "medium #2C3E50", bottom: thin, color: "#E0E0E0"}}
+        - {when: num(Quantity) > 2, columns: [Code], border: {bottom: "thick #000000"}}
     - {name: B, like: A, columns: [{header: Extra, value: '"x"'}]}
 `)))
 	if err != nil {
@@ -252,6 +254,22 @@ func TestOutputStyles(t *testing.T) {
 	st, _ := f.GetStyle(id)
 	if st.Fill.Color[0] != "FF0000" || len(st.Border) != 1 {
 		t.Errorf("B3 style %+v", st)
+	}
+	// Each border side keeps its own color; sides without one take border.color.
+	sides := func(cell string) map[string]string {
+		id, _ := f.GetCellStyle("A", cell)
+		st, _ := f.GetStyle(id)
+		m := map[string]string{}
+		for _, b := range st.Border {
+			m[b.Type] = fmt.Sprint(b.Style, " ", b.Color)
+		}
+		return m
+	}
+	if got := sides("A2"); !reflect.DeepEqual(got, map[string]string{"left": "2 2C3E50", "bottom": "1 E0E0E0"}) {
+		t.Errorf("A2 borders %v", got)
+	}
+	if got := sides("A3"); !reflect.DeepEqual(got, map[string]string{"left": "2 2C3E50", "bottom": "5 000000"}) {
+		t.Errorf("A3 borders %v", got)
 	}
 	if w, _ := f.GetColWidth("A", "A"); w != 12 {
 		t.Errorf("width %v", w)
@@ -282,6 +300,8 @@ func TestParseRejects(t *testing.T) {
 		"if without then":      strings.Replace(ok, "  - save: out", "  - if: 'true'\n  - save: out", 1),
 		"if unknown key":       strings.Replace(ok, "  - save: out", "  - {if: 'true', then: [], otherwise: []}\n  - save: out", 1),
 		"bad color":            strings.Replace(ok, "{Out: out}", "[{name: Out, from: out, styles: [{fill: red}]}]", 1),
+		"bad border side":      strings.Replace(ok, "{Out: out}", "[{name: Out, from: out, styles: [{border: {left: 'thin red'}}]}]", 1),
+		"bad border style":     strings.Replace(ok, "{Out: out}", "[{name: Out, from: out, styles: [{border: {left: 'wide #000000'}}]}]", 1),
 		"unknown style column": strings.Replace(ok, "{Out: out}", "[{name: Out, from: out, columns: [{header: A}], styles: [{columns: [B], fill: '#000000'}]}]", 1),
 		"bad sheet name":       strings.Replace(ok, "{Out: out}", "{'a/b': out}", 1),
 		"case-equal sheets":    strings.Replace(ok, "{Out: out}", "{Out: out, out: out}", 1),

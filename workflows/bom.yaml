@@ -345,19 +345,19 @@ output:
         - {when: InScope, columns: [sep], fill: "#000000"}
         - {when: InScope && Level0, columns: [Level, Part Number, Part Type, Description, Rev, BOM.Qty, BOM.UOM, BOM.Find Num, BOM.Ref Des, mfg, mpn, sep, block, forth, prio], fill: "#FFFF00"}
         - {when: 'InScope && HasIJK && !Level0 && ForthPN == "CREATE P/N" && !((Forbidden || Z1) && !Exempt)', columns: [forth], fill: "#FFFF00"}
-        - {when: InScope && (Forbidden || Z1) && !Exempt, columns: [mfg, mpn], fill: "#FF0000", font: {color: "#FFFFFF", bold: true}}
-        - {when: 'InScope && Priority == "MAIN"', columns: [prio], fill: "#0070C0", font: {color: "#FFFFFF", bold: true}}
-        - {when: 'InScope && Priority startsWith "SUB"', columns: [prio], fill: "#2E7D32", font: {color: "#FFFFFF", bold: true}}
-        - {when: InScope && Dup, columns: [prio], fill: "#000000", font: {color: "#FFFFFF", bold: true}}
+        - {when: InScope && (Forbidden || Z1) && !Exempt, columns: [mfg, mpn], fill: "#FF0000", font: {color: "#FFFFFF", bold: true, size: 10}}
+        - {when: 'InScope && Priority == "MAIN"', columns: [prio], fill: "#0070C0", font: {color: "#FFFFFF", bold: true, size: 10}}
+        - {when: 'InScope && Priority startsWith "SUB"', columns: [prio], fill: "#2E7D32", font: {color: "#FFFFFF", bold: true, size: 10}}
+        - {when: InScope && Dup, columns: [prio], fill: "#000000", font: {color: "#FFFFFF", bold: true, size: 10}}
         - {when: GroupEnd == true, columns: [Level, Part Number, Part Type, Description, Rev, BOM.Qty, BOM.UOM, BOM.Find Num, BOM.Ref Des, mfg, mpn, sep, block, forth, prio], border: {bottom: thick}}
 
     - name: debug
       like: BOM
       columns:
-        - {header: "", id: s1, value: '""', width: 2}
-        - {header: "", id: s2, value: '""', width: 2}
-        - {header: "", id: s3, value: '""', width: 2}
-        - {header: "", id: s4, value: '""', width: 2}
+        - {header: "", id: s1, value: '""', width: 2, header_style: {font: {bold: false, size: 11}}}
+        - {header: "", id: s2, value: '""', width: 2, header_style: {font: {bold: false, size: 11}}}
+        - {header: "", id: s3, value: '""', width: 2, header_style: {font: {bold: false, size: 11}}}
+        - {header: "", id: s4, value: '""', width: 2, header_style: {font: {bold: false, size: 11}}}
         - header: "Debug: Priority (P1)"
           id: p1
           width: 16
@@ -365,17 +365,25 @@ output:
           value: '!InScope ? "-" : PriorityValue == 1 ? "P1 (1.0)" : PriorityValue != nil ? "Val (" + str(PriorityValue) + ")" : "None"'
         - {header: "Debug: SAP Vendor Name", id: vname, value: '!InScope ? "-" : trim(VName) != "" ? trim(VName) : "No Vendor"', width: 28, header_style: {fill: "#2C3E50", font: {color: "#FFFFFF", bold: true}}}
         - {header: "Debug: SAP Vendor Code", id: vcode, value: '!InScope ? "-" : trim(VendorCode) != "" ? trim(VendorCode) : "-"', width: 16, header_style: {fill: "#2C3E50", font: {color: "#FFFFFF", bold: true}}}
-        - {header: "Debug: SAP Stock Qty", id: stock, value: 'InScope ? Stock : "-"', number_format: "#,##0", width: 16, header_style: {fill: "#2C3E50", font: {color: "#FFFFFF", bold: true}}}
+        - {header: "Debug: SAP Stock Qty", id: stock, value: 'InScope ? Stock : "-"', width: 16, header_style: {fill: "#2C3E50", font: {color: "#FFFFFF", bold: true}}}
         - {header: "Debug: Forth Material No", id: dforth, value: 'InScope ? ForthPN : OrigMfrPN', width: 20, header_style: {fill: "#2C3E50", font: {color: "#FFFFFF", bold: true}}}
         - {header: "Debug: Eligibility Status", id: elig, column: Eligible, width: 24, header_style: {fill: "#2C3E50", font: {color: "#FFFFFF", bold: true}}}
         - {header: "Debug: Decision Reason", id: reason, column: Reason, width: 48, header_style: {fill: "#2C3E50", font: {color: "#FFFFFF", bold: true}}}
         - {header: "Debug: Group ID", id: gid, value: 'InScope ? str(GroupID) : "-"', width: 12, header_style: {fill: "#2C3E50", font: {color: "#FFFFFF", bold: true}}}
-      styles:
-        - {columns: [p1, vname, vcode, stock, dforth, elig, reason, gid], font: {size: 9, color: "#212121"}, border: {left: thin, right: thin, top: thin, bottom: thin, color: "#E0E0E0"}}
-        - {when: GroupEnd == true, columns: [p1, vname, vcode, stock, dforth, elig, reason, gid], border: {bottom: thick, color: "#000000"}}
+      styles:   # debug columns: 9 pt, light grey grid, navy divider left of the first one
+        - {columns: [p1, vname, vcode, stock, dforth, elig, reason, gid], font: {size: 9, color: "#212121"}, border: {left: "thin #E0E0E0", right: "thin #E0E0E0", top: "thin #E0E0E0", bottom: "thin #E0E0E0"}}
+        - {columns: [p1], border: {left: "medium #2C3E50"}}
+        - {when: GroupEnd == true, columns: [p1, vname, vcode, stock, dforth, elig, reason, gid], border: {bottom: "thick #000000"}}
+        - {columns: [dforth, gid], font: {bold: true}}
+        - {when: '!InScope || PriorityValue == nil', columns: [p1], font: {color: "#9E9E9E"}}
+        - {when: '!InScope || trim(VName) in ["", "-", "No Vendor"]', columns: [vname], font: {color: "#9E9E9E"}}
+        - {when: '!InScope || trim(VendorCode) in ["", "-"]', columns: [vcode], font: {color: "#9E9E9E"}}
+        - {when: '!InScope || Stock <= 0', columns: [stock], font: {color: "#9E9E9E"}}
+        - {when: InScope, columns: [stock], number_format: "#,##0"}
         - {when: 'Eligible == "Eligible"', columns: [elig], fill: "#E8F5E9", font: {bold: true, color: "#2E7D32"}}
         - {when: 'Eligible contains "Ineligible" && Eligible not contains "Scope"', columns: [elig], fill: "#FFEBEE", font: {bold: true, color: "#C62828"}}
         - {when: '!InScope', columns: [elig], fill: "#F5F5F5", font: {color: "#757575"}}
+        - {when: 'Reason contains "Ineligible" || Reason contains "Scope"', columns: [reason], font: {color: "#757575"}}
         - {when: 'Reason startsWith "MAIN"', columns: [reason], fill: "#E3F2FD", font: {bold: true, color: "#1565C0"}}
         - {when: 'Reason startsWith "SUB"', columns: [reason], fill: "#F1F8E9", font: {color: "#33691E"}}
         - {when: 'InScope && PriorityValue == 1', columns: [p1], fill: "#FFF8E1", font: {bold: true, color: "#E65100"}}
