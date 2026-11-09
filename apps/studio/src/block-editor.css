@@ -1,10 +1,10 @@
 .block-editor {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 8px;
   min-height: 0;
   height: 100%;
-  padding: 20px;
+  padding: 8px;
   background: #f4f7fb;
   color: #20334d;
 }
@@ -16,7 +16,7 @@
 }
 .block-editor-heading h2 {
   margin: 0 0 5px;
-  font-size: 24px;
+  font-size: 13px;
   letter-spacing: -0.02em;
 }
 .block-editor-heading p {
@@ -32,7 +32,7 @@
   flex-wrap: wrap;
   gap: 12px 28px;
   color: #435a76;
-  font-size: 14px;
+  font-size: 12px;
   font-weight: 600;
 }
 .block-editor-guide span {
@@ -52,7 +52,7 @@
 .block-editor-note {
   margin: 0;
   color: #526781;
-  font-size: 14px;
+  font-size: 12px;
 }
 .block-editor-draft {
   display: flex;
@@ -78,7 +78,7 @@
   min-height: 160px;
   overflow: hidden;
   border: 1px solid #cdd9e8;
-  border-radius: 12px;
+  border-radius: 4px;
   background: #f7f9fd;
 }
 .block-editor-canvas {
@@ -127,7 +127,7 @@
 .block-editor .blocklyTreeRow,
 .block-editor .blocklyToolboxCategory {
   height: auto;
-  min-height: 42px;
+  min-height: 32px;
   display: flex;
   align-items: center;
   margin: 2px 6px;
@@ -137,13 +137,13 @@
 .block-editor .blocklyTreeLabel,
 .block-editor .blocklyToolboxCategoryLabel {
   font-family: inherit;
-  font-size: 16px;
+  font-size: 13px;
   font-weight: 600;
 }
 .block-editor .blocklyFlyoutLabelText,
 .block-editor .blocklyText {
   font-family: "Segoe UI", Inter, system-ui, sans-serif;
-  font-size: 17px;
+  font-size: 13px;
 }
 @media (max-width: 680px) {
   .block-editor {
@@ -158,3 +158,15 @@
     gap: 8px 16px;
   }
 }
+
+.block-editor-heading { align-items: center; padding: 0 4px; gap: 12px; }
+.block-editor-heading > div { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.block-editor-heading h2 { margin: 0; }
+.block-editor-heading p { font-size: 12px; }
+.block-editor-guide { padding: 10px 12px; background: white; border: 1px solid #dce5f0; border-radius: 5px; font-weight: 400; gap: 8px 20px; }
+.block-editor-guide b { width: 18px; height: 18px; }
+.block-context { display: flex; align-items: baseline; gap: 12px; padding: 7px 10px; background: #edf3ff; border-left: 2px solid #275ad5; font-size: 12px; line-height: 1.5; }
+.block-context strong { white-space: nowrap; }
+.block-editor .blocklyTreeRow, .block-editor .blocklyToolboxCategory { padding: 4px 8px !important; border-radius: 4px; }
+.block-editor-zoom { right: 80px; bottom: 16px; }
+.block-editor-zoom button { padding: 5px 9px; }

@@ -2,7 +2,7 @@
   font-family: "Segoe UI", Inter, system-ui, sans-serif;
   color: #20334d;
   background: #edf2f8;
-  font-size: 16px;
+  font-size: 13px;
 }
 * {
   box-sizing: border-box;
@@ -18,10 +18,10 @@ textarea {
 }
 button {
   border: 1px solid #becde0;
-  border-radius: 8px;
+  border-radius: 5px;
   background: white;
   color: #263d5c;
-  padding: 10px 14px;
+  padding: 6px 10px;
   cursor: pointer;
   font-weight: 600;
 }
@@ -54,7 +54,7 @@ label {
   display: block;
   margin-bottom: 16px;
   font-weight: 600;
-  font-size: 15px;
+  font-size: 13px;
 }
 label input,
 label select {
@@ -73,13 +73,13 @@ label select {
 }
 .app {
   height: 100dvh;
-  min-height: 620px;
+  min-height: 420px;
   display: flex;
   flex-direction: column;
 }
 .app > header {
-  min-height: 76px;
-  padding: 14px 24px;
+  min-height: 52px;
+  padding: 8px 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -105,7 +105,7 @@ label select {
   white-space: nowrap;
 }
 .brand strong {
-  font-size: 26px;
+  font-size: 16px;
   letter-spacing: -1px;
 }
 .brand strong span {
@@ -126,7 +126,7 @@ label select {
 }
 small,
 .mode {
-  font-size: 14px;
+  font-size: 12px;
 }
 .mode {
   color: #35735a;
@@ -137,7 +137,7 @@ small,
   background: #fff3d8;
   color: #71501b;
   border-bottom: 1px solid #e9d4ab;
-  font-size: 14px;
+  font-size: 12px;
   line-height: 1.5;
 }
 main {
@@ -151,7 +151,7 @@ aside {
   max-width: 420px;
   resize: horizontal;
   overflow: auto;
-  padding: 24px;
+  padding: 16px;
   background: #f7f9fc;
   border-right: 1px solid #ccd8e7;
   flex-shrink: 0;
@@ -170,7 +170,7 @@ aside button {
 }
 .path,
 .hint {
-  font-size: 14px;
+  font-size: 12px;
   line-height: 1.6;
   color: #526983;
   overflow-wrap: anywhere;
@@ -195,8 +195,8 @@ hr {
   flex-direction: column;
 }
 .documentbar {
-  min-height: 58px;
-  padding: 12px 24px;
+  min-height: 38px;
+  padding: 8px 16px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -209,12 +209,12 @@ hr {
   white-space: nowrap;
 }
 .state {
-  font-size: 14px;
+  font-size: 12px;
   color: #357153;
   white-space: nowrap;
 }
 nav {
-  min-height: 48px;
+  min-height: 36px;
   display: flex;
   align-items: stretch;
   background: white;
@@ -226,7 +226,7 @@ nav button {
   border-radius: 0;
   background: none;
   color: #516880;
-  font-size: 15px;
+  font-size: 13px;
 }
 nav button.active {
   border-bottom: 3px solid #275ad5;
@@ -236,10 +236,10 @@ nav > span {
   margin-left: auto;
   align-self: center;
   color: #526983;
-  font-size: 14px;
+  font-size: 12px;
 }
 .authoring-toolbar {
-  padding: 10px 20px;
+  padding: 6px 16px;
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
@@ -247,8 +247,8 @@ nav > span {
   border-bottom: 1px solid #cad6e6;
 }
 .authoring-toolbar button {
-  padding: 8px 12px;
-  font-size: 14px;
+  padding: 5px 9px;
+  font-size: 12px;
 }
 .editor {
   flex: 1;
@@ -291,7 +291,7 @@ nav > span {
 }
 .template-heading h2 {
   margin: 0 0 8px;
-  font-size: 26px;
+  font-size: 16px;
 }
 .template-heading p {
   color: #526983;
@@ -311,7 +311,7 @@ nav > span {
   flex-direction: column;
   align-items: flex-start;
   text-align: left;
-  padding: 24px;
+  padding: 16px;
   gap: 12px;
   border-radius: 12px;
 }
@@ -352,8 +352,8 @@ nav > span {
   z-index: 5;
 }
 .canvas-navigation button {
-  font-size: 14px;
-  padding: 8px 12px;
+  font-size: 12px;
+  padding: 5px 9px;
   box-shadow: 0 3px 14px #0002;
 }
 .react-flow__edge-path {
@@ -362,7 +362,7 @@ nav > span {
 }
 .react-flow__edge-text {
   fill: #20334d;
-  font-size: 15px;
+  font-size: 13px;
 }
 .react-flow__controls button {
   min-width: 36px;
@@ -387,17 +387,17 @@ nav > span {
   z-index: 5;
 }
 .step-inspector {
-  width: 350px;
-  min-width: 300px;
+  width: 320px;
+  min-width: 250px;
   max-width: 430px;
-  padding: 24px;
+  padding: 16px;
   overflow: auto;
   background: #f9fbfe;
   border-left: 1px solid #cad6e6;
   flex-shrink: 0;
 }
 .step-inspector > strong {
-  font-size: 20px;
+  font-size: 16px;
 }
 .step-inspector textarea {
   display: block;
@@ -405,7 +405,7 @@ nav > span {
   min-height: 120px;
   margin-top: 8px;
   font:
-    15px/1.6 ui-monospace,
+    13px/1.6 ui-monospace,
     monospace;
   resize: vertical;
 }
@@ -419,19 +419,19 @@ nav > span {
   height: 100%;
 }
 .source-help {
-  padding: 14px 24px;
+  padding: 8px 16px;
   background: #edf2fa;
   color: #405a7a;
-  font-size: 14px;
+  font-size: 12px;
 }
 .source-editor textarea {
   flex: 1;
   border: 0;
   border-radius: 0;
   resize: none;
-  padding: 24px;
+  padding: 16px;
   font:
-    16px/1.8 ui-monospace,
+    13px/1.7 ui-monospace,
     monospace;
   color: #d7e5fb;
   background: #132238;
@@ -457,10 +457,10 @@ nav > span {
   gap: 20px;
 }
 .library-heading strong {
-  font-size: 22px;
+  font-size: 16px;
 }
 .library-heading p {
-  font-size: 14px;
+  font-size: 12px;
   color: #526983;
   margin-top: 6px;
 }
@@ -486,7 +486,7 @@ nav > span {
 }
 .library-item strong {
   display: block;
-  font-size: 16px;
+  font-size: 13px;
   margin-bottom: 5px;
 }
 .library-item small {
@@ -494,7 +494,7 @@ nav > span {
   color: #526983;
   font-weight: 400;
   line-height: 1.5;
-  font-size: 14px;
+  font-size: 12px;
 }
 .workbook {
   height: 34vh;
@@ -521,7 +521,7 @@ nav > span {
 }
 .subtle {
   color: #526983;
-  font-size: 14px;
+  font-size: 12px;
   margin-left: 15px;
 }
 .data-tabs {
@@ -531,7 +531,7 @@ nav > span {
   flex-wrap: wrap;
 }
 .data-tabs button {
-  font-size: 14px;
+  font-size: 12px;
 }
 .inspectbar {
   display: flex;
@@ -562,7 +562,7 @@ nav > span {
 table {
   border-collapse: collapse;
   min-width: 100%;
-  font-size: 14px;
+  font-size: 12px;
 }
 th,
 td {
@@ -598,7 +598,7 @@ tbody th {
   background: none;
 }
 .cell-inspector {
-  padding: 10px 20px;
+  padding: 6px 16px;
   display: flex;
   align-items: flex-start;
   gap: 15px;
@@ -612,11 +612,11 @@ tbody th {
   overflow: auto;
 }
 .pager {
-  padding: 10px 20px;
+  padding: 6px 16px;
   display: flex;
   gap: 8px;
   align-items: center;
-  font-size: 14px;
+  font-size: 12px;
 }
 .pager span {
   margin-right: auto;
@@ -653,7 +653,7 @@ tbody th {
   display: flex;
   justify-content: space-between;
   gap: 20px;
-  padding: 10px 20px;
+  padding: 6px 16px;
   font-size: 13px;
   background: #f7f9fc;
   color: #526983;
@@ -680,7 +680,7 @@ tbody th {
   line-height: 1.6;
 }
 .discard-dialog h2 {
-  font-size: 22px;
+  font-size: 16px;
 }
 .discard-dialog button {
   margin-right: 10px;
@@ -698,7 +698,7 @@ tbody th {
   }
   .toolbar button {
     padding: 9px;
-    font-size: 14px;
+    font-size: 12px;
   }
   .step-inspector {
     width: 310px;
@@ -720,9 +720,58 @@ tbody th {
 .data-open .editor {
   min-height: 120px;
 }
-.next-action { padding: 8px 20px; background: #eef5ff; color: #314f78; font-size: 14px; }
+.next-action { padding: 8px 20px; background: #eef5ff; color: #314f78; font-size: 12px; }
 .next-action button { padding: 3px 8px; font-size: inherit; }
 .build-view { display: flex; gap: 4px; }
 .build-view button[aria-pressed="true"] { background: #eaf1ff; border-color: #275ad5; }
 .column-suggestions { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; }
 .column-suggestions button { padding: 4px 8px; font-size: 13px; }
+
+/* Workspace shell: compact chrome, independent panels, optional guidance. */
+:root { color-scheme: light; }
+.app > header { gap: 16px; }
+.brand strong { font-size: 19px; letter-spacing: -.6px; }
+.mark { width: 28px; height: 28px; border-radius: 7px; }
+.toolbar { gap: 6px; }
+.notice { padding: 5px 16px; font-size: 12px; }
+.documentbar { border-bottom: 1px solid #e3e8ef; }
+.documentbar strong { font-size: 13px; }
+.state { font-size: 11px; }
+nav { padding: 0 12px; }
+nav button.active { border-bottom-width: 2px; }
+.authoring-toolbar { align-items: center; gap: 5px; padding: 6px 12px; background: #fff; }
+.authoring-toolbar button { font-weight: 500; }
+.authoring-toolbar .focus-toggle { margin-left: auto; }
+.next-action { padding: 0 16px; background: #f7f9fc; font-size: 12px; border-bottom: 1px solid #e3e8ef; }
+.next-action summary { cursor: pointer; padding: 5px 0; color: #526983; }
+.next-action > div { padding: 4px 0 8px; }
+.focus-mode > header, .focus-mode > .notice, .focus-mode main > aside,
+.focus-mode .documentbar, .focus-mode nav, .focus-mode .next-action { display: none; }
+.step-inspector { resize: horizontal; }
+.editor { min-height: 120px; background: #f7f9fc; }
+.editor > .workflow-setup { flex: 0 0 auto; width: 280px; min-width: 230px; max-width: 40%; resize: horizontal; }
+.node-library { top: 130px; border-radius: 8px; padding: 16px; box-shadow: 0 12px 40px #08152e26; }
+.focus-mode .node-library { top: 42px; }
+.library-item { padding: 10px; }
+.library-item strong { font-size: 13px; }
+.library-item small { font-size: 12px; }
+.app > footer { padding: 5px 12px; font-size: 11px; }
+button[aria-expanded="true"] { border-color: #7794ce; background: #edf3ff; }
+@media (max-width: 900px) {
+  .app > header { align-items: flex-start; }
+  .toolbar button { font-size: 12px; padding: 6px 8px; }
+  main > aside { position: absolute; inset: 100px auto 28px 0; z-index: 30; width: 280px; box-shadow: 8px 0 30px #15253c20; }
+  .editor > .workflow-setup { position: absolute; inset: 0 auto 0 0; z-index: 25; max-width: 85%; box-shadow: 8px 0 30px #15253c20; }
+  .authoring-toolbar { flex-wrap: nowrap; overflow-x: auto; flex-shrink: 0; }
+  .authoring-toolbar button { white-space: nowrap; }
+}
+@media (max-width: 600px) {
+  .app > header { flex-direction: column; gap: 8px; }
+  .toolbar { justify-content: flex-start; }
+  .library-items, .template-grid { grid-template-columns: 1fr; }
+  .canvas-layout { flex-direction: column; overflow: auto; }
+  .canvas { min-height: 260px; }
+  .canvas-layout .step-inspector { width: 100%; max-width: none; }
+  .template-dialog { max-height: 90dvh; overflow: auto; padding: 16px; }
+  footer > span:last-child { display: none; }
+}

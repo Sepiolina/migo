@@ -48,6 +48,7 @@ export default function App() {
   const [packagePending, setPackagePending] = useState(false);
   const packagePendingRef = useRef(false);
   packagePendingRef.current = packagePending;
+  const [focusMode, setFocusMode] = useState(false);
   const [showProject, setShowProject] = useState(false);
   const [showData, setShowData] = useState(false);
   const [fullData, setFullData] = useState(false);
@@ -403,7 +404,7 @@ export default function App() {
   }
   const ready = isDesktop() && !!workspace && !busy && !packagePending;
   return (
-    <div className="app">
+    <div className={`app ${focusMode ? "focus-mode" : ""}`}>
       <header>
         <div className="brand">
           <b className="mark">M</b>
@@ -588,7 +589,7 @@ export default function App() {
                 : "● Edited · validate to check"}
             </span>
           </div>
-          <nav>
+          <nav aria-label="Editor views">
             <button
               className={tab === "blocks" ? "active" : ""}
               disabled={hasDraft}
@@ -637,7 +638,7 @@ export default function App() {
               )}
             </div>
           )}
-          <div className="next-action">
+          <details className="next-action"><summary>Workflow checklist</summary><div>
             <strong>Next:</strong>{" "}
             {!workspace ? (
               <button onClick={() => setShowProject(true)}>
@@ -656,8 +657,8 @@ export default function App() {
             ) : (
               <button onClick={() => setShowData(true)}>View results</button>
             )}
-          </div>
-          <div className="authoring-toolbar">
+          </div></details>
+          <div className="authoring-toolbar" role="toolbar" aria-label="Workflow tools">
             <button
               disabled={!document.canUndo || !!busy || hasDraft}
               onClick={document.undo}
@@ -708,7 +709,7 @@ export default function App() {
                   disabled={!!graph.error || !!busy || hasDraft}
                   onClick={() => setShowLibrary(!showLibrary)}
                   aria-expanded={showLibrary}
-                  title="Choose a node from the library"
+                  title="Browse steps with descriptions and configure their settings"
                 >
                   + Add step
                 </button>
@@ -751,6 +752,9 @@ export default function App() {
                 )}
               </>
             )}
+            <button className="focus-toggle" aria-pressed={focusMode} onClick={() => setFocusMode(!focusMode)} title="Hide navigation to give the editor more space">
+              {focusMode ? "Exit focus mode" : "Focus mode"}
+            </button>
           </div>
           {showLibrary && (
             <section className="node-library" aria-label="Node library">

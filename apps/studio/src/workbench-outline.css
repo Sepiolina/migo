@@ -2,18 +2,18 @@
   flex: 1;
   min-width: 0;
   overflow: auto;
-  padding: 24px;
+  padding: 16px;
   background: #f4f7fb;
 }
 .workbench-outline h2 {
   margin: 0;
-  font-size: 20px;
+  font-size: 15px;
 }
 .workbench-outline p {
   color: #526983;
 }
 .workbench-outline ol {
-  max-width: 720px;
+  max-width: 960px;
   padding-left: 2em;
 }
 .workbench-outline li {
@@ -53,3 +53,7 @@
     flex: none;
   }
 }
+
+.outline-step { padding: 12px 14px; border-color: #d8e1ec; border-radius: 6px; }
+.outline-step strong { font-size: 13px; }
+.outline-step span { line-height: 1.5; }
