@@ -1,10 +1,10 @@
 @echo off
-rem Builds a test folder in dist\ : the service, the migo CLI, the PM2
-rem ecosystem.config.js, config.json, start and smoke-test scripts, samples.
+rem Builds a deploy folder in dist\ : maiservice, config.json (holds the port)
+rem and a PM2 ecosystem.config.js that works on Linux and Windows.
 rem
 rem   build-dist.bat                    asks: 1) linux  2) windows  3) both
 rem   build-dist.bat windows            or: linux, all
-rem   build-dist.bat windows -arch arm64 -port 3090
+rem   build-dist.bat windows -arch arm64 -port 3090 -cli
 rem   build-dist.bat -os linux          the flags of: go run ./tools/dist
 rem
 rem Output: dist\maiservice-<os>-<arch>\  (config.json, uploads, outputs kept on rebuild)
@@ -38,7 +38,7 @@ go run ./tools/dist %OSARG%%REST%
 set "RC=%ERRORLEVEL%"
 if "%RC%"=="0" (
   echo.
-  echo Done. Open the folder under dist\ and read README.txt.
+  echo Done. Copy the folder under dist\ to the server and run: pm2 start ecosystem.config.js
 ) else (
   echo.
   echo Build failed with exit code %RC%.

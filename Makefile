@@ -13,7 +13,7 @@ help:
 	@echo 'make fmt         Format Go source files'
 	@echo 'make workflows   Validate the three example workflows without company services'
 	@echo 'make linux/windows  Cross-build a static service binary into dist/'
-	@echo 'make dist        Build a test folder with PM2 config (TARGET=linux|windows|all; asks if unset)'
+	@echo 'make dist        Build a deploy folder: binary, config.json, PM2 file (TARGET=linux|windows|all; asks if unset)'
 
 build:
 	$(GO) build -o maiservice ./cmd/maiservice

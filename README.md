@@ -264,11 +264,10 @@ that user. Configuration is decrypted with server-local `AGE_IDENTITY` and store
 with mode `0600`. Packages include their own `ecosystem.config.js`; the manual
 PM2 example below is an alternative for directly built binaries.
 
-## Build a test folder for Linux or Windows
+## Build a deploy folder for Linux or Windows
 
-One command builds a folder you can copy to a test machine and run, with the
-PM2 configuration and a smoke test included. It works the same in PowerShell
-and Linux shells:
+One command builds a folder you can copy to a server and run. It works the same
+in PowerShell and Linux shells:
 
 ```sh
 go run ./tools/dist
@@ -281,38 +280,31 @@ go run ./tools/dist -os linux
 ```
 
 Use `-os windows` or `-os all` for the other targets, `-arch arm64` for ARM
-servers and `-port 3090` for another port. On Linux, `make dist TARGET=linux`
-does the same.
+servers, `-port 3090` for the port written into a new `config.json`, and `-cli`
+to also build the `migo` workflow CLI. On Linux, `make dist TARGET=linux` does
+the same. On Windows you can also double-click `build-dist.bat`, or run
+`.\build-dist.bat windows` from a terminal.
 
-On Windows you can also double-click `build-dist.bat` in the repository folder.
-It asks for the target and keeps the window open at the end. From a terminal,
-give the target and any flags:
-
-```powershell
-.\build-dist.bat windows
-.\build-dist.bat linux -arch arm64
-```
-
-The result is `dist/maiservice-<os>-<arch>/`:
+The result is `dist/maiservice-<os>-<arch>/` with three files:
 
 | File | Purpose |
 | --- | --- |
 | `maiservice` / `maiservice.exe` | The HTTP service |
-| `migo` / `migo.exe` | The workflow CLI |
-| `config.json` | Local test settings with DB and SAP off. Kept when you rebuild |
-| `config.example.json` | Every config key with placeholder values |
-| `ecosystem.config.js` | PM2 process file. Its paths are relative to the folder |
-| `start.sh` / `start.cmd` | Runs the service in the foreground |
-| `smoke-test.sh` / `smoke-test.ps1` | Checks health, uploads the samples, downloads the result |
-| `samples/` | A small BOM and Priority workbook, plus `bom.yaml` for `migo` |
-| `README.txt` | These steps for the test machine |
+| `config.json` | All settings, **including the port**. Starts with DB and SAP off. Kept when you rebuild |
+| `ecosystem.config.js` | PM2 process file. Identical for Linux and Windows; it picks the right executable itself |
 
-On the test machine, from that folder, start the service with `./start.sh`,
-`start.cmd` or `pm2 start ecosystem.config.js`. While it runs, run the smoke
-test in a second terminal. Rebuilding replaces the binaries and generated files
-but keeps `config.json`, `uploads/`, `outputs/` and `workflows/`. For a real
-deployment, set the DB and SAP values in `config.json` and follow the PM2
-steps below.
+The port is set only in `config.json`; `ecosystem.config.js` does not repeat it.
+On the server, from that folder, run either:
+
+```sh
+./maiservice                 # foreground; finds config.json beside it (maiservice.exe on Windows)
+pm2 start ecosystem.config.js
+```
+
+`uploads/` and `outputs/` are created on first start. Rebuilding replaces the
+binary and `ecosystem.config.js` but keeps `config.json`, `uploads/`, `outputs/`
+and `workflows/`. For real use, set the DB and SAP values in `config.json`.
+`config.example.json` in the repository lists every key.
 
 ## Deploy on Linux with PM2
 
@@ -391,7 +383,7 @@ module.exports = {
     max_memory_restart: '650M',
     kill_timeout: 15000,
     time: true,
-    env: { PORT: '3081', GOMEMLIMIT: '400MiB' }
+    env: { GOMEMLIMIT: '400MiB' }   // the port comes from config.json
   }]
 };
 ```
