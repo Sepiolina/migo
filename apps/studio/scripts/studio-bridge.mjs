@@ -18,6 +18,12 @@ export function prepare() {
   execFileSync(process.env.MAI_GO || "go", ["build", "-mod=readonly", "-o", runner, "./cmd/mai-runner"], { cwd: repo, stdio: "inherit" });
   const workspace = join(dir, "project");
   for (const sub of ["workflows", "examples", "testdata"]) cpSync(join(repo, sub), join(workspace, sub), { recursive: true, filter: (p) => !p.endsWith(".go") });
+  // MAI_CRLF=1 checks the files as Git on Windows checks them out.
+  if (process.env.MAI_CRLF)
+    for (const f of readdirSync(join(workspace, "workflows"))) {
+      const file = join(workspace, "workflows", f);
+      writeFileSync(file, readFileSync(file, "utf8").replace(/\r?\n/g, "\r\n"));
+    }
   return { dir, runner, workspace };
 }
 

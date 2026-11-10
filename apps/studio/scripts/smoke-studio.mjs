@@ -65,7 +65,8 @@ try {
   await page.locator(".insp").getByLabel("Keep").selectOption("first");
   await page.getByRole("tab", { name: "YAML" }).click();
   const yaml = await page.getByLabel("Workflow YAML").inputValue();
-  const original = readFileSync(`${env.workspace}/workflows/bom.yaml`, "utf8");
+  // A text box reports LF; Git on Windows checks the file out with CRLF.
+  const original = readFileSync(`${env.workspace}/workflows/bom.yaml`, "utf8").replace(/\r\n/g, "\n");
   const changed = yaml.split("\n").filter((l, i) => l !== original.split("\n")[i]);
   assert.deepEqual(changed, ["  - dedupe: {by: [Key], keep: first}"]);
 

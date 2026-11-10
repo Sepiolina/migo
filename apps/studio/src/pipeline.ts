@@ -45,6 +45,10 @@ function finish(source: string, doc: Document.Parsed, commentsChanged = false): 
   const text = preserveText(lf(source), doc.toString(writeOptions), commentsChanged);
   return source.includes("\r\n") ? text.replace(/\n/g, "\r\n") : text;
 }
+/** Text typed into a text box comes back with LF; keep the file's own line endings. */
+export function keepLineEndings(previous: string, next: string): string {
+  return previous.includes("\r\n") ? next.replace(/\r?\n/g, "\r\n") : next;
+}
 /** Apply an edit to the YAML tree and return the new source. */
 export function edit(source: string, change: (doc: Document.Parsed) => void, commentsChanged = false): string {
   const doc = open(source);

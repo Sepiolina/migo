@@ -96,3 +96,4 @@ describe("Studio", () => {
     await waitFor(() => expect(document.querySelector(".nav .row.sel")?.textContent).toContain("Sort by Quantity, largest first"));
   });
 });
+

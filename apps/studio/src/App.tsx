@@ -3,7 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./studio.css";
 import { isDesktop, native, request, type Inspection, type RunResult, type Trace, type Validation } from "./api";
 import { useDocument } from "./useDocument";
-import { readPipeline, insertStep, addInput, expandSheets, addItem, type Pipeline } from "./pipeline";
+import { readPipeline, insertStep, addInput, expandSheets, addItem, keepLineEndings, type Pipeline } from "./pipeline";
 import { Navigator, type Selection } from "./Navigator";
 import { Inspector } from "./Inspector";
 import { DataGrid, profileRows, type ColumnAction } from "./DataGrid";
@@ -619,7 +619,7 @@ export default function App() {
           problems={problems}
           log={log}
           source={source}
-          onSource={(s) => change(s, "Edit YAML")}
+          onSource={(s) => change(keepLineEndings(source, s), "Edit YAML")}
           onGoTo={(id) => setSelection({ kind: "step", id })}
           open={consoleTab}
           onOpen={setConsoleTab}

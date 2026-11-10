@@ -7,6 +7,7 @@ import {
   duplicateAt,
   expandSheets,
   insertStep,
+  keepLineEndings,
   itemForm,
   moveAt,
   readForm,
@@ -122,6 +123,10 @@ describe("pipeline model", () => {
       }
       expect(parse(out), spec.op).toEqual(parse(src));
     }
+  });
+  it("keeps a file's line endings when text comes back from a text box", () => {
+    expect(keepLineEndings("a: 1\r\nb: 2\r\n", "a: 1\nb: 3\n")).toBe("a: 1\r\nb: 3\r\n");
+    expect(keepLineEndings("a: 1\n", "a: 2\n")).toBe("a: 2\n");
   });
   it("keeps CRLF line endings", () => {
     const crlf = bom.replace(/\r?\n/g, "\r\n");
