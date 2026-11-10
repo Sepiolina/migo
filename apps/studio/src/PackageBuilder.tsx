@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { native as invoke } from "./api";
 import "./package-builder.css";
 
 export type PackageProfile = {

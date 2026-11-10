@@ -72,7 +72,7 @@ fn authorize(request: &mut Value, root: Option<&Path>) -> Result<(), String> {
         .ok_or("Missing command")?;
     if !matches!(
         command,
-        "capabilities" | "validate" | "inspectWorkbook" | "run"
+        "capabilities" | "validate" | "inspectWorkbook" | "run" | "trace"
     ) {
         return Err("Unsupported runner command".into());
     }

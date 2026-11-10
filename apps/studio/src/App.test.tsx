@@ -1,462 +1,99 @@
 // @vitest-environment jsdom
-import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-} from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import type { Node } from "@xyflow/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { parse } from "yaml";
 import App from "./App";
+import type { StepTrace } from "./api";
 
-const native = vi.hoisted(() => ({
-  invoke: vi.fn(),
-  destroy: vi.fn(async () => {}),
-  closeRequested: undefined as
-    | undefined
-    | ((event: { preventDefault: () => void }) => void),
-}));
-vi.mock("@tauri-apps/api/core", () => ({ invoke: native.invoke }));
-// SVG rendering is checked in the browser smoke test. Keep the editor's draft
-// contract here so the app's file and navigation guards use actual state.
-vi.mock("./BlockEditor", () => ({
-  default: ({
-    onDraftChange,
-  }: {
-    onDraftChange: (pending: boolean) => void;
-  }) => (
-    <section aria-label="Workflow block editor">
-      <button onClick={() => onDraftChange(true)}>Disconnect a block</button>
-      <button onClick={() => onDraftChange(false)}>Discard block edits</button>
-    </section>
-  ),
-}));
-vi.mock("@tauri-apps/api/window", () => ({
-  getCurrentWindow: () => ({
-    destroy: native.destroy,
-    onCloseRequested: async (handler: typeof native.closeRequested) => {
-      native.closeRequested = handler;
-      return () => {};
+vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => ({ onCloseRequested: async () => () => undefined }) }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: async () => { throw new Error("no host"); } }));
+
+const col = (name: string, kind: "text" | "number" = "text") => ({ name, kind, filled: 2, distinct: 2 });
+/** A runner stand-in: the trace after each step of the parts template. */
+function bridge() {
+  const calls: { command: string; args?: Record<string, unknown> }[] = [];
+  const trace = (step: number): StepTrace[] =>
+    [0, 1, 2, 3].map((i) => ({
+      step: i,
+      name: ["from", "filter", "group", "save"][i],
+      line: i + 5,
+      columns: i < 2 ? [col("Part Number"), col("Description"), col("Quantity", "number")] : [col("Part Number"), col("Quantity", "number")],
+      total: i === 0 ? 4 : i === 1 ? 3 : 2,
+      rows: i === step ? [["00123", i < 2 ? "Resistor" : "5", "2"], ["00456", "Capacitor", "1"]] : undefined,
+      ms: 1,
+    }));
+  (window as unknown as { __maiBridge: unknown }).__maiBridge = {
+    invoke: async (command: string, args?: Record<string, unknown>) => {
+      calls.push({ command, args });
+      if (command === "choose_workspace") return { path: "/work" };
+      if (command === "list_workflows") return { paths: [] };
+      if (command === "runner_request") {
+        const req = (args as { request: { command: string; params: { step: number } } }).request;
+        if (req.command === "trace") return { ok: true, result: { steps: trace(req.params.step), format: "xlsx" } };
+        if (req.command === "validate") return { ok: true, result: { name: "x", inputs: [], sheets: [] } };
+      }
+      throw new Error(`unexpected ${command}`);
     },
-  }),
-}));
-// The graph library's layout requires a real browser. Preserve its selection
-// callback contract while exercising the actual editor and document lifecycle.
-vi.mock("@xyflow/react", () => ({
-  ReactFlow: ({
-    nodes,
-    onNodeClick,
-  }: {
-    nodes: Node[];
-    onNodeClick: (event: unknown, node: Node) => void;
-  }) => (
-    <div>
-      {nodes.map((node) => (
-        <button key={node.id} onClick={(event) => onNodeClick(event, node)}>
-          Select {node.id}
-        </button>
-      ))}
-    </div>
-  ),
-  Background: () => null,
-  Controls: () => null,
-  MiniMap: () => null,
-}));
-
-beforeEach(() => {
-  Object.defineProperty(window, "__TAURI_INTERNALS__", {
-    configurable: true,
-    value: {},
-  });
-  native.closeRequested = undefined;
-  native.destroy.mockClear();
-  native.invoke.mockReset();
-  native.invoke.mockImplementation(
-    async (command: string, args?: { source?: string }) => {
-      if (command === "choose_workspace") return { path: "/project" };
-      if (command === "list_workflows")
-        return { paths: ["workflows/other.yaml"] };
-      if (command === "save_workflow")
-        return {
-          path: "workflows/summary.yaml",
-          source: args?.source,
-          revision: "saved-revision",
-        };
-      throw new Error(`Unexpected native command ${command}`);
-    },
-  );
-});
-afterEach(cleanup);
-
-it("starts with blocks and protects incomplete edits from save, run, view changes, and close", async () => {
-  const user = userEvent.setup();
-  render(<App />);
-  await screen.findByRole("region", { name: "Workflow block editor" });
-  expect(screen.queryByLabelText("Workflow YAML source")).toBeNull();
-  await user.click(screen.getByRole("button", { name: "Project & inputs" }));
-  await user.click(screen.getByRole("button", { name: /Open workspace/ }));
-  await user.click(
-    await screen.findByRole("button", { name: "Disconnect a block" }),
-  );
-  for (const name of [
-    /Save workflow/,
-    /Run workflow/,
-    /Validate/,
-    "Workflow canvas",
-    "YAML source",
-  ]) {
-    expect(
-      (screen.getByRole("button", { name }) as HTMLButtonElement).disabled,
-    ).toBe(true);
-  }
-  await user.keyboard("{Control>}s{/Control}");
-  expect(
-    native.invoke.mock.calls.some(([command]) => command === "save_workflow"),
-  ).toBe(false);
-  const preventDefault = vi.fn();
-  act(() => native.closeRequested!({ preventDefault }));
-  expect(preventDefault).toHaveBeenCalledOnce();
-  await user.click(screen.getByRole("button", { name: "Keep editing" }));
-  await user.click(screen.getByRole("button", { name: "Discard block edits" }));
-  expect(
-    (screen.getByRole("button", { name: /Save workflow/ }) as HTMLButtonElement)
-      .disabled,
-  ).toBe(false);
-});
-
-it("creates a new unsaved workflow from a template without editing YAML", async () => {
-  const user = userEvent.setup();
-  render(<App />);
-  await user.click(screen.getByRole("button", { name: /New workflow/ }));
-  await user.click(screen.getByRole("button", { name: /Copy a worksheet/ }));
-  expect(
-    (screen.getByLabelText("Workflow display name") as HTMLInputElement).value,
-  ).toBe("Copy a worksheet");
-  expect(screen.getByText(/Copy a worksheet.*Unsaved/)).toBeTruthy();
-  expect(screen.queryByLabelText("Workflow YAML source")).toBeNull();
-  fireEvent.change(screen.getByLabelText("Workflow display name"), {
-    target: { value: "My workbook" },
-  });
-  expect(
-    (screen.getByRole("button", { name: "YAML source" }) as HTMLButtonElement)
-      .disabled,
-  ).toBe(true);
-  await user.click(
-    screen.getByRole("button", { name: "Apply workbook settings" }),
-  );
-  await user.click(screen.getByRole("button", { name: "YAML source" }));
-  expect(
-    (screen.getByLabelText("Workflow YAML source") as HTMLTextAreaElement)
-      .value,
-  ).toContain("name: My workbook");
-});
-
-async function openInspector() {
-  const user = userEvent.setup();
-  render(<App />);
-  await user.click(screen.getByRole("button", { name: "Project & inputs" }));
-  await user.click(screen.getByRole("button", { name: /Open workspace/ }));
-  await waitFor(() => expect(screen.getByText("/project")).toBeTruthy());
-  await user.click(screen.getByRole("button", { name: "Workflow canvas" }));
-  await user.click(screen.getByRole("button", { name: "Select step.0" }));
-  await user.click(screen.getByRole("button", { name: "Advanced YAML" }));
-  return user;
+  };
+  return calls;
 }
+const yaml = () => (screen.getByLabelText("Workflow YAML") as HTMLTextAreaElement).value;
 
-describe("unapplied argument protection", () => {
-  it("blocks stale saves/runs and navigation, retains invalid drafts when load/workspace/close are canceled", async () => {
-    const user = await openInspector();
-    fireEvent.change(screen.getByLabelText("Step argument"), {
-      target: { value: "invalid: [" },
-    });
-    expect(
-      (
-        screen.getByRole("button", {
-          name: /Save workflow/,
-        }) as HTMLButtonElement
-      ).disabled,
-    ).toBe(true);
-    expect(
-      (
-        screen.getByRole("button", {
-          name: /Run workflow/,
-        }) as HTMLButtonElement
-      ).disabled,
-    ).toBe(true);
-    expect(
-      (screen.getByRole("button", { name: "YAML source" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(true);
-    await user.click(screen.getByRole("button", { name: "Select step.1" }));
-    expect(
-      (screen.getByLabelText("Step argument") as HTMLTextAreaElement).value,
-    ).toBe("invalid: [");
-    await user.keyboard("{Control>}s{/Control}");
-    expect(
-      native.invoke.mock.calls.some(([command]) => command === "save_workflow"),
-    ).toBe(false);
-
-    await user.selectOptions(
-      screen.getByLabelText("Open workflow"),
-      "workflows/other.yaml",
-    );
-    expect(screen.getByRole("alertdialog")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Keep editing" }));
-    expect(
-      native.invoke.mock.calls.some(([command]) => command === "read_workflow"),
-    ).toBe(false);
-
-    await user.click(screen.getByRole("button", { name: /Change workspace/ }));
-    await user.click(screen.getByRole("button", { name: "Keep editing" }));
-    expect(
-      native.invoke.mock.calls.filter(
-        ([command]) => command === "choose_workspace",
-      ),
-    ).toHaveLength(1);
-
-    const preventDefault = vi.fn();
-    act(() => native.closeRequested!({ preventDefault }));
-    expect(preventDefault).toHaveBeenCalledOnce();
-    await user.click(screen.getByRole("button", { name: "Keep editing" }));
-    expect(native.destroy).not.toHaveBeenCalled();
-    expect(
-      (screen.getByLabelText("Step argument") as HTMLTextAreaElement).value,
-    ).toBe("invalid: [");
-
-    await user.click(screen.getByRole("button", { name: "Apply changes" }));
-    expect(screen.getByRole("alert")).toBeTruthy();
-    expect(
-      (screen.getByLabelText("Step argument") as HTMLTextAreaElement).value,
-    ).toBe("invalid: [");
-    await user.click(screen.getByRole("button", { name: "Discard changes" }));
-    expect(screen.queryByRole("alert")).toBeNull();
-    expect(
-      (
-        screen.getByRole("button", {
-          name: /Save workflow/,
-        }) as HTMLButtonElement
-      ).disabled,
-    ).toBe(false);
+describe("Studio", () => {
+  beforeEach(() => localStorage.clear());
+  afterEach(() => {
+    cleanup();
+    delete (window as unknown as { __maiBridge?: unknown }).__maiBridge;
   });
 
-  it("saves the applied argument and only closes after explicit discard confirmation", async () => {
-    const user = await openInspector();
-    fireEvent.change(screen.getByLabelText("Step argument"), {
-      target: { value: '"changed[Sheet]"' },
-    });
-    await user.click(screen.getByRole("button", { name: "Apply changes" }));
-    expect(
-      screen.queryByRole("button", { name: "Discard changes" }),
-    ).toBeNull();
-    await user.click(screen.getByRole("button", { name: /Save workflow/ }));
-    await waitFor(() =>
-      expect(native.invoke).toHaveBeenCalledWith(
-        "save_workflow",
-        expect.objectContaining({
-          source: expect.stringContaining('from: "changed[Sheet]"'),
-          expectedRevision: null,
-        }),
-      ),
-    );
-    fireEvent.change(screen.getByLabelText("Step argument"), {
-      target: { value: "another[Sheet]" },
-    });
-    const preventDefault = vi.fn();
-    act(() => native.closeRequested!({ preventDefault }));
-    expect(native.destroy).not.toHaveBeenCalled();
-    await user.click(
-      screen.getByRole("button", { name: "Discard changes and continue" }),
-    );
-    expect(preventDefault).toHaveBeenCalledOnce();
-    expect(native.destroy).toHaveBeenCalledOnce();
-  });
-});
-
-describe("optional Excel workspace", () => {
-  it("starts collapsed and preserves edited workflow source through open, expand, dock, and close", async () => {
-    const user = userEvent.setup();
+  it("opens a template in the browser preview and edits it through the inspector", async () => {
     render(<App />);
-    expect(
-      screen.queryByRole("complementary", { name: "Project and inputs" }),
-    ).toBeNull();
-    expect(
-      screen.queryByRole("region", { name: "Excel data panel" }),
-    ).toBeNull();
-    await user.click(screen.getByRole("button", { name: "YAML source" }));
-    const source = screen.getByLabelText(
-      "Workflow YAML source",
-    ) as HTMLTextAreaElement;
-    const edited = `# retain my workflow comment\n${source.value}`;
-    fireEvent.change(source, { target: { value: edited } });
-    await user.click(screen.getByRole("button", { name: "Excel data" }));
-    expect(
-      screen.getByRole("region", { name: "Excel data panel" }),
-    ).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Expand data" }));
-    expect(screen.getByRole("button", { name: "Dock panel" })).toBeTruthy();
-    expect(
-      (screen.getByLabelText("Workflow YAML source") as HTMLTextAreaElement)
-        .value,
-    ).toBe(edited);
-    await user.click(screen.getByRole("button", { name: "Dock panel" }));
-    await user.click(screen.getByRole("button", { name: "Close Excel data" }));
-    expect(
-      screen.queryByRole("region", { name: "Excel data panel" }),
-    ).toBeNull();
-    expect(
-      (screen.getByLabelText("Workflow YAML source") as HTMLTextAreaElement)
-        .value,
-    ).toBe(edited);
-    expect(native.invoke).not.toHaveBeenCalled();
+    expect(screen.getByText(/browser preview/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Summarize by group/ }));
+    const nav = screen.getByRole("complementary", { name: "Workflow" });
+    expect(within(nav).getByText("Keep rows where num(Quantity) > 0")).toBeTruthy();
+    fireEvent.click(within(nav).getByText("Keep rows where num(Quantity) > 0"));
+    const condition = screen.getByLabelText("Condition") as HTMLTextAreaElement;
+    fireEvent.change(condition, { target: { value: "num(Quantity) > 1" } });
+    fireEvent.blur(condition);
+    expect(parse(yaml()).steps[1].filter).toBe("num(Quantity) > 1");
+    expect(yaml()).toContain("  - filter: num(Quantity) > 1\n");
+    // Undo restores the source.
+    fireEvent.click(screen.getAllByRole("button", { name: "Undo" })[0]);
+    expect(parse(yaml()).steps[1].filter).toBe("num(Quantity) > 0");
+  });
+
+  it("adds steps from the command menu and documents the endpoint", async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /Summarize by group/ }));
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    fireEvent.change(screen.getByLabelText("Search commands"), { target: { value: "remove columns" } });
+    fireEvent.keyDown(screen.getByLabelText("Search commands"), { key: "Enter" });
+    expect(parse(yaml()).steps[1]).toEqual({ drop: ["Column"] });
+    fireEvent.click(screen.getByText("/api/parts-summary"));
+    expect(screen.getByText("/api/parts-summary/run")).toBeTruthy();
+    const route = screen.getByLabelText("Route /api/");
+    fireEvent.change(route, { target: { value: "parts" } });
+    fireEvent.blur(route);
+    expect(parse(yaml()).service).toEqual({ route: "parts" });
+    expect(screen.getByText("/api/parts/run")).toBeTruthy();
+  });
+
+  it("previews each step with the runner and turns column actions into steps", async () => {
+    const calls = bridge();
+    render(<App />);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Open folder…" })));
+    fireEvent.click(screen.getByRole("button", { name: /Summarize by group/ }));
+    const grid = await screen.findByRole("region", { name: "Rows" }, { timeout: 3000 });
+    expect(within(grid).getByText("Resistor")).toBeTruthy();
+    const trace = calls.find((c) => (c.args as { request?: { command: string } })?.request?.command === "trace")!;
+    expect((trace.args as { request: { params: { inputs: unknown } } }).request.params.inputs).toEqual({ parts: "examples/parts.xlsx" });
+    const header = within(grid).getAllByRole("button").find((b) => b.textContent?.includes("Quantity"))!;
+    fireEvent.click(header);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Sort largest first" }));
+    expect(parse(yaml()).steps[1]).toEqual({ sort: { by: ["Quantity"], desc: true, numeric: true } });
+    // The new step is selected and previewed in its turn.
+    await waitFor(() => expect(document.querySelector(".nav .row.sel")?.textContent).toContain("Sort by Quantity, largest first"));
   });
 });
 
-it("opens the separate package dialog and blocks native window close during a build", async () => {
-  const baseInvoke = native.invoke.getMockImplementation()!;
-  let resolveBuild: (result: unknown) => void = () => {};
-  native.invoke.mockImplementation(
-    (command: string, args?: { source?: string }) => {
-      if (command === "get_signing_identity")
-        return Promise.resolve({ available: false });
-      if (command === "build_linux_package")
-        return new Promise((resolve) => {
-          resolveBuild = resolve;
-        });
-      return baseInvoke(command, args);
-    },
-  );
-  const user = userEvent.setup();
-  render(<App />);
-  expect(
-    (
-      screen.getByRole("button", {
-        name: "Build Linux package",
-      }) as HTMLButtonElement
-    ).disabled,
-  ).toBe(true);
-  await user.click(screen.getByRole("button", { name: "Project & inputs" }));
-  await user.click(screen.getByRole("button", { name: /Open workspace/ }));
-  await user.click(screen.getByRole("button", { name: "Build Linux package" }));
-  await screen.findByText("No signing identity");
-  expect(
-    screen.getByRole("dialog", { name: "Build Linux package" }),
-  ).toBeTruthy();
-  await user.click(screen.getByRole("radio", { name: /Trusted local/ }));
-  await user.click(screen.getByRole("button", { name: "Build ZIP package" }));
-  const preventDefault = vi.fn();
-  act(() => native.closeRequested!({ preventDefault }));
-  expect(preventDefault).toHaveBeenCalledOnce();
-  expect(native.destroy).not.toHaveBeenCalled();
-  expect(screen.queryByRole("alertdialog")).toBeNull();
-  await act(async () =>
-    resolveBuild({
-      path: "dist/test.zip",
-      sha256: "abc",
-      arch: "amd64",
-      mode: "trusted",
-      files: [],
-      validation: { runtimeTested: false },
-    }),
-  );
-  await screen.findByText("Package created");
-  await user.click(
-    screen.getByRole("button", { name: "Close package builder" }),
-  );
-  await user.click(screen.getByRole("button", { name: "YAML source" }));
-  fireEvent.change(screen.getByLabelText("Workflow YAML source"), {
-    target: { value: "# unsaved" },
-  });
-  expect(
-    (
-      screen.getByRole("button", {
-        name: "Build Linux package",
-      }) as HTMLButtonElement
-    ).disabled,
-  ).toBe(true);
-});
-
-it("adds, edits, reorders, and deletes steps through the outline", async () => {
-  const user = userEvent.setup();
-  render(<App />);
-  await user.click(screen.getByRole("button", { name: /Add step/ }));
-  await user.type(screen.getByLabelText("Search steps"), "filter");
-  await user.click(
-    screen.getByRole("button", { name: /Filter rows Keep rows/ }),
-  );
-  expect(screen.getByRole("region", { name: "Step outline" })).toBeTruthy();
-  expect(
-    screen
-      .getByRole("button", { name: /Filter rows Keep every row/ })
-      .getAttribute("aria-pressed"),
-  ).toBe("true");
-  await user.click(screen.getByRole("button", { name: "Advanced YAML" }));
-  fireEvent.change(screen.getByLabelText("Step argument"), {
-    target: { value: '"num(Quantity) > 5"' },
-  });
-  expect(
-    (screen.getByRole("button", { name: "Move up" }) as HTMLButtonElement)
-      .disabled,
-  ).toBe(true);
-  await user.click(screen.getByRole("button", { name: "Apply changes" }));
-  await user.click(
-    screen.getByRole("button", {
-      name: /Filter rows Quantity is greater than 5/,
-    }),
-  );
-  await user.keyboard("{Alt>}{ArrowUp}{/Alt}");
-  expect(document.activeElement?.getAttribute("aria-pressed")).toBe("true");
-  await user.click(screen.getByRole("button", { name: "Project & inputs" }));
-  await user.keyboard("{Delete}{Alt>}{ArrowUp}{/Alt}");
-  expect(
-    screen
-      .getByRole("button", { name: /Filter rows Quantity is greater than 5/ })
-      .getAttribute("aria-pressed"),
-  ).toBe("true");
-  await user.click(screen.getByRole("button", { name: "YAML source" }));
-  const text = (
-    screen.getByLabelText("Workflow YAML source") as HTMLTextAreaElement
-  ).value;
-  expect(text.indexOf("num(Quantity) > 5")).toBeLessThan(
-    text.indexOf("save: summary"),
-  );
-  await user.click(screen.getByRole("button", { name: "Build" }));
-  await user.click(screen.getByRole("button", { name: "Delete step" }));
-  expect(document.activeElement?.getAttribute("aria-pressed")).toBe("true");
-  await user.click(screen.getByRole("button", { name: "Undo" }));
-  await user.click(screen.getByRole("button", { name: "YAML source" }));
-  expect(
-    (screen.getByLabelText("Workflow YAML source") as HTMLTextAreaElement)
-      .value,
-  ).toContain("num(Quantity) > 5");
-});
-
-it("reports successful output even when the run has no preview", async () => {
-  const user = userEvent.setup();
-  native.invoke.mockImplementation(async (command: string) => {
-    if (command === "choose_workspace") return { path: "/project" };
-    if (command === "list_workflows") return { paths: [] };
-    if (command === "runner_request")
-      return {
-        ok: true,
-        result: {
-          path: ".studio/runs/test/output.xlsx",
-          sha256: "abc123",
-          previewWarning: "Workbook exceeds preview limit",
-        },
-      };
-    throw new Error(command);
-  });
-  render(<App />);
-  await user.click(screen.getByRole("button", { name: "Project & inputs" }));
-  await user.click(screen.getByRole("button", { name: /Open workspace/ }));
-  await user.click(screen.getByRole("button", { name: /Run workflow/ }));
-  await screen.findByText("Workbook saved; preview unavailable");
-  expect(
-    screen.getByText(/Generated: .studio\/runs\/test\/output.xlsx/),
-  ).toBeTruthy();
-  expect(screen.getByText(/Run completed; workbook saved/)).toBeTruthy();
-});

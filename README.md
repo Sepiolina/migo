@@ -1,12 +1,13 @@
 # MaiService and Mai Studio
 
-**Mai Studio** is a Windows desktop developer app built with Tauri v2, React, and
-React Flow. Build workflows with snap-together blocks, validate them, run Excel
-fixtures, and inspect the generated workbook. A graph canvas and YAML remain
-available for advanced editing.
+**Mai Studio** is a desktop app (Tauri v2 and React) for building data workflows
+over Excel and CSV files. Pick a source, then work on the table: each column
+action or form edit becomes a step, and Studio runs the production engine on
+sample files so you see the data after every step. A workflow is one YAML file,
+and the same file is an API endpoint.
 
 **MaiService** runs those workflows as an HTTP microservice. Each workflow accepts
-Excel inputs and produces an Excel workbook. It runs on Windows for development
+`.xlsx`, `.xls` or `.csv` uploads and returns an Excel workbook or a CSV file. It runs on Windows for development
 and on Linux under PM2 for deployment. The `migo` CLI runs workflows without HTTP.
 
 See [current capabilities](docs/CURRENT_CAPABILITIES.md) for what works today,
@@ -89,36 +90,22 @@ Excel, validation, and execution features require the native desktop window.
 
 ### 3. Create and run a workflow
 
-For a complete starter with predictable results, follow the
-[customer order totals walkthrough](docs/MAI_STUDIO_USER_GUIDE.md#worked-example-customer-order-totals).
-Choose **Customer order totals** in **+ New workflow**, bind `orders` to the
-bundled `examples/orders.xlsx`, and run. It reads **Orders**, keeps positive
-quantities, calculates `Line total = Quantity × Unit price`, and groups by
-customer. The generated **Totals** sheet contains **Acme = 50** and **Beta = 5**.
-Save it under `workflows/` and bind your own workbook to reuse the starter;
-[examples/orders-totals.yaml](examples/orders-totals.yaml) is the matching YAML.
+1. On the home screen choose **Open folder…** and select the cloned `migo`
+   folder.
+2. Choose the **Customer order totals** template. Its source is bound to the
+   bundled `examples/orders.xlsx`, so the table shows data at once.
+3. Select the steps on the left to see the table after each one; click a column
+   header to add a step such as a sort or a filter.
+4. Press **Run** (⌘↵). The **Totals** output shows **Acme = 50** and
+   **Beta = 5**.
+5. Press **Save** (⌘S) and save it in `workflows/`. MaiService serves it at
+   `/api/<file name>`; select **Endpoint** for the request format and a `curl`
+   example, and **Build Linux package…** to distribute it.
 
-1. Open **Project & inputs**, select **Open workspace**, and choose the cloned
-   `migo` repository folder. Choose **+ New workflow**, then **Copy a worksheet**.
-2. In **Workbook setup**, set the workflow display name and input identifier and
-   label. Set the output sheet name and its saved table name, then choose **Apply
-   workbook settings**. The template uses input `parts` and saved table `result`.
-3. In **Blocks**, set **Read source** to the input identifier and enter a sheet
-   name if needed. Set **Save dataset as** to the output's saved table name.
-   Drag and snap additional steps or expressions into the workflow if desired.
-4. Choose **Validate**, then in **Project & inputs** bind the input to a workbook
-   relative to the workspace, such as `examples/parts.xlsx`. Choose **Run
-   workflow** and open **Excel data** to inspect the output.
-5. Check the **Save path** (for example `workflows/copy-workbook.yaml`) and choose
-   **Save workflow**. The parent folder must already exist. To deploy, save first
-   and choose **Build Linux package**; see the package instructions below.
-
-**Workflow canvas** provides a graph and guided step settings; **YAML source** is
-available for advanced definitions. Finish or discard incomplete block edits and
-apply or discard workbook setup changes before saving, running, switching views,
-or closing. Runs are offline: SQL and external HTTP calls are blocked. Generated
-workbooks are under `.studio/runs/`; input workbooks are read-only. See the
-[Studio user guide](docs/MAI_STUDIO_USER_GUIDE.md) for details and limitations.
+Runs are offline: SQL and REST steps are skipped. Generated files are under
+`.studio/runs/`; sources are read-only. See the
+[Studio user guide](docs/MAI_STUDIO_USER_GUIDE.md) for the editor, shortcuts and
+limitations.
 
 ### 4. Build a Windows installer
 
@@ -522,7 +509,7 @@ from the workflow definition. It does not implement Excel formula recalculation.
 Keep a copy of original inputs and verify representative outputs in Excel before
 using a new workflow in production.
 
-Interactive documentation: open [`docs/mai-studio-guide.html`](docs/mai-studio-guide.html) in a browser for the searchable, offline-friendly Mai Studio field guide, with platform setup tabs and a customer-totals walkthrough. The walkthrough illustrates the bundled fixture; real workflow execution requires the native app or CLI.
+Interactive documentation: [`docs/mai-studio-guide.html`](docs/mai-studio-guide.html) is an offline field guide with platform setup tabs. Its editor screenshots and walkthrough show the previous block editor; the [Studio user guide](docs/MAI_STUDIO_USER_GUIDE.md) describes the current one.
 
 Further reading: [Studio user guide](docs/MAI_STUDIO_USER_GUIDE.md),
 [workflow reference](docs/WORKFLOWS.md), [extending MaiService](docs/EXTENDING.md),

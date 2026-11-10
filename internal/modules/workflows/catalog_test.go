@@ -134,3 +134,29 @@ func TestRouteConflictsStopStartup(t *testing.T) {
 		}
 	}
 }
+
+func TestCSVEndpoint(t *testing.T) {
+	ts, dir := newServer(t, [2]string{"orders.yaml", `name: Orders
+input: {orders: {label: Orders}}
+steps:
+  - from: orders
+  - drop: [Note]
+  - save: out
+output:
+  format: csv
+  sheets: {Orders: out}
+`})
+	src := dir + "/orders.csv"
+	os.WriteFile(src, []byte("ID,Note\n1,a\n"), 0o600)
+	body, kind := multipartBody(t, map[string]string{"bam": "7"}, [2]string{"orders.csv", src})
+	resp, err := http.Post(ts.URL+"/api/orders/run", kind, body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != 200 || !strings.HasPrefix(resp.Header.Get("Content-Type"), "text/csv") ||
+		!strings.Contains(resp.Header.Get("Content-Disposition"), "orders_7.csv") || string(b) != "\xEF\xBB\xBFID\n1\n" {
+		t.Errorf("csv run %d %v %q", resp.StatusCode, resp.Header, b)
+	}
+}

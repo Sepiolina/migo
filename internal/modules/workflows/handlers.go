@@ -77,7 +77,7 @@ func (e *endpoint) receive(r *http.Request) (*request, error) {
 	return &request{
 		inputs:   inputs,
 		owner:    emp,
-		fileName: BuildOutputFilename(up.Files[pick[0]].Name, emp),
+		fileName: strings.TrimSuffix(BuildOutputFilename(up.Files[pick[0]].Name, emp), ".xlsx") + e.wf.Ext(),
 		done:     done,
 	}, nil
 }
@@ -143,7 +143,7 @@ func (e *endpoint) run(w http.ResponseWriter, r *http.Request) error {
 	if err := e.wf.Run(r.Context(), e.rt, req.inputs, tmp); err != nil {
 		return err
 	}
-	return serveWorkbook(w, r, tmp, req.fileName)
+	return serveWorkbook(w, r, tmp, req.fileName, e.wf.ContentType())
 }
 
 // Description is the JSON shape of a workflow in the catalog.
@@ -154,6 +154,7 @@ type Description struct {
 	Description string       `json:"description,omitempty"`
 	Inputs      []inputDesc  `json:"inputs"`
 	Sheets      []string     `json:"sheets"`
+	Format      string       `json:"format"`
 	Owner       ownerDesc    `json:"owner"`
 	MaxUploadMB int          `json:"maxUploadMB"`
 	Endpoints   endpointDesc `json:"endpoints"`
@@ -177,6 +178,7 @@ func (e *endpoint) description() Description {
 	d := Description{
 		Name: e.wf.Name, Route: e.name, File: e.file + ".yaml",
 		Description: e.wf.Service.Description,
+		Format:      e.wf.Format,
 		Owner:       ownerDesc{Field: e.wf.Service.OwnerField, Required: e.wf.Service.OwnerRequired},
 		MaxUploadMB: MaxUploadMB,
 		Inputs:      []inputDesc{},
@@ -255,10 +257,10 @@ func (e *endpoint) download(w http.ResponseWriter, r *http.Request) error {
 	if file == "" {
 		return httpx.Fail(http.StatusNotFound, "No output file found.")
 	}
-	return serveWorkbook(w, r, file, filepath.Base(file))
+	return serveWorkbook(w, r, file, filepath.Base(file), e.wf.ContentType())
 }
 
-func serveWorkbook(w http.ResponseWriter, r *http.Request, file, name string) error {
+func serveWorkbook(w http.ResponseWriter, r *http.Request, file, name, contentType string) error {
 	f, err := os.Open(file)
 	if err != nil {
 		return httpx.Fail(http.StatusNotFound, "No output file found.")
@@ -269,7 +271,7 @@ func serveWorkbook(w http.ResponseWriter, r *http.Request, file, name string) er
 		return err
 	}
 	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": name}))
-	w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+	w.Header().Set("Content-Type", contentType)
 	http.ServeContent(w, r, name, st.ModTime(), f)
 	return nil
 }

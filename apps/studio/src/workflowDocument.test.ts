@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { isMap } from "yaml";
-import { changeSteps, editArgument } from "./authoring";
+import { deleteAt, insertStep, moveAt, setValue } from "./pipeline";
 import {
   createWorkflowDocument,
   sourceTransaction,
@@ -23,7 +23,7 @@ describe("workflow document commands", () => {
     const edited = transition(
       state,
       sourceTransaction(source, "Change filter", (draft) =>
-        editArgument(draft, 0, '"false"'),
+        setValue(draft, ["steps", 0, "filter"], "false"),
       ),
     );
     expect(edited.present.cst.toJS().steps[0].filter).toBe("false");
@@ -40,7 +40,7 @@ describe("workflow document commands", () => {
     });
     const undone = transition(edited, { type: "undo" });
     const noop = sourceTransaction(source, "Move first up", (draft) =>
-      changeSteps(draft, "up", 0),
+      moveAt(draft, ["steps", 0], -1),
     );
     expect(transition(undone, noop)).toBe(undone);
     expect(transition(initial, { type: "undo" })).toBe(initial);
@@ -52,8 +52,8 @@ describe("workflow document commands", () => {
     const command = sourceTransaction(
       source,
       "Edit and move",
-      (draft) => editArgument(draft, 0, '"false"'),
-      (draft) => changeSteps(draft, "down", 0),
+      (draft) => setValue(draft, ["steps", 0, "filter"], "false"),
+      (draft) => moveAt(draft, ["steps", 0], 1),
     );
     const edited = transition(initial, command);
     expect(edited.past).toHaveLength(1);
@@ -90,8 +90,8 @@ describe("workflow document commands", () => {
       sourceTransaction(
         source,
         "Invalid edit",
-        (draft) => changeSteps(draft, "add"),
-        (draft) => editArgument(draft, 0, "["),
+        (draft) => insertStep(draft, ["steps"], 2, { save: "more" }),
+        (draft) => deleteAt(draft, ["nope", 0]),
       ),
     ).toThrow();
     expect(state.present.source).toBe(source);

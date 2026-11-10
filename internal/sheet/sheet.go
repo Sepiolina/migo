@@ -1,4 +1,5 @@
-// Package sheet reads .xlsx and .xls (BIFF8) workbooks into plain string grids
+// Package sheet reads .xlsx and .xls (BIFF8) workbooks, and CSV files as a
+// one-sheet workbook, into plain string grids
 // that match what the Node service saw through
 //
 //	XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' })
@@ -35,7 +36,7 @@ type Workbook interface {
 }
 
 // ErrUnsupported is returned for files that are neither .xlsx nor BIFF8 .xls.
-var ErrUnsupported = errors.New("unsupported file format: expected an Excel .xlsx or .xls (97-2003) workbook")
+var ErrUnsupported = errors.New("unsupported file format: expected an Excel .xlsx or .xls (97-2003) workbook, or a CSV file")
 
 // Open sniffs the file's magic bytes (uploads are stored without an
 // extension, and clients routinely mislabel .xls/.xlsx) and opens it.
@@ -53,7 +54,22 @@ func Open(path string) (Workbook, error) {
 	case n >= 8 && magic == [8]byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1}:
 		return openXLS(path)
 	}
+	if isText(path) {
+		return openCSV(path)
+	}
 	return nil, ErrUnsupported
+}
+
+// isText reports whether the file starts like plain text (CSV, TSV...).
+func isText(path string) bool {
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	defer f.Close()
+	prefix := make([]byte, 4096)
+	n, _ := io.ReadFull(f, prefix)
+	return looksLikeText(prefix[:n])
 }
 
 // cellEntry is one non-empty cell at an absolute (0-based) position.

@@ -40,6 +40,7 @@ type Workflow struct {
 	Inputs  []Input // upload order
 	Sheets  []*SheetSpec
 	Service Service // how the HTTP service exposes it
+	Format  string  // output file format: "xlsx" (default) or "csv"
 	steps   []step
 }
 
@@ -97,7 +98,7 @@ func init() {
 		"from": compileFrom, "save": compileSave, "log": compileLog, "fail": compileFail,
 		"select": tableStep(compileSelect), "rename": tableStep(compileRename),
 		"filter": tableStep(compileFilter), "set": tableStep(compileSet),
-		"fill": tableStep(compileFill), "dedupe": tableStep(compileDedupe),
+		"fill": tableStep(compileFill), "dedupe": tableStep(compileDedupe), "drop": tableStep(compileDrop),
 		"group": tableStep(compileGroup), "sort": tableStep(compileSort),
 		"join": tableStep(compileJoin), "append": tableStep(compileAppend),
 		"compare": tableStep(compileCompare), "stack": tableStep(compileStack),
@@ -125,6 +126,7 @@ type document struct {
 	Steps   yaml.Node `yaml:"steps"`
 	Service yaml.Node `yaml:"service"`
 	Output  struct {
+		Format string    `yaml:"format"`
 		Sheets yaml.Node `yaml:"sheets"`
 	} `yaml:"output"`
 }
@@ -165,6 +167,16 @@ func Parse(data []byte) (*Workflow, error) {
 	}
 	if len(wf.Sheets) == 0 {
 		return nil, fmt.Errorf("output.sheets must name at least one sheet")
+	}
+	switch wf.Format = strings.ToLower(strings.TrimSpace(doc.Output.Format)); wf.Format {
+	case "", "xlsx":
+		wf.Format = "xlsx"
+	case "csv":
+		if len(wf.Sheets) != 1 {
+			return nil, fmt.Errorf("output.format csv writes one table: name exactly one sheet")
+		}
+	default:
+		return nil, fmt.Errorf("output.format %q: use xlsx or csv", doc.Output.Format)
 	}
 	for _, sh := range wf.Sheets {
 		if !sc.saved[sh.From] {
@@ -251,7 +263,21 @@ func (wf *Workflow) Run(ctx context.Context, rt Runtime, inputs map[string]strin
 	if err := runSteps(ctx, s, wf.steps); err != nil {
 		return err
 	}
+	if wf.Format == "csv" {
+		return writeCSV(ctx, out, wf.Sheets[0], s)
+	}
 	return writeWorkbook(ctx, out, wf.Sheets, s)
+}
+
+// Ext is the output file extension, with the dot.
+func (wf *Workflow) Ext() string { return "." + wf.Format }
+
+// ContentType is the MIME type of the output file.
+func (wf *Workflow) ContentType() string {
+	if wf.Format == "csv" {
+		return "text/csv; charset=utf-8"
+	}
+	return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 }
 
 // Assign pairs uploaded file names with the inputs: inputs with a Match

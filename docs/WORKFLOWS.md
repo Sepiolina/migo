@@ -118,6 +118,11 @@ dataset) and `sheets("input")` (an input's sheet names).
 Cells hold text, numbers, `true`/`false` or nothing (`nil`). Sheets are read
 as text.
 
+**Inputs** may be `.xlsx`, `.xls` (Excel 97–2003) or CSV. A CSV file is a
+workbook with one sheet, `Sheet1`; its delimiter (comma, semicolon, tab or `|`)
+is detected from the first line, and text that is not UTF-8 is read as
+Windows-1252.
+
 ## Steps
 
 ### Reading
@@ -151,6 +156,7 @@ as text.
 | `select` | `{New: Source, ...}` | keep only these columns, renamed and in this order |
 | `rename` | `{Old: New, ...}` or `'<expression of name>'` | rename columns, e.g. `'lower(name)'` |
 | `fill` | `[Col, ...]` | fill blank cells from the row above |
+| `drop` | `[Col, ...]` | remove these columns |
 | `dedupe` | `[Col, ...]` or `{by: [..], keep: first\|last, normalize: false}` | one row per key |
 | `sort` | `{by: [Col, ...], desc: false, numeric: false}` | stable sort |
 | `group` | `{by: [Key], sum: [..], count / mean / min / max / first / last / join: [..]}` | one row per key; without `by`, one row in total |
@@ -259,6 +265,10 @@ output:
 ```
 
 The short form `sheets: {Name: dataset}` writes every column as is.
+
+`output.format: csv` writes the one named sheet as a UTF-8 CSV file instead
+of a workbook (columns, headers and `value`s apply; styles do not). The
+endpoints then return `text/csv` and name the file `<input>_<owner>.csv`.
 
 ## The BOM workflow
 

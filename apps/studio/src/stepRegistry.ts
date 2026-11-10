@@ -1,12 +1,11 @@
 /**
  * The Studio step registry: one declaration per workflow step or nested item.
  *
- * Every block on the canvas, every toolbox entry, the step library and the
- * selected-block inspector are generated from these specs, and the generic
- * codec in blocklyWorkflow.ts reads and writes YAML from them. To make a new
- * Go step editable as blocks, add one entry to `steps` (see
- * docs/MAI_STUDIO_DEVELOPMENT.md, "Add a step to Studio"). Unknown or
- * unrepresentable steps still round-trip intact as preserved blocks.
+ * The step list, the add-step menu, the inspector forms and the column menu
+ * are generated from these specs, and pipeline.ts reads and writes YAML from
+ * them. To make a new Go step editable in Studio, add one entry to `steps`
+ * (see docs/MAI_STUDIO_DEVELOPMENT.md, "Add a step to Studio"). A step Studio
+ * has no spec for still opens, shows its YAML and is saved unchanged.
  */
 
 /** Where an expression runs, which decides the variables it can see. */
@@ -15,7 +14,7 @@ export type ExpressionScope = "row" | "table" | "name";
 interface Base {
   /** The YAML key of the field inside the step argument (or item map). */
   key: string;
-  /** The Blockly field or input name; unique within a block. */
+  /** The form field name; unique within a step. */
   name: string;
   /** The label shown before the field on the canvas. */
   label: string;
@@ -44,9 +43,9 @@ export type Field =
       boolean?: boolean;
     })
   | (Base & { kind: "expr"; scope: ExpressionScope; condition?: boolean })
-  /** A map edited as a stack of `item` blocks (key and value per block). */
+  /** A map edited as rows of `item` entries (a key and a value per row). */
   | (Base & { kind: "entries"; item: string; rest?: boolean })
-  /** A list of maps edited as a stack of `item` blocks. */
+  /** A list of maps, each edited as an `item` sub-form. */
   | (Base & { kind: "items"; item: string })
   /** A nested list of steps (if/then/else, split). */
   | (Base & { kind: "steps" })
@@ -65,10 +64,10 @@ export type Category =
 export interface StepSpec {
   /** The YAML step name. */
   op: string;
-  /** The Blockly block type. */
+  /** A stable id for the step kind. */
   type: string;
   title: string;
-  /** The block's first line. */
+  /** A short heading. */
   heading: string;
   category: Category;
   icon: string;
@@ -94,7 +93,7 @@ export interface StepSpec {
   service?: boolean;
 }
 
-/** A nested block: one map entry, or one map inside a list. */
+/** A nested item: one map entry, or one map inside a list. */
 export interface ItemSpec {
   type: string;
   /** The inspector title. */
@@ -413,7 +412,7 @@ export const steps: StepSpec[] = [
     category: "Data",
     icon: "↳",
     description: "Start with an input workbook or a saved table.",
-    help: "Use an input identifier from Workbook setup, or a saved table name. Choose a sheet name or number (starting at 1). Leave the name blank for the first sheet.",
+    help: "Starts the table from a source or a table saved earlier. Leave the sheet blank for the first sheet; a number counts from 1. A CSV file has one sheet, Sheet1.",
     form: "map",
     fields: [
       text("input", "source", { name: "SOURCE" }),
@@ -451,7 +450,7 @@ export const steps: StepSpec[] = [
     category: "Data",
     icon: "▣",
     description: "Keep a copy of the current table for later steps or output sheets.",
-    help: "Keep the current table with this name. Use the same name in Workbook setup for an output sheet.",
+    help: "Keeps a copy of the current table under this name, for lookups and output sheets. It cannot share a name with a source.",
     form: "map",
     scalar: "",
     fields: [text("", "", { name: "NAME" })],
@@ -479,7 +478,7 @@ export const steps: StepSpec[] = [
     category: "Data",
     icon: "⋈",
     description: "Add columns from a saved table by matching keys.",
-    help: "Choose a table saved by an earlier block. Separate matching column titles with commas. Take chooses and names the added columns.",
+    help: "Adds columns from a table saved earlier where the key columns match. Take chooses and names the added columns; rows without a match get blanks.",
     form: "map",
     fields: [
       text("with", "", { name: "WITH" }),
@@ -510,7 +509,7 @@ export const steps: StepSpec[] = [
     category: "Rows",
     icon: "◇",
     description: "Keep rows that match a condition.",
-    help: "Keep only rows whose connected condition is true. Use a comparison from Logic and column values from Values.",
+    help: "Keeps the rows where the condition is true, for example Quantity > 0 or Status != \"Cancelled\".",
     form: "map",
     scalar: "",
     fields: [expr("", "", "row", { name: "VALUE", condition: true })],
@@ -623,7 +622,7 @@ export const steps: StepSpec[] = [
     category: "Columns",
     icon: "ƒ",
     description: "Create or update columns with expressions, in order.",
-    help: "Create or replace columns. Snap a number, text, column or calculation into each value socket. prev(\"Col\") reads the row above.",
+    help: "Creates or replaces columns, in order, so later ones can use earlier ones. prev(\"Col\") reads the row above.",
     form: "entries",
     fields: [entries("", "", "mai_assign")],
     example: '{Column: "\\"\\""}',
@@ -663,6 +662,20 @@ export const steps: StepSpec[] = [
     icon: "↓",
     description: "Fill blank cells from the row above.",
     help: "Column titles separated by commas. A blank cell takes the last non-blank value above it.",
+    form: "map",
+    list: "",
+    fields: [list("", "", { name: "COLUMNS" })],
+    example: "[Column]",
+  },
+  {
+    op: "drop",
+    type: "mai_drop",
+    title: "Remove columns",
+    heading: "Remove columns",
+    category: "Columns",
+    icon: "−",
+    description: "Remove columns from the table.",
+    help: "Column titles separated by commas. Later steps no longer see them.",
     form: "map",
     list: "",
     fields: [list("", "", { name: "COLUMNS" })],
@@ -863,7 +876,7 @@ export const stepByOp = new Map(steps.map((s) => [s.op, s]));
 export const stepByType = new Map(steps.map((s) => [s.type, s]));
 export const itemByType = new Map(items.map((s) => [s.type, s]));
 
-/** The fields of a step or object item block. */
+/** The fields of a step or item. */
 export function fieldsOf(type: string): Field[] {
   const step = stepByType.get(type);
   if (step) return step.fields;

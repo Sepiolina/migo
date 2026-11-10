@@ -22,103 +22,52 @@ execute a workflow from the command line without starting a server.
 
 ### Workspace and workflow files
 
-- Choose a local project folder through the native desktop picker.
-- Discover YAML workflows under `workflows/`, or open another workspace-relative
-  YAML path, such as `examples/parts-summary.yaml`.
-- Create a workflow from **Copy a worksheet**, **Filter and summarize**, or **Customer order totals**, then
-  save to an unused `.yaml` or `.yml` path. The parent directory must already exist.
-- Save changes with file revision checks. If another program changed the file,
-  Studio rejects the overwrite and keeps the editor contents for recovery or Save As.
-- Undo and redo source/step edits within the current session.
-- Receive unsaved-work prompts when switching documents, changing workspaces, or
-  closing the native window. Unapplied settings block conflicting actions.
+- Choose a local project folder; Studio lists the workflows in `workflows/` with
+  the route each is served at.
+- Start from templates: Clean a sheet, Summarize by group, Look up and enrich
+  (Excel + CSV), Customer order totals, Excel to CSV, Blank.
+- Save with file revision checks; a conflict keeps your edits.
+- Undo and redo every edit, with the selection restored.
+- Unsaved-work prompts when switching workflows or closing the window.
 
-Workflow saves use temporary files and atomic replacement. File access is scoped
-to the selected workspace, with path and symlink checks. These protections do not
-replace operating-system permissions or backups. There is no autosave, crash
-recovery store, collaboration, or persisted input-binding profile yet.
+There is no autosave or collaboration. Sample-file bindings are remembered per
+workflow on the computer, not in the YAML.
 
-### Visual editors
+### Editing
 
-**Blocks** is the default editor. Blockly provides a snap-together typed step
-chain and expression blocks for conditions and calculations. Common steps include
-reading, filtering, setting, renaming and selecting columns, sorting, grouping,
-joining, removing duplicates, and saving datasets. Workbook setup edits the
-workflow name, input identifiers and labels, and output sheet and saved table
-names while preserving advanced settings such as styles. Changing identifiers
-requires updating matching blocks. Incomplete or disconnected blocks and pending
-workbook setup changes must be completed or discarded before saving, running,
-switching views, or closing; invalid setup cannot be applied.
+- A steps navigator lists sources, every step (nested `if`/`split` branches
+  indented, YAML comments as section notes) and outputs, with each step's effect.
+- The table shows the data after the selected step, computed by the Go engine on
+  the sample files, with a profile on every column.
+- Column actions (sort, filter, dedupe, fill, convert, trim, group, rename,
+  remove) add steps.
+- The inspector edits every engine step, nested pick rules, output columns and
+  styles, and the service settings; formulas are text with column chips.
+- The command menu (⌘K) adds steps and reaches every command.
+- The console shows problems from the parser and the preview, the run log and
+  the editable YAML.
+- Light and dark appearance; a compact layout and a phone layout.
 
-Every engine step has a block, including `if`/`split` branches, `window`,
-`pick` rules, `sql`, `rest`, header detection, output sheets, columns and
-conditional styles, and the `service` settings: `workflows/bom.yaml` opens with no
-preserved steps. Expressions beyond simple comparisons and arithmetic open as
-editable ƒx code blocks; select a block to edit its settings, SQL and expressions
-in the inspector. Unknown steps and shapes a block cannot show are preserved as
-opaque blocks. Complex branching and other advanced
-shapes use **YAML source**. Comma-separated list fields cannot represent a single
-name containing a comma; unsupported existing shapes are preserved. Column value
-blocks offer number and text conversion; Go determines runtime types and behavior.
-
-**Build → Step outline** offers the same ordered workflow through readable step
-buttons and the guided inspector, with move-up/down and delete controls. **Add
-step** searches the operation catalog and appends a step, then opens its settings.
-Nested branches retain their source fallback. The next-action strip points to
-project setup, validation, running, and results; successful runs open Excel data.
-Column suggestions use an inspected first-row header and supported upstream
-transformations. They are advisory; unknown schemas still need manual names.
-The **Orders totals** starter and `examples/orders.xlsx` provide a complete
-filter/calculate/group/export walkthrough with expected totals Acme 50 and Beta 5.
-
-**Overview** (the workflow canvas) remains available as a second view, with ordered graph cards,
-a searchable node library and guided top-level settings. Canvas connections show
-execution flow; they are not manually editable wires. Guided settings preserve
-options outside their controls and offer **Advanced YAML** for unsupported shapes.
-Go remains the authority for validation and execution.
+Every step of `workflows/bom.yaml` is editable. Edits change only the lines they
+touch and keep comments and CRLF line endings.
 
 ### Validation and execution
 
-- Validate with the production Go parser/compiler, including workflow structure,
-  expression compilation, and declared references.
-- Bind named workflow inputs to Excel files inside the workspace.
-- Execute using the same workflow engine as the service.
-- Run offline: both unconditional and conditional external SQL/HTTP operations
-  remain unavailable in the desktop runner. Turning a workflow flag on does not
-  enable live desktop connections.
-- Generate `.xlsx` output under `.studio/runs/<run-id>/output.xlsx` and show its
-  path and SHA-256 hash. If preview inspection fails or exceeds the response
-  budget, the successful output remains available with a preview warning.
-- Mark output stale when the workflow source, workspace, or bindings change.
+- Validation with the production parser after each edit.
+- A step-by-step preview (offline trace) after each edit, with rows for the
+  selected step and profiles for all.
+- **Run** writes `.studio/runs/<run>/output.xlsx` or `output.csv` and shows it.
+- Runs are offline: SQL and REST steps are skipped.
 
-Validation cannot prove that every expression will succeed for every input row.
-Execution is needed to catch data-dependent problems. Changes to workbook file
-contents outside Studio are not currently monitored for stale-result detection.
-There is no Cancel button or per-step execution trace yet; native requests have
-a bounded timeout and supervised child processes.
+Preview limits: 25 MiB per file, 64 MiB expanded for XLSX, 200 rows per table
+(profiles cover every row). There is no cancel button; native requests have a
+bounded timeout.
 
-### Excel inspection
+### Endpoint and distribution
 
-The **Excel data** panel is closed by default. Open it to inspect data, expand it
-for a larger view, dock it again, or close it without changing the workflow.
-
-- Shortcuts to bound inputs and the generated output workbook.
-- Workbook path entry, sheet selection, and previous/next paging.
-- Read-only cell values, row numbers, and a cell inspector for complete text.
-- Preview of the actual generated output artifact, rather than a second workbook
-  independently rendered by the frontend.
-- Input support for `.xlsx` and Excel 97–2003 BIFF8 `.xls`; output is `.xlsx`.
-
-The current preview is **value-oriented**, not pixel-identical to Excel. It does
-not reproduce full workbook styling, charts, merged-cell layouts, macros, or
-formula recalculation. Workbook editing and intermediate-step tables are not
-available. Inspect the generated file in Excel when final formatting matters.
-
-Desktop workbook inspection limits files to 25 MiB, including generated output
-previews. It checks XLSX ZIP expansion against a 64 MiB limit and bounds protocol
-frames and preview pages.
-The UI requests 100 rows per page. Paging limits the response size; it is not a
-guarantee that workbook parsing itself uses constant memory.
+The Endpoint page sets the route, description, requester-id field, upload limit
+and output format, and documents the endpoints with a `curl` example. **Build
+Linux package…** builds the signed Linux service package.
 
 ## Workflow engine and migo CLI
 

@@ -41,6 +41,8 @@ type Params struct {
 	Offset    int               `json:"offset"`
 	Limit     int               `json:"limit"`
 	Inputs    map[string]string `json:"inputs"`
+	Step      *int              `json:"step"` // trace: the step whose rows are returned
+	Skip      []int             `json:"skip"` // trace: steps to leave out
 }
 type Failure struct {
 	Code    string `json:"code"`
@@ -117,7 +119,7 @@ func execute(ctx context.Context, req Request) (any, error) {
 	p := req.Params
 	switch req.Command {
 	case "capabilities":
-		return map[string]any{"version": Version, "commands": []string{"capabilities", "validate", "inspectWorkbook", "run", "buildPackage"}, "offlineOnly": true, "maxFrameBytes": MaxFrameBytes}, nil
+		return map[string]any{"version": Version, "commands": []string{"capabilities", "validate", "inspectWorkbook", "run", "trace", "buildPackage"}, "offlineOnly": true, "maxFrameBytes": MaxFrameBytes}, nil
 	case "validate":
 		wf, err := workflow.Parse([]byte(p.YAML))
 		if err != nil {
@@ -139,6 +141,8 @@ func execute(ctx context.Context, req Request) (any, error) {
 		return inspect(path, p)
 	case "run":
 		return run(ctx, p)
+	case "trace":
+		return trace(ctx, p)
 	case "buildPackage":
 		return deploy.Build(ctx, p.Workspace, p.Build)
 	default:
@@ -305,6 +309,76 @@ func run(ctx context.Context, p Params) (any, error) {
 	return runWithInspect(ctx, p, inspect)
 }
 
+// resolveInputs checks every declared input is bound to a file in the workspace.
+func resolveInputs(wf *workflow.Workflow, root string, bound map[string]string) (map[string]string, error) {
+	inputs := make(map[string]string, len(bound))
+	for _, input := range wf.Inputs {
+		if bound[input.Name] == "" {
+			return nil, fmt.Errorf("Missing input %q", input.Name)
+		}
+		path, err := localPath(root, bound[input.Name])
+		if err != nil {
+			return nil, err
+		}
+		if err := checkWorkbook(path); err != nil {
+			return nil, err
+		}
+		inputs[input.Name] = path
+	}
+	return inputs, nil
+}
+
+// offline is the desktop runtime: SQL and external HTTP are unavailable.
+func offline() workflow.Runtime {
+	return workflow.Runtime{HTTP: &http.Client{Transport: offlineTransport{}}, SQL: func(context.Context, string, string, []any) (*workflow.Table, error) {
+		return nil, errors.New("SQL is disabled in desktop offline runs")
+	}}
+}
+
+// maxTraceRows bounds the rows a trace returns for its focused step.
+const maxTraceRows = 500
+
+// trace runs the workflow step by step without writing anything and returns
+// each top-level step's column profile, plus rows for the focused step.
+func trace(ctx context.Context, p Params) (any, error) {
+	wf, err := workflow.Parse([]byte(p.YAML))
+	if err != nil {
+		return nil, err
+	}
+	root, err := localPath(p.Workspace, ".")
+	if err != nil {
+		return nil, err
+	}
+	inputs, err := resolveInputs(wf, root, p.Inputs)
+	if err != nil {
+		return nil, err
+	}
+	opt := workflow.TraceOptions{Focus: -1, Limit: p.Limit, Skip: p.Skip}
+	if p.Step != nil {
+		opt.Focus = *p.Step
+	}
+	if opt.Limit <= 0 || opt.Limit > maxTraceRows {
+		opt.Limit = 200
+	}
+	steps, err := wf.Trace(ctx, offline(), inputs, opt)
+	if err != nil {
+		return nil, err
+	}
+	// Keep the frame under the protocol limit: drop rows before profiles.
+	for {
+		encoded, err := json.Marshal(steps)
+		if err != nil {
+			return nil, err
+		}
+		if len(encoded) < MaxFrameBytes-4096 || opt.Focus < 0 || opt.Focus >= len(steps) || len(steps[opt.Focus].Rows) == 0 {
+			break
+		}
+		rows := steps[opt.Focus].Rows
+		steps[opt.Focus].Rows = rows[:len(rows)/2]
+	}
+	return map[string]any{"steps": steps, "format": wf.Format}, nil
+}
+
 func runWithInspect(ctx context.Context, p Params, inspectOutput func(string, Params) (Preview, error)) (any, error) {
 	wf, err := workflow.Parse([]byte(p.YAML))
 	if err != nil {
@@ -314,19 +388,9 @@ func runWithInspect(ctx context.Context, p Params, inspectOutput func(string, Pa
 	if err != nil {
 		return nil, err
 	}
-	inputs := make(map[string]string, len(p.Inputs))
-	for _, input := range wf.Inputs {
-		if p.Inputs[input.Name] == "" {
-			return nil, fmt.Errorf("Missing input %q", input.Name)
-		}
-		path, err := localPath(root, p.Inputs[input.Name])
-		if err != nil {
-			return nil, err
-		}
-		if err := checkWorkbook(path); err != nil {
-			return nil, err
-		}
-		inputs[input.Name] = path
+	inputs, err := resolveInputs(wf, root, p.Inputs)
+	if err != nil {
+		return nil, err
 	}
 	// Refuse symlinked artifact parents; MkdirAll does not establish containment.
 	// Create each directory only after verifying its existing parent is local.
@@ -351,11 +415,8 @@ func runWithInspect(ctx context.Context, p Params, inspectOutput func(string, Pa
 			os.RemoveAll(dir)
 		}
 	}()
-	output := filepath.Join(dir, "output.xlsx")
-	rt := workflow.Runtime{HTTP: &http.Client{Transport: offlineTransport{}}, SQL: func(context.Context, string, string, []any) (*workflow.Table, error) {
-		return nil, errors.New("SQL is disabled in desktop offline runs")
-	}}
-	if err := wf.Run(ctx, rt, inputs, output); err != nil {
+	output := filepath.Join(dir, "output"+wf.Ext())
+	if err := wf.Run(ctx, offline(), inputs, output); err != nil {
 		return nil, err
 	}
 	f, err := os.Open(output)
