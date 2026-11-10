@@ -188,3 +188,39 @@ func TestOfflineTransport(t *testing.T) {
 		t.Fatal("HTTP available")
 	}
 }
+
+func TestTraceTheBOMOffline(t *testing.T) {
+	root := fixtureRoot(t)
+	yaml, err := os.ReadFile(filepath.Join(root, "workflows/bom.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	step := 4
+	r := request(t, "trace", Params{Workspace: root, YAML: string(yaml), Step: &step, Limit: 20,
+		Inputs: map[string]string{"bom": "testdata/bom_basic.xlsx", "priority": "testdata/prio_basic.xlsx"}})
+	if !r.OK {
+		t.Fatal(r.Error)
+	}
+	encoded, _ := json.Marshal(r.Result)
+	if len(encoded) > MaxFrameBytes {
+		t.Fatalf("trace frame %d bytes", len(encoded))
+	}
+	var out struct {
+		Steps []struct {
+			Name  string
+			Total int
+			Rows  [][]string
+			Error string
+		}
+		Format string
+	}
+	json.Unmarshal(encoded, &out)
+	if out.Format != "xlsx" || len(out.Steps) < 40 || out.Steps[4].Rows == nil || len(out.Steps[4].Rows) > 20 || out.Steps[3].Rows != nil {
+		t.Fatalf("trace: %d steps, format %q", len(out.Steps), out.Format)
+	}
+	for _, s := range out.Steps {
+		if s.Error != "" {
+			t.Errorf("step %s failed offline: %s", s.Name, s.Error)
+		}
+	}
+}

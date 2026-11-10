@@ -666,6 +666,40 @@ func (t *Table) cols(names []string) ([]int, error) {
 	return out, nil
 }
 
+// - drop: [Col, ...] removes columns.
+func compileDrop(arg *yaml.Node, _ *scope) (tableFn, error) {
+	names, err := nameList(arg)
+	if err != nil {
+		return nil, err
+	}
+	return func(t *Table, _ *State) (*Table, error) {
+		ix, err := t.cols(names)
+		if err != nil {
+			return nil, err
+		}
+		gone := map[int]bool{}
+		for _, i := range ix {
+			gone[i] = true
+		}
+		out := &Table{}
+		var keep []int
+		for i, c := range t.Columns {
+			if !gone[i] {
+				keep = append(keep, i)
+				out.Columns = append(out.Columns, c)
+			}
+		}
+		for _, r := range t.Rows {
+			nr := make([]any, len(keep))
+			for j, i := range keep {
+				nr[j] = r[i]
+			}
+			out.Rows = append(out.Rows, nr)
+		}
+		return out, nil
+	}, nil
+}
+
 func nameList(arg *yaml.Node) ([]string, error) {
 	var names []string
 	if err := strictDecode(arg, &names); err != nil || len(names) == 0 {

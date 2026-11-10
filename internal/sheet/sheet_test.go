@@ -1,6 +1,7 @@
 package sheet
 
 import (
+	"os"
 	"reflect"
 	"testing"
 )
@@ -27,7 +28,13 @@ func TestRangeOffsetAndNumberFormatting(t *testing.T) {
 }
 
 func TestUnsupported(t *testing.T) {
-	if _, err := Open("sheet.go"); err != ErrUnsupported {
-		t.Error("plain text should be rejected")
+	// Plain text opens as CSV (csv_test.go); binary files that are not
+	// workbooks are still rejected.
+	path := t.TempDir() + "/x.bin"
+	if err := os.WriteFile(path, []byte("\x00\x01binary"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Open(path); err != ErrUnsupported {
+		t.Error("binary non-workbook should be rejected")
 	}
 }

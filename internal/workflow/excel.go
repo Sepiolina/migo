@@ -2,8 +2,10 @@ package workflow
 
 import (
 	"context"
+	"encoding/csv"
 	"fmt"
 	"math"
+	"os"
 	"regexp"
 	"strings"
 	"unicode/utf8"
@@ -536,6 +538,66 @@ func writeSheet(ctx context.Context, f *excelize.File, sh *SheetSpec, t *Table, 
 		return f.SetPanes(sh.Name, &excelize.Panes{Freeze: true, YSplit: 1, TopLeftCell: "A2", ActivePane: "bottomLeft"})
 	}
 	return nil
+}
+
+// writeCSV writes one output sheet as UTF-8 CSV (with a byte order mark, so
+// Excel opens it as UTF-8). Columns, headers and values follow the sheet's
+// columns; styles do not apply to CSV.
+func writeCSV(ctx context.Context, out string, sh *SheetSpec, s *State) error {
+	t, err := s.dataset(sh.From)
+	if err != nil {
+		return fmt.Errorf("output %q: %w", sh.Name, err)
+	}
+	cols := sh.Columns
+	if cols == nil {
+		for _, c := range t.Columns {
+			p, _ := compileExpr("col("+quote(c)+")", true, rowVars...)
+			cols = append(cols, &OutColumn{Header: c, ID: c, value: p})
+		}
+	}
+	for _, c := range cols {
+		if err := c.value.check(t); err != nil {
+			return err
+		}
+	}
+	f, err := os.Create(out)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	if _, err := f.WriteString("\xEF\xBB\xBF"); err != nil {
+		return err
+	}
+	w := csv.NewWriter(f)
+	head := make([]string, len(cols))
+	for i, c := range cols {
+		head[i] = c.Header
+	}
+	if err := w.Write(head); err != nil {
+		return err
+	}
+	rec := make([]string, len(cols))
+	for i := range t.Rows {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		env := rowEnv(t, i, s.vars())
+		for c, col := range cols {
+			v, err := col.value.run(env)
+			if err != nil {
+				return fmt.Errorf("row %d column %q: %w", i+1, col.Header, err)
+			}
+			rec[c] = text(cell(v))
+		}
+		if err := w.Write(rec); err != nil {
+			return err
+		}
+	}
+	w.Flush()
+	if err := w.Error(); err != nil {
+		return err
+	}
+	return f.Close()
 }
 
 func boolPtr(b bool) *bool { return &b }
