@@ -1,5 +1,10 @@
 # Mai Studio + MaiService: automation workbench implementation plan
 
+> **Superseded.** Studio no longer uses Blockly or React Flow: it is a
+> pipeline editor with a live data table, a registry-driven inspector and an
+> endpoint page. See [MAI_STUDIO_DEVELOPMENT.md](MAI_STUDIO_DEVELOPMENT.md).
+> This plan is kept for its history and its deferred items.
+
 Planning baseline: **29 October 2026**, repository `Sepiolina/migo`, inspected
 commit **1291d7f207d8f1a0f644601eabba9240ed9c9fbf**. This replaces the original
 foundation plan. It is a design and engineering proposal, not a release note.

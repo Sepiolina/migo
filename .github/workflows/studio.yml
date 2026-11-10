@@ -46,14 +46,12 @@ jobs:
         working-directory: apps/studio
       - run: npm run build
         working-directory: apps/studio
-      - run: node scripts/smoke-blockly-ui.mjs
+      - run: node scripts/smoke-studio.mjs
         working-directory: apps/studio
       - run: node scripts/build-sidecar.mjs
         working-directory: apps/studio
       - run: python3 -m unittest discover -s scripts -p "test_*.py"
       - run: node scripts/smoke-runner.mjs
-        working-directory: apps/studio
-      - run: node scripts/smoke-blockly.mjs
         working-directory: apps/studio
       - run: cargo test --locked --manifest-path workspace-core/Cargo.toml
         working-directory: apps/studio/src-tauri
@@ -79,8 +77,6 @@ jobs:
       - run: npm test
         working-directory: apps/studio
       - run: npm run build
-        working-directory: apps/studio
-      - run: node scripts/smoke-blockly-ui.mjs
         working-directory: apps/studio
 
   native-windows:
@@ -113,7 +109,7 @@ jobs:
       - run: node scripts/build-sidecar.mjs
         working-directory: apps/studio
       - run: go test ./internal/deploy
-      - run: node scripts/smoke-blockly.mjs
+      - run: node scripts/smoke-studio.mjs
         working-directory: apps/studio
       - run: cargo fmt --check
         working-directory: apps/studio/src-tauri

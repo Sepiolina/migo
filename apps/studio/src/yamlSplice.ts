@@ -1,4 +1,4 @@
-import { isMap, isScalar, isSeq, parseDocument, type Node } from "yaml";
+import { Document, isMap, isScalar, isSeq, parseDocument, type Node } from "yaml";
 
 /**
  * Re-use the original text of every collection that did not change.
@@ -9,13 +9,16 @@ import { isMap, isScalar, isSeq, parseDocument, type Node } from "yaml";
  * one-field change produces a one-line diff. The result is checked: if it
  * does not parse to the same data, the freshly printed text is used.
  */
-export function preserveText(original: string, printed: string): string {
+export function preserveText(original: string, printed: string, commentsChanged = false): string {
   const before = parseDocument(original, { keepSourceTokens: true });
   const after = parseDocument(printed, { keepSourceTokens: true });
   if (before.errors.length || after.errors.length) return printed;
-  const json = (n: unknown) =>
+  const data = (n: unknown) =>
     JSON.stringify((n as { toJSON?: () => unknown })?.toJSON?.() ?? n);
-  if (json(before.contents) === json(after.contents)) return original;
+  // When comments changed, nodes are equal only if their comments are too.
+  const json = (n: unknown) =>
+    commentsChanged && n && typeof n === "object" ? new Document(n as Node).toString() : data(n);
+  if (!commentsChanged && data(before.contents) === data(after.contents)) return original;
 
   const edits: [start: number, end: number, text: string][] = [];
   const column = (text: string, at: number) => at - text.lastIndexOf("\n", at - 1) - 1;
@@ -75,5 +78,5 @@ export function preserveText(original: string, printed: string): string {
   for (const [start, end, value] of edits.sort((a, b) => b[0] - a[0]))
     text = text.slice(0, start) + value + text.slice(end);
   const check = parseDocument(text);
-  return !check.errors.length && json(check.contents) === json(after.contents) ? text : printed;
+  return !check.errors.length && data(check.contents) === data(after.contents) ? text : printed;
 }

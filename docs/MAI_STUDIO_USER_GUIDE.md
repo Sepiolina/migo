@@ -1,15 +1,16 @@
 # Mai Studio user guide
 
-Mai Studio builds workflows with visual blocks and runs them locally with the production Go
-engine. This milestone supports offline Excel fixtures. SQL and external REST
-connections are disabled.
+Mai Studio builds data workflows for Excel and CSV files and publishes them as
+MaiService API endpoints. A workflow reads one or more **sources** (`.xlsx`,
+`.xls` or `.csv`), transforms them in ordered **steps**, and writes **outputs**
+(sheets of an `.xlsx` workbook, or one `.csv` file). Studio runs every edit on
+sample files with the production Go engine, so you see the table after each step
+as you build it.
 
-## Start and open a workspace
+## Start
 
-For Windows prerequisites, PowerShell commands, and running the HTTP microservice,
-see the [README getting-started instructions](../README.md).
-
-From the repository root:
+For Windows prerequisites and the HTTP microservice, see the
+[README getting-started instructions](../README.md). From the repository root:
 
 ```sh
 cd apps/studio
@@ -17,186 +18,116 @@ npm ci
 npm run desktop:dev
 ```
 
-Install the native prerequisites listed in the
-[development guide](MAI_STUDIO_DEVELOPMENT.md) first. `npm run dev` opens an editor
-preview in a browser; folder access, saving, validation, workbook inspection, and
-execution require the Tauri desktop app.
+`npm run dev` opens a browser preview that edits YAML only; opening folders,
+previews, runs and saving need the desktop app.
 
-Open **Project & inputs**, then choose **Open workspace** and select a local
-project folder. All workflow and workbook paths are relative to that folder. For the bundled example, select the
-repository root. Use synthetic inputs while developing; keep private workbooks,
-credentials, and generated runs out of source control.
+## The home screen
 
-## Open, create, and save workflows
+Choose **Open folder…** and select your project folder, for example a clone of
+this repository. Studio lists the workflows in its `workflows/` folder with the
+route each one is served at, and offers templates:
 
-The **Open a workflow…** list discovers `.yaml` and `.yml` files recursively inside
-the workspace's `workflows/` directory. It skips symlinks. You can also enter a
-workspace-relative YAML file in **Open path** and choose
-**Open workflow path**, including files outside `workflows/`. The initial document
-is a built-in parts-summary example. Workflow controls and input bindings are in
-**Project & inputs**.
+| Template | Sources → output |
+| --- | --- |
+| Clean a sheet | xlsx → xlsx |
+| Summarize by group | xlsx → xlsx |
+| Look up and enrich | xlsx + csv → xlsx |
+| Customer order totals | xlsx → xlsx (the tutorial below) |
+| Excel to CSV | xlsx → csv |
+| Blank workflow | xlsx → xlsx |
 
-Choose **+ New workflow** and select **Copy a worksheet**, **Filter and
-summarize**, or **Customer order totals**. The template becomes the current
-document and suggests a Save path.
-For a new file, choose an unused workspace-relative path such as
-`workflows/summary.yaml`; create the parent directory outside Studio first if
-needed. Saving to a different unused path creates a copy; an existing destination
-cannot be overwritten this way. `Ctrl/Cmd+S` saves to the current Save path.
+Templates come with sample files from `examples/`, so their table preview works
+at once.
 
-A dot and **Unsaved** mark changes since the last successful save or load.
-Switching workflows or workspaces, or closing the native window, asks whether to
-discard unsaved work; choose **Keep editing** to retain it. Save before closing.
-There is no autosave or recovery store, and input bindings are session settings rather than
-part of the saved YAML.
+## The editor
 
-A save checks whether the file changed on disk since it was opened or last saved.
-A conflict leaves your editor contents intact and reports an error in the status
-bar. Preserve those contents in a new, unused Save path, then reopen the original
-to compare the external changes. Studio has no merge dialog or force-overwrite
-control. Discovery is refreshed when opening a workspace; reopen the workspace if
-files added externally do not appear.
+| Area | What it holds |
+| --- | --- |
+| Toolbar | The workflow name, its status (valid, rows out, errors), Search (⌘K), Undo/Redo, appearance, panel switches, Save and Run |
+| Left: Workflow | The **Endpoint** (`/api/<route>`), **Sources**, **Steps** in order (nested steps of `if` and `split` indented, YAML comments shown as section notes) and **Outputs** |
+| Centre: the table | The data after the selected step, with a profile on each column: type, how full it is, distinct values or a histogram, blanks |
+| Right: Inspector | Settings of the selected item, generated from the step registry |
+| Bottom: Console | **Problems**, **Run log** (lines the workflow logs) and **YAML**, the whole file, editable |
+
+On a phone-sized window the three areas become tabs: Steps, Table, Settings.
+
+### Build by working on the table
+
+Click a column header for actions: sort, keep rows that have a value or equal
+a value, remove duplicates, fill blanks from above, convert to number, trim,
+group by, rename and remove. Each action adds a step **after the selected one**,
+selects it, and shows the new table. The step list shows each step's effect:
+rows removed (−83), columns added (+1 col), log lines (☰) or an error.
+
+Other ways to add a step:
+
+- **+ Add step** in the step list, or ⌘⇧A, opens the step menu.
+- **Search** (⌘K) finds any step type, command, step, source or workflow.
+
+### Edit a step
+
+Select a step to edit it in the inspector. Text fields apply when you leave them
+or press Enter (⌘Enter in boxes); Escape reverts. Formula fields accept the
+engine's expressions: column names directly (`Quantity * Price`),
+`col("Unit price")` for names with spaces, functions such as `trim()`, `norm()`,
+`prev("Col")`, `a ? b : c`. The column chips under a form insert a column name at
+the cursor. **Show all** reveals rarely used settings. **Note** writes a YAML
+comment above the step.
+
+Each edit is one undo step; a toast offers Undo, and Undo also returns the
+selection to where it was. Edits change only the lines they touch: comments,
+formatting and settings Studio has no field for are kept, as are Windows (CRLF)
+line endings.
+
+The eye icon on a step previews the workflow **without** that step. It is not
+saved; use Delete to remove a step. Move up/down, Duplicate and Delete are in
+the inspector.
+
+### Sources and outputs
+
+Select a source to see the raw sheet with column letters and row numbers, which
+is what fixed-column and header-row settings refer to. Set its **sample file**
+(a path inside the folder); sample files are remembered per workflow on this
+computer and are not part of the YAML. **File name** is a pattern that lets API
+clients upload files in any order.
+
+Select an output to name the sheet and choose its table. **Choose and format
+columns…** switches the outputs to the detailed form, with column headers,
+widths, number formats and conditional styles.
+
+### The endpoint
+
+Select **Endpoint** to set how MaiService serves the workflow: the route,
+description, the requester-id form field and whether it is required, the upload
+limit, and whether it returns an Excel workbook or a CSV file. The panel lists
+the endpoints (`/run`, `/upload`, `/download`, the description and the
+catalogue), the form clients send, and a `curl` example to copy.
+
+## Run and save
+
+**Run** (⌘↵) runs the workflow on the sample files and writes the output under
+`.studio/runs/` in the folder, then shows it. Local runs are offline: SQL and
+REST steps are skipped, and the Problems tab says so.
+
+**Save** (⌘S) writes the file. A new workflow asks for a path; files in
+`workflows/` become endpoints. Saves check that the file did not change on disk
+since it was opened; a conflict keeps your edits so you can save them elsewhere.
+Switching workflows or closing the window asks before discarding unsaved
+changes.
 
 ## Worked example: customer order totals
 
-This starter uses synthetic data bundled in [examples/orders.xlsx](../examples/orders.xlsx).
-Its **Orders** sheet contains:
+1. On the home screen, open the repository folder and choose **Customer order
+   totals**. Its source `orders` is bound to `examples/orders.xlsx`.
+2. Select step 2, **Keep rows where num(Quantity) > 0**: the table shows 3 of
+   the 5 rows and the step list shows −2.
+3. Select step 3: **Line total** is added (green).
+4. Select step 4: one row per customer, Acme 50 and Beta 5.
+5. Press ⌘↵. The output **Totals** opens with the same values.
+6. Press ⌘S and save as `workflows/order-totals.yaml`. MaiService then serves
+   it at `/api/order-totals`.
 
-| Customer | Quantity | Unit price |
-| --- | ---: | ---: |
-| Acme | 2 | 10 |
-| Acme | 3 | 10 |
-| Beta | 1 | 5 |
-| Acme | 0 | 999 |
-| Beta | -2 | 100 |
-
-1. Open the repository root as your workspace. Choose **+ New workflow**, then
-   **Customer order totals**. Alternatively, open path
-   `examples/orders-totals.yaml` in **Project & inputs**.
-2. In **Blocks**, follow the connected steps: read input `orders`, sheet
-   `Orders`; filter `Quantity` as a number greater than `0`; calculate
-   `Line total` as numeric `Quantity` multiplied by numeric `Unit price`;
-   group by `Customer` and sum `Line total`; save as `totals`.
-3. **Workbook setup** declares input `orders` and output sheet `Totals`, which
-   reads the saved table `totals`. Choose **Validate**, then bind `orders` to
-   `examples/orders.xlsx` under **Project & inputs**.
-4. Choose **Run workflow**, then **Excel data** → **Output workbook** and sheet
-   **Totals**. The real generated workbook must have the following values
-   (row order may vary):
-
-   | Customer | Line total |
-   | --- | ---: |
-   | Acme | 50 |
-   | Beta | 5 |
-
-   The zero and negative quantities were removed before the totals were summed.
-   The output path identifies the XLSX you can open in Excel.
-5. Save the workflow to an unused path such as `workflows/customer-totals.yaml`.
-   To reuse it, copy your workbook inside the workspace, preserve the three
-   column headers and **Orders** sheet name, and update the input binding.
-   Change the Read source sheet name if your workbook uses another sheet.
-   Rerun after each change; bindings are session settings and must be supplied
-   again when reopening the workflow.
-
-The matching [starter YAML](../examples/orders-totals.yaml) also runs from the
-repository root without the desktop:
-
-```sh
-go run ./cmd/migo -in orders=examples/orders.xlsx -out outputs/customer-totals.xlsx examples/orders-totals.yaml
-```
-
-The fixture can be regenerated without spreadsheet software or Python packages:
-`python3 scripts/generate-orders-fixture.py`. The existing parts examples remain
-available for other workflows.
-
-## Build a workflow with blocks
-
-**Build** opens with **Blocks** by default. For a keyboard-friendly alternative,
-choose **Step outline**, select a step, and edit its settings in the inspector.
-Apply or discard settings before selecting another step. Use **Add step** to search
-and append an operation; **Move up**, **Move down**, and **Delete step** change the
-selected top-level step. With focus inside the outline, Alt+Up/Down and Delete
-provide keyboard alternatives. Undo reverses these edits. Nested branches retain
-their Advanced YAML fallback. Column suggestions appear after inspecting the bound
-input's first page, for supported header and upstream-step shapes.
-
-**Next** points to project/input setup, validation, running, or results. A successful
-run opens **Excel data** automatically; close it to return space to authoring.
-
-In **Workbook setup**, edit the workflow display
-name, input identifiers and labels, and output sheet names and saved table names.
-Choose **Apply workbook settings** or **Discard setup changes**. Advanced output
-settings such as styles are preserved. If existing settings cannot be safely
-represented, use the advanced editor to change them. Renaming an input or table
-requires updating matching blocks yourself.
-
-In **Read source**, choose a sheet **name / first** or **number**. Leave the
-name blank for the first sheet; numbered sheets start at 1.
-
-For a first workflow, choose **+ New workflow** and **Copy a worksheet**. In
-Workbook setup, keep input identifier `parts` and set the output sheet's saved
-table name to `result`. In the connected chain, set **Read source** to `parts`
-and enter a sheet name if needed; set **Save dataset as** to `result`. Apply any
-workbook setup changes. The output sheet refers to that saved dataset. Bind a
-workbook and run it as described below, then save the workflow and build a Linux
-package if needed.
-
-Drag blocks from the toolbox and snap steps into the Workflow chain. Expression
-blocks snap into compatible inputs for conditions and calculations. Common blocks
-read, filter, set, rename and select columns, sort, group, join, remove duplicates,
-and save datasets. Conditions and calculations can combine column values, text,
-numbers, booleans, comparisons, arithmetic, and logic. The column value dropdown
-can convert a value to a number or text; actual types and behavior are determined
-by the Go runtime. List fields use comma-separated names; names containing commas
-cannot be represented as individual entries there and are preserved when loaded
-in unsupported shapes.
-
-Incomplete or disconnected blocks remain as a draft. Finish connecting and filling
-them, or discard block edits, before saving, running, switching views, or closing.
-Likewise, apply or discard workbook setup changes; invalid settings cannot be
-applied. Existing unsupported, nested, or custom steps appear as preserved blocks,
-and unsupported expressions as preserved custom expression blocks. They retain
-their source but are not fully editable in Blocks. Use **Advanced YAML** for complex
-branching and other advanced shapes. Go validates and executes the workflow.
-
-**Overview** shows the ordered graph and offers the existing searchable
-**+ Add node** library and guided top-level settings. Select a step, edit its
-settings, and choose **Apply changes** or **Discard changes**. Canvas ports show
-the flow; they are not editable connections. **Readable 100%**, **Overview**, and
-**Focus selected** control the view. Use **Advanced YAML** or **Advanced YAML** for
-settings that the guided forms cannot represent.
-
-**Undo** and **Redo** cover source edits and applied step changes. Loading a
-document resets history. Outside text fields, `Ctrl/Cmd+Z` undoes and
-`Ctrl/Cmd+Shift+Z` or `Ctrl/Cmd+Y` redoes. Canvas shortcuts include `Alt+Insert`
-for the node library, `Delete`/`Backspace` to delete the selected top-level step,
-and `Alt+Up`/`Alt+Down` to move it.
-
-## Validate, bind inputs, and run
-
-1. Choose **Validate** to check the current workflow with the Go parser. Errors
-   appear in the status bar. Validation populates the declared input fields.
-2. Open **Project & inputs**. Under **Input files**, bind each input name to an
-   existing workbook inside the workspace. For the initial parts-summary example, bind `parts` to
-   `examples/parts.xlsx`. Validate again after changing input declarations.
-3. Choose **Run workflow**. The runner executes the current editor contents, so
-   saving is a separate action. External SQL/REST operations cannot run offline.
-4. Open **Excel data** to inspect the generated workbook. Choose an **Input** tab
-   to inspect a bound workbook or **Output workbook** for the generated artifact.
-   You can also enter a workbook path and choose **Inspect workbook**.
-5. Use the sheet selector and **Previous**/**Next** to page through rows. Click a
-   cell to read its complete value in the cell inspector; **Clear** dismisses it.
-   **Expand data** gives the panel more space, **Dock panel** restores it, and
-   **Close** returns the space to the canvas.
-
-Outputs are written under `.studio/runs/` in the workspace. The output path and
-SHA-256 identify the generated XLSX artifact. The preview reads actual workbook
-cell values; styling, formula metadata, and full Excel visual fidelity are not
-shown. Open the artifact in a spreadsheet application for those details.
-
-Editing the workflow or changing input bindings marks the displayed output stale. Run
-again to refresh it. Changes to workbook files made outside Studio are not
-tracked automatically; rerun after changing them.
+`examples/orders-totals.yaml` is the same workflow.
 
 ## Build a Linux deployment package
 
@@ -340,8 +271,8 @@ cannot start, verify Go is on PATH or set `MAI_GO` to its executable. Missing
 GTK/WebKit libraries or a missing desktop session prevent the Linux native host
 from starting; see the development guide for dependencies.
 
-Intermediate execution traces, cancellation controls, and live desktop
-connections are planned.
+Cancellation and live desktop connections to SQL and REST services are
+planned.
 
 Each package also includes `release.json` with the target and available build
 provenance, and `sbom.cdx.json` with a CycloneDX Go dependency inventory. These
@@ -350,18 +281,16 @@ vulnerability audit. Avoid editing saved source or inputs during compilation.
 
 ## Recover from editing and preview problems
 
-- If a setting is invalid, correct it or choose **Discard changes** before
-  switching to Advanced YAML. Invalid fields stay visible and keep save/run
-  protection active. Column names with commas or surrounding spaces require
-  Advanced YAML in comma-separated settings.
-- The unsaved-changes dialog keeps keyboard focus inside the confirmation.
-  **Escape** chooses **Keep editing** and returns focus to the previous control.
-- **Workbook saved; preview unavailable** means execution succeeded and the XLSX
-  was retained. Copy its displayed workspace-relative path and open the file in
-  Excel. Its SHA-256 still identifies the generated artifact. Retry inspection
-  when appropriate; files beyond preview size limits need an external viewer.
-  This is distinct from a failed workflow run, which does not publish a result.
+- **The YAML has an error**: the table and forms keep the last valid version.
+  Fix the file in the YAML tab of the console; the error is listed under
+  Problems.
+- **A step failed**: its row turns red, later steps show "did not run", and the
+  error is under Problems. Click the problem to select the step.
+- **Add a sample file**: a source has no sample file, so nothing can be
+  previewed. Select the source and enter a path inside the folder.
+- **Studio has no form for a step**: the inspector shows its YAML; edit it in
+  the YAML tab. The step is saved unchanged otherwise.
 
-Preview limits apply to generated workbooks as well as inputs: currently 25 MiB
-compressed and 64 MiB expanded XLSX. A large embedded preview can also exceed the
-runner response budget; Studio then keeps the output and reports the limitation.
+Preview limits apply to inputs and outputs: 25 MiB per file and 64 MiB expanded
+for XLSX. The table shows the first 200 rows of a step; column profiles cover
+every row.

@@ -1,31 +1,25 @@
 # Mai Studio development
 
-Mai Studio is being implemented in stages. The current milestone connects a Tauri v2
-React desktop workspace with Blockly and React Flow to the production Go workflow engine. The full
-roadmap is in [the implementation plan](MAI_DEV_TOOL_IMPLEMENTATION_PLAN.md).
+Mai Studio is a Tauri v2 and React desktop app around the production Go
+workflow engine. It edits workflow YAML through generated forms and direct
+actions on a data table, previews every step on sample files, and builds Linux
+service packages. The earlier [implementation plan](MAI_DEV_TOOL_IMPLEMENTATION_PLAN.md)
+describes the Blockly-based design this replaced.
 
 ## Current scope
 
-The runner validates workflow source, inspects Excel input workbooks, and runs
-workflows offline to generate inspectable XLSX artifacts. The default Blocks view
-uses Blockly 12.4.1 for a typed, snap-together step chain and visual expressions.
-Workbook setup edits names, inputs, and output sheets while preserving advanced
-settings. Incomplete or disconnected blocks and pending workbook setup drafts
-guard saving, running, switching views, and closing. Unsupported steps and
-expressions remain opaque and preserved. Workflow canvas provides the existing
-React Flow graph, node library, and guided settings; YAML source supports advanced
-and nested authoring. The shell also provides workspace discovery, revision-checked
-saves, undo/redo, input bindings, and result inspection.
-
-The native package builder cross-builds Linux service ZIPs, with secure signing
-and configuration encryption or explicit trusted-local mode. Intermediate traces,
-live desktop connections, and cancellation controls remain subsequent milestones. The production service and its HTTP
-contract are unchanged. See the [user guide](MAI_STUDIO_USER_GUIDE.md) for the
-editing and execution flow.
+- Home: open a folder, list its `workflows/` with their routes, start from templates.
+- Editor: steps navigator, the table after the selected step with column
+  profiles and column actions, a registry-driven inspector, the endpoint
+  (service) settings with the API contract, a console with problems, run log and
+  the YAML, a command menu, undo with selection restore.
+- Runner: `validate`, `trace` (each top-level step's column profile, log and
+  error, with rows for one step; steps can be skipped), `run` (writes
+  `.studio/runs/run-*/output.xlsx|csv`), `inspectWorkbook`, `buildPackage`.
+  Runs are offline: SQL and REST are unavailable.
 
 Run data is written inside the selected workspace under `.studio/runs/`. Never
-commit real workbook inputs, connection credentials, or generated runs. Workspaces
-and input bindings should point to synthetic fixtures while developing the app.
+commit real workbook inputs, connection credentials, or generated runs.
 
 ## Prerequisites
 
@@ -39,26 +33,21 @@ The browser development server supports frontend work, but native workspace and
 runner operations require the Tauri application. A browser-only build must never
 pretend to have successfully executed a workflow.
 
-## Visual editor architecture
+## Editor architecture
 
-Every block is generated from **`src/stepRegistry.ts`**: one `StepSpec` per
-workflow step and one `ItemSpec` per nested item (set entries, header titles,
-pick rules, output sheets, columns and styles, the service block). From it:
+| File | Role |
+| --- | --- |
+| `stepRegistry.ts` | One `StepSpec` per engine step and one `ItemSpec` per nested item (set entries, header titles, pick rules, output sheets, columns, styles, the service block). Forms, the add-step menu and summaries come from it. |
+| `pipeline.ts` | Reads a workflow into sources, a step tree and outputs; `readForm`/`writeField` edit any field through a spec; inserts, moves, duplicates and deletes steps; keeps short forms (`save: x`, `from: a[Sheet]`) and CRLF. |
+| `yamlSplice.ts` | After an edit, reuses the original text of every unchanged mapping, so a one-field change is a one-line diff. |
+| `App.tsx` | State: document and undo (with selection restore), selection, sample-file bindings (localStorage per workspace and workflow), live `trace`/`validate`/`inspectWorkbook` requests, run, save, shortcuts, commands. |
+| `Navigator.tsx`, `DataGrid.tsx`, `Inspector.tsx`, `StepForm.tsx`, `Console.tsx`, `CommandMenu.tsx`, `Home.tsx` | The panes. `DataGrid` turns column-menu choices into steps; `StepForm` renders any registry form, including nested item lists. |
+| `api.ts` | The native bridge. `window.__maiBridge` can stand in for the Tauri host (see `scripts/studio-bridge.mjs`). |
+| `studio.css` | Design tokens (light and dark) and the layout, including the compact and phone layouts. |
 
-- `blocklyBlocks.ts` builds the Blockly definitions and the toolbox;
-- `blocklyWorkflow.ts` reads and writes YAML generically: unchanged parts are
-  written back as they were, changed fields are patched in place, and anything
-  a spec cannot represent opens as a preserved block;
-- `yamlSplice.ts` keeps the original text of unchanged mappings after an edit,
-  so a one-field change is a one-line diff;
-- `operationCatalog.ts` (the **Add step** library) and `BlockInspector.tsx`
-  (the selected-block panel with full-size text boxes) read the same specs.
-
-`blocklyExpressions.ts` turns simple conditions and arithmetic into visual
-blocks; any other expression opens as an editable **ƒx** code block.
-`BlockEditor.tsx` owns the canvas lifecycle; `workbookSettings.ts` preserves
-workbook metadata when the setup form changes. `theme.css` holds the design
-tokens (light and dark); `modern.css` the shell layout and breakpoints.
+Go owns validation, expression semantics, workbook reading and execution; the
+frontend never evaluates expressions. A step without a registry spec still shows
+its YAML and is saved unchanged.
 
 ### Add a step to Studio
 
@@ -76,47 +65,45 @@ tokens (light and dark); `modern.css` the shell layout and breakpoints.
    `form` says where fields live (`map`, `entries` for a whole-map argument,
    `inline` for if/then/else); `scalar`/`list` name the field a short form fills.
    Field kinds: `text`, `template`, `number`, `bool`, `enum`, `list`, `expr`,
-   `entries`, `items`, `steps`, `yaml`. Mark rarely used ones `advanced`.
+   `entries`, `items`, `steps`, `yaml`. Mark rarely used ones `advanced`; the
+   inspector hides them until used or **Show all**.
+3. Optionally give it a sentence in `summarize` (`pipeline.ts`) and a column
+   action in `DataGrid.tsx`.
 2. For nested structures add an `ItemSpec` and point an `entries` or `items`
    field at it.
-3. `npm test` checks every registry example round-trips (`bomBlocks.test.ts`).
+4. `npm test` checks every registry example round-trips through its form
+   (`pipeline.test.ts`).
 
 ## Checks
 
 From the repository root, `make check` runs Go formatting, vet, compilation, race
-tests, and the existing example workflows. From `apps/studio`, run `npm ci`,
-`npm run build`, and `npm test` for frontend checks. Run
-`node scripts/smoke-blockly.mjs` from `apps/studio` to generate a visual workflow
-and execute it and both starter templates against the Go engine and Excel fixture.
-Run `node scripts/smoke-blockly-ui.mjs` to check real block editing, reopening,
-undo, incomplete edits, and the compact layout in a system-installed Chrome or
-Chromium browser. Set `MAI_CHROME` to its executable if it is not detected.
-Run `node scripts/smoke-runner.mjs` from `apps/studio` for the serialized runner
-integration check: it builds Go, validates a synthetic fixture, runs it in a
-temporary workspace, verifies the artifact hash, and compares workbook previews.
-Run `cargo test --locked --manifest-path src-tauri/workspace-core/Cargo.toml`
-from `apps/studio` for filesystem discovery/save/conflict checks without GTK.
-With native prerequisites installed, run `cargo test --locked` and
-`cargo fmt --check` from `apps/studio/src-tauri`. Native Rust compilation also
-requires the system libraries above; a successful web build does not validate the
-native desktop host.
+tests, and the example workflows. From `apps/studio`:
 
-Use `examples/parts-summary.yaml` with `examples/parts.xlsx` for the smallest
-end-to-end fixture. The BOM fixtures under `testdata/` provide broader engine
-coverage without access to company services.
+- `npm test`: the pipeline model (BOM, short forms, nested items, CRLF, every
+  registry example), the app (template editing, command menu, endpoint, preview
+  and column actions with a mocked runner), document history, package builder.
+- `npm run build`, then `node scripts/smoke-studio.mjs`: drives the built app in
+  a system Chrome or Chromium against the real Go runner, through the bridge in
+  `scripts/studio-bridge.mjs` on a temporary copy of the examples. It previews
+  the BOM step by step, adds and undoes a column action, checks a one-line YAML
+  edit, the endpoint page, runs and saves a template, and the phone layout. Set
+  `MAI_CHROME` if Chrome is not found.
+- `node scripts/smoke-runner.mjs`: the serialized runner contract.
+- `cargo test --locked --manifest-path src-tauri/workspace-core/Cargo.toml`, and
+  with native prerequisites `cargo test --locked` and `cargo fmt --check` in
+  `src-tauri`.
+
+The BOM fixtures under `testdata/` and the files in `examples/` (including the
+CSV `regions.csv`) give engine coverage without company services.
 
 ## Design boundaries
 
-React renders workflow documents and displays native results. Tauri authorizes
-workspace access and supervises the sidecar. Go owns validation, expression
-semantics, workbook reading, and execution. Blockly and workbook setup translate
-edits to workflow source; they do not evaluate expressions or use a Blockly
-JavaScript generator. Unsupported content must round-trip intact. The graph
-projects ordered source steps and branches; its ports are not editable wires.
-`predev` and `prebuild` copy Blockly media locally for offline use.
-Protocol responses use version 1 and preserve request IDs; unsupported commands,
-paths, and versions must fail explicitly. Offline means all external SQL/HTTP
-operations are unavailable, including unconditional steps.
+React renders the document and native results. Tauri authorizes workspace access
+and supervises the sidecar. Go owns validation, expression semantics, workbook
+reading and execution. Unsupported content must round-trip intact. Protocol
+responses use version 1 and preserve request IDs; unsupported commands, paths and
+versions fail explicitly. Offline means all external SQL/HTTP operations are
+unavailable.
 
 ## Start the desktop app
 
@@ -134,13 +121,10 @@ If Go is not on PATH, set `MAI_GO` to the Go executable. `npm run desktop:build`
 builds the desktop distribution. The in-app **Build Linux package** command
 builds the separate Linux service deployment ZIP.
 
-Open **Project & inputs** and choose the repository folder as the workspace. The
-initial document contains the parts-summary example; you can also paste `examples/parts-summary.yaml` into the
-source editor. Validate, bind `parts` to `examples/parts.xlsx`, then run. Open
-**Excel data** to inspect the generated artifact, select input/output workbooks,
-or page through another sheet. Artifacts are stored under `.studio/runs/`. The
-preview displays cell values only; styles, formula metadata, and full Excel visual fidelity remain
-roadmap work. Generated workbooks themselves come from the production writer.
+Choose **Open folder…** and the repository folder, then a workflow or a template.
+Templates bind their sources to files in `examples/`. Artifacts are stored under
+`.studio/runs/`. Previews show cell values; styles and formulas are in the
+generated file itself.
 
 ## Runner protocol
 
@@ -153,9 +137,10 @@ logs must not be written to stdout. For example:
 ```
 
 Successful responses contain `version`, matching `id`, `ok: true`, and `result`.
-Failures contain `ok: false` and an `error` with `code` and `message`. `validate`
-and `run` take `params.yaml`; `run` also takes named relative paths in
-`params.inputs`. `inspectWorkbook` accepts `sheet`, `offset`, and `limit`.
+Failures contain `ok: false` and an `error` with `code` and `message`. `validate`,
+`trace` and `run` take `params.yaml`; `trace` and `run` also take named relative
+paths in `params.inputs`, and `trace` takes `step` (the step whose rows to
+return), `skip` and `limit`. `inspectWorkbook` accepts `sheet`, `offset`, and `limit`.
 The native bridge replaces the workspace path with the folder approved by the
 native picker. The standalone runner is a local developer utility, not a remotely
 accessible authorization service.
@@ -234,22 +219,12 @@ server-local `AGE_IDENTITY`, protects config with mode `0600`, and refuses exist
 targets. PM2 must run as a dedicated service user. In-place upgrades, automatic
 rollback, remote deployment, and signing-key lifecycle UI remain future work.
 
-### Guided workbench document model
+### Document model
 
 `workflowDocument.ts` owns source/CST snapshots, revisions, bounded history and
-source transactions. `useDocument` keeps the shared React interface; visual
-editors apply the same source transforms, with a grouped transaction producing
-one undo entry. Invalid source is retained. This is an in-memory model, not a
-crash-recovery store or durable step-identity implementation.
-
-`WorkbenchOutline.tsx` provides a keyboard-accessible top-level step presentation;
-`StepInspector` edits the same source. `columnSuggestions.ts` makes conservative
-name suggestions from inspected input headers and supported preceding steps.
-Unknown transforms invalidate suggestions; Go remains authoritative.
-
-Run `node scripts/smoke-blockly.mjs` with Go on PATH to check all templates through
-the real engine and inspect their XLSX values. Regenerate the synthetic Orders
-workbook with `python3 scripts/generate-orders-fixture.py` from the repository root.
+source transactions; `useDocument` is its React interface. Every edit is one
+transaction and one undo entry; invalid source is retained. This is an in-memory
+model, not a crash-recovery store.
 
 ### Document and preview error contracts
 

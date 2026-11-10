@@ -1,1149 +1,680 @@
-import React, {
-  lazy,
-  Suspense,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import {
-  ReactFlow,
-  Background,
-  Controls,
-  MiniMap,
-  type ReactFlowInstance,
-} from "@xyflow/react";
-import "@xyflow/react/dist/style.css";
-import "./theme.css";
-import "./style.css";
-import "./modern.css";
-import { example, projectWorkflow, type WorkflowGraphNode } from "./model";
-import { changeSteps, topLevelCount } from "./authoring";
+import "./studio.css";
+import { isDesktop, native, request, type Inspection, type RunResult, type Trace, type Validation } from "./api";
 import { useDocument } from "./useDocument";
-import { workflowNodeTypes } from "./WorkflowNode";
-import { operations } from "./operationCatalog";
-import { addOperation } from "./nodeAuthoring";
-import { WorkbookPanel } from "./WorkbookPanel";
-import { StepInspector } from "./StepInspector";
-import { WorkbenchOutline } from "./WorkbenchOutline";
-import { suggestColumns } from "./columnSuggestions";
+import { readPipeline, insertStep, addInput, expandSheets, addItem, type Pipeline } from "./pipeline";
+import { Navigator, type Selection } from "./Navigator";
+import { Inspector } from "./Inspector";
+import { DataGrid, profileRows, type ColumnAction } from "./DataGrid";
+import { Console, type LogLine, type Problem } from "./Console";
+import { CommandMenu, type Command } from "./CommandMenu";
+import { Home, type WorkflowEntry } from "./Home";
 import { PackageBuilder } from "./PackageBuilder";
-import { WorkflowSetup } from "./WorkflowSetup";
-import { readWorkbookSettings } from "./workbookSettings";
-import { workflowTemplates } from "./workflowTemplates";
 import { DiscardChangesDialog } from "./DiscardChangesDialog";
-import { WorkflowTemplatePicker } from "./WorkflowTemplatePicker";
-import {
-  isDesktop,
-  request,
-  type Inspection,
-  type Validation,
-  type RunResult,
-} from "./api";
-const BlockEditor = lazy(() => import("./BlockEditor"));
+import { steps as stepSpecs } from "./stepRegistry";
+import { workflowTemplates, type Template } from "./workflowTemplates";
+import { parse } from "yaml";
 
-type ThemeChoice = "system" | "light" | "dark";
-const themeIcons: Record<ThemeChoice, React.ReactNode> = {
-  system: (
-    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-      <circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.5" />
-      <path d="M8 2a6 6 0 0 1 0 12z" fill="currentColor" />
-    </svg>
-  ),
-  light: (
-    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-      <circle cx="8" cy="8" r="3" fill="currentColor" />
-      <path
-        d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.4 1.4M11.6 11.6 13 13M3 13l1.4-1.4M11.6 4.4 13 3"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-      />
-    </svg>
-  ),
-  dark: (
-    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
-      <path d="M13.5 10.2A6 6 0 0 1 5.8 2.5a6 6 0 1 0 7.7 7.7z" fill="currentColor" />
-    </svg>
-  ),
+type Theme = "system" | "light" | "dark";
+type Toast = { text: string; undo?: boolean } | null;
+type Panel = "steps" | "table" | "insp";
+
+const letters = (i: number): string => (i >= 26 ? letters(Math.floor(i / 26) - 1) : "") + String.fromCharCode(65 + (i % 26));
+const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "workflow";
+const base = (path: string) => path.split("/").pop()!.replace(/\.ya?ml$/, "");
+const now = () => new Date().toTimeString().slice(0, 8);
+const store = {
+  get<T>(key: string, fallback: T): T {
+    try {
+      const v = localStorage.getItem(key);
+      return v ? (JSON.parse(v) as T) : fallback;
+    } catch {
+      return fallback;
+    }
+  },
+  set(key: string, value: unknown) {
+    try {
+      localStorage.setItem(key, JSON.stringify(value));
+    } catch {
+      /* storage unavailable */
+    }
+  },
 };
-function readTheme(): ThemeChoice {
-  try {
-    const saved = localStorage.getItem("mai-theme");
-    return saved === "light" || saved === "dark" ? saved : "system";
-  } catch {
-    return "system";
-  }
-}
-function applyTheme(choice: ThemeChoice) {
-  if (choice === "system") delete document.documentElement.dataset.theme;
-  else document.documentElement.dataset.theme = choice;
-  try {
-    localStorage.setItem("mai-theme", choice);
-  } catch {
-    /* storage unavailable */
-  }
-}
+const icons = {
+  nav: <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><rect x="1.5" y="2.5" width="13" height="11" rx="2" /><path d="M6 2.5v11" /></svg>,
+  insp: <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><rect x="1.5" y="2.5" width="13" height="11" rx="2" /><path d="M10 2.5v11" /></svg>,
+  undo: <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="M5 4 2 7l3 3" /><path d="M2 7h7.5a4 4 0 0 1 0 8H7" /></svg>,
+  redo: <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4"><path d="m11 4 3 3-3 3" /><path d="M14 7H6.5a4 4 0 0 0 0 8H9" /></svg>,
+  theme: <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.4" /><path d="M8 2a6 6 0 0 1 0 12z" fill="currentColor" /></svg>,
+};
 
 export default function App() {
-  const document = useDocument(example);
-  const [themeChoice, setThemeChoice] = useState<ThemeChoice>(readTheme);
-  useEffect(() => applyTheme(themeChoice), [themeChoice]);
-  const [libraryCategory, setLibraryCategory] = useState("All");
-  const [showPackageBuilder, setShowPackageBuilder] = useState(false);
-  const [packagePending, setPackagePending] = useState(false);
-  const packagePendingRef = useRef(false);
-  packagePendingRef.current = packagePending;
-  const [focusMode, setFocusMode] = useState(false);
-  const [showProject, setShowProject] = useState(false);
-  const [showData, setShowData] = useState(false);
-  const [fullData, setFullData] = useState(false);
-  const [showLibrary, setShowLibrary] = useState(false);
-  const [buildView, setBuildView] = useState<"blocks" | "outline">("blocks");
-  const [showSetup, setShowSetup] = useState(false);
-  const [showTemplates, setShowTemplates] = useState(false);
-  const [editorGeneration, setEditorGeneration] = useState(0);
-  const [nodeSearch, setNodeSearch] = useState("");
-  const flow = useRef<ReactFlowInstance<WorkflowGraphNode> | null>(null);
-  const [loadedInspectPath, setLoadedInspectPath] = useState("");
-  const { source, setSource } = document;
-  const [selected, setSelected] = useState<string>();
-  const [outlineFocusRequest, setOutlineFocusRequest] = useState(0);
-  const [argumentDraft, setArgumentDraft] = useState<string>();
-  const [blockDraft, setBlockDraft] = useState(false);
-  const [setupDraft, setSetupDraft] = useState(false);
-  const hasDraft = argumentDraft !== undefined || blockDraft || setupDraft;
-  const [workflowPaths, setWorkflowPaths] = useState<string[]>([]);
+  const doc = useDocument(workflowTemplates[1].source);
+  const { source } = doc;
+  const desktop = isDesktop();
+  const [view, setView] = useState<"home" | "editor">("home");
+  const [workspace, setWorkspace] = useState("");
+  const [entries, setEntries] = useState<WorkflowEntry[]>([]);
   const [workflowPath, setWorkflowPath] = useState("");
-  const [openPath, setOpenPath] = useState("examples/parts-summary.yaml");
-  const [savePath, setSavePath] = useState("workflows/summary.yaml");
   const [revision, setRevision] = useState<string | null>(null);
-  const [pendingDiscard, setPendingDiscard] = useState<() => void>();
-  const [workspace, setWorkspace] = useState(""),
-    [tab, setTab] = useState("blocks");
-  const [validation, setValidation] = useState<Validation>(),
-    [bindings, setBindings] = useState<Record<string, string>>({
-      parts: "examples/parts.xlsx",
-    });
-  const [inspection, setInspection] = useState<Inspection>(),
-    [artifact, setArtifact] = useState<RunResult>();
-  const [inspectPath, setInspectPath] = useState("examples/parts.xlsx"),
-    [busy, setBusy] = useState(""),
-    [error, setError] = useState(false);
-  const [message, setMessage] = useState(
-      "Open a workspace to validate and run with the Go engine.",
-    ),
-    [runIdentity, setRunIdentity] = useState(""),
-    [validatedSource, setValidatedSource] = useState("");
-  const unsavedRef = useRef(false);
-  unsavedRef.current = document.dirty || hasDraft;
+  const [selection, setSelection] = useState<Selection>({ kind: "step", id: "steps.0" });
+  const [showNav, setShowNav] = useState(true);
+  const [showInsp, setShowInsp] = useState(true);
+  const [panel, setPanel] = useState<Panel>("table");
+  const [consoleTab, setConsoleTab] = useState<"problems" | "log" | "yaml" | null>("problems");
+  const [bindings, setBindings] = useState<Record<string, string>>({});
+  const [skipped, setSkipped] = useState<Set<number>>(new Set());
+  const [trace, setTrace] = useState<{ key: string; data?: Trace; error?: string; busy: boolean }>({ key: "", busy: false });
+  const [inspection, setInspection] = useState<{ key: string; data?: Inspection; error?: string }>({ key: "" });
+  const [validation, setValidation] = useState<{ source: string; error?: string }>({ source: "" });
+  const [run, setRun] = useState<{ source: string; result: RunResult } | null>(null);
+  const [log, setLog] = useState<LogLine[]>([]);
+  const [busy, setBusy] = useState("");
+  const [toast, setToast] = useState<Toast>(null);
+  const [palette, setPalette] = useState<null | "all" | "add">(null);
+  const [saveAs, setSaveAs] = useState<string | null>(null);
+  const [packaging, setPackaging] = useState(false);
+  const [packagePending, setPackagePending] = useState(false);
+  const [pendingDiscard, setPendingDiscard] = useState<(() => void) | null>(null);
+  const [theme, setTheme] = useState<Theme>(() => store.get<Theme>("mai.theme", "system"));
+
   useEffect(() => {
-    const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (unsavedRef.current || packagePendingRef.current) {
-        event.preventDefault();
-        event.returnValue = "";
-      }
-    };
-    window.addEventListener("beforeunload", beforeUnload);
-    let disposed = false;
-    let unlisten: (() => void) | undefined;
-    if (isDesktop()) {
-      const currentWindow = getCurrentWindow();
-      void currentWindow
-        .onCloseRequested((event) => {
-          if (packagePendingRef.current) {
-            event.preventDefault();
-            setError(true);
-            setMessage(
-              "A package operation is in progress. Keep this window open until it finishes; cancellation is unavailable.",
-            );
-            return;
-          }
-          if (!unsavedRef.current) return;
-          event.preventDefault();
-          setPendingDiscard(() => () => {
-            void currentWindow.destroy().catch((error) => {
-              setError(true);
-              setMessage(String(error));
-            });
-          });
-        })
-        .then((stop) => {
-          if (disposed) stop();
-          else unlisten = stop;
-        })
-        .catch((error) => {
-          setError(true);
-          setMessage(String(error));
-        });
-    }
-    return () => {
-      disposed = true;
-      unlisten?.();
-      window.removeEventListener("beforeunload", beforeUnload);
-    };
-  }, []);
-  const currentIdentity = JSON.stringify({ source, workspace, bindings });
-  const graph = useMemo(() => projectWorkflow(source), [source]);
-  const workbookSettings = useMemo(
-    () => readWorkbookSettings(source),
-    [source],
-  );
-  async function task(label: string, action: () => Promise<void>) {
-    setBusy(label);
-    setError(false);
+    if (theme === "system") delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = theme;
+    store.set("mai.theme", theme);
+  }, [theme]);
+
+  // ---- the model ------------------------------------------------------------------
+  const parsed = useMemo(() => {
     try {
-      await action();
+      return { pipeline: readPipeline(source) };
     } catch (e) {
-      setError(true);
-      setMessage(e instanceof Error ? e.message : String(e));
+      return { error: (e as Error).message };
+    }
+  }, [source]);
+  const lastGood = useRef<Pipeline | null>(null);
+  if (parsed.pipeline) lastGood.current = parsed.pipeline;
+  const pipeline = parsed.pipeline ?? lastGood.current ?? readPipeline(workflowTemplates[1].source);
+  const route = String(pipeline.service.route ?? "") || (workflowPath ? base(workflowPath) : slug(pipeline.name));
+  const selectedStep = selection.kind === "step" ? pipeline.steps.find((s) => s.id === selection.id) : undefined;
+  const bound = pipeline.inputs.every((i) => bindings[i.id]);
+  const bindingKey = `mai.bindings:${workspace}:${workflowPath || pipeline.name}`;
+
+  const say = useCallback((text: string, undo = false) => {
+    setToast({ text, undo });
+  }, []);
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 3600);
+    return () => clearTimeout(t);
+  }, [toast]);
+  const addLog = (text: string, warn = false) => setLog((l) => [...l.slice(-400), { time: now(), text, warn }]);
+  const fail = (e: unknown) => {
+    const text = e instanceof Error ? e.message : String(e);
+    say(text);
+    addLog(text, true);
+  };
+
+  /** Every edit goes through here: one undo step, with an Undo toast. Undo
+   * also restores the selection from before the edit. */
+  const selections = useRef<{ undo: Selection[]; redo: Selection[] }>({ undo: [], redo: [] });
+  const change = useCallback((next: string, label: string) => {
+    if (next === source) return;
+    selections.current.undo = [...selections.current.undo.slice(-199), selection];
+    selections.current.redo = [];
+    doc.transact(label, () => next);
+    say(label, true);
+  }, [doc, source, say, selection]);
+  const undo = () => {
+    if (!doc.canUndo) return;
+    doc.undo();
+    const s = selections.current.undo.pop();
+    if (s) {
+      selections.current.redo.push(selection);
+      setSelection(s);
+    }
+  };
+  const redo = () => {
+    if (!doc.canRedo) return;
+    doc.redo();
+    const s = selections.current.redo.pop();
+    if (s) {
+      selections.current.undo.push(selection);
+      setSelection(s);
+    }
+  };
+
+  // Keep the selection valid after edits.
+  useEffect(() => {
+    if (selection.kind === "step" && !pipeline.steps.some((s) => s.id === selection.id))
+      setSelection(pipeline.steps.length ? { kind: "step", id: pipeline.steps[Math.min(pipeline.steps.length - 1, Number(selection.id.split(".")[1]) || 0)].id } : { kind: "endpoint" });
+    if (selection.kind === "source" && !pipeline.inputs.some((i) => i.id === selection.id)) setSelection({ kind: "endpoint" });
+    if (selection.kind === "output" && !pipeline.outputs[selection.index]) setSelection({ kind: "endpoint" });
+  }, [pipeline, selection]);
+
+  // ---- bindings ---------------------------------------------------------------------
+  useEffect(() => setBindings(store.get(bindingKey, {})), [bindingKey]);
+  const bind = (id: string, path: string) => {
+    const next = { ...bindings, [id]: path };
+    if (!path) delete next[id];
+    setBindings(next);
+    store.set(bindingKey, next);
+  };
+
+  // ---- live preview: trace the workflow on the sample files ----------------------------
+  const focus = selectedStep?.top ?? -1;
+  const traceKey = JSON.stringify({ source, bindings, focus, skip: [...skipped].sort(), workspace });
+  const canPreview = desktop && !!workspace && bound && !parsed.error && view === "editor";
+  useEffect(() => {
+    if (!canPreview || trace.key === traceKey) return;
+    let live = true;
+    setTrace((t) => ({ ...t, busy: true }));
+    const timer = setTimeout(() => {
+      request<Trace>("trace", { workspace, yaml: source, inputs: bindings, step: focus, skip: [...skipped], limit: 200 })
+        .then((data) => {
+          if (!live) return;
+          setTrace({ key: traceKey, data, busy: false });
+          const lines = data.steps.flatMap((s) => (s.log ?? []).map((l) => `${s.step + 1}. ${l}`));
+          if (lines.length) setLog((l) => [...l.slice(-300), ...lines.map((text) => ({ time: now(), text }))]);
+        })
+        .catch((e) => live && setTrace({ key: traceKey, error: (e as Error).message, busy: false }));
+    }, 280);
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [canPreview, traceKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Source and output previews read files directly.
+  const fileToInspect =
+    selection.kind === "source" ? bindings[selection.id]
+    : selection.kind === "output" && run?.source === source ? run.result.path
+    : undefined;
+  const sheetToInspect = selection.kind === "output" ? (pipeline.format === "csv" ? undefined : pipeline.outputs[selection.index]?.name) : undefined;
+  const inspectKey = JSON.stringify({ fileToInspect, sheetToInspect, workspace });
+  useEffect(() => {
+    if (!desktop || !workspace || !fileToInspect || inspection.key === inspectKey) return;
+    let live = true;
+    request<Inspection>("inspectWorkbook", { workspace, path: fileToInspect, sheet: sheetToInspect, limit: 200 })
+      .then((data) => live && setInspection({ key: inspectKey, data }))
+      .catch((e) => live && setInspection({ key: inspectKey, error: (e as Error).message }));
+    return () => {
+      live = false;
+    };
+  }, [inspectKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Validate with the production parser shortly after each edit.
+  useEffect(() => {
+    if (!desktop || !workspace || parsed.error || validation.source === source) return;
+    const t = setTimeout(() => {
+      request<Validation>("validate", { workspace, yaml: source })
+        .then(() => setValidation({ source }))
+        .catch((e) => setValidation({ source, error: (e as Error).message }));
+    }, 450);
+    return () => clearTimeout(t);
+  }, [source, workspace]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ---- problems -------------------------------------------------------------------------------
+  const problems: Problem[] = [];
+  if (parsed.error) problems.push({ level: "error", text: parsed.error });
+  if (validation.source === source && validation.error) {
+    const m = validation.error.match(/^step (\d+)/);
+    problems.push({ level: "error", text: validation.error, step: m ? `steps.${Number(m[1]) - 1}` : undefined });
+  }
+  trace.data?.steps.forEach((s) => s.error && problems.push({ level: "error", text: `Step ${s.step + 1}: ${s.error}`, step: `steps.${s.step}` }));
+  if (trace.error) problems.push({ level: "error", text: trace.error });
+  pipeline.inputs.forEach((i) => !bindings[i.id] && problems.push({ level: "warning", text: `Source “${i.id}” has no sample file, so the table cannot be previewed.` }));
+  // The parser and the trace can report the same error.
+  for (let i = problems.length - 1; i > 0; i--) if (problems.slice(0, i).some((p) => p.text.endsWith(problems[i].text.replace(/^Step \d+: /, "")) || problems[i].text.endsWith(p.text))) problems.splice(i, 1);
+  if (pipeline.steps.some((s) => s.spec?.service)) problems.push({ level: "info", text: "SQL and REST steps run on the server only. Local previews skip them and use the fallback values." });
+
+  // ---- actions -------------------------------------------------------------------------------
+  const insertAfter = (step: Record<string, unknown>, label: string) => {
+    const s = selectedStep;
+    const listPath = s ? s.listPath : ["steps"];
+    const at = s ? s.index + 1 : pipeline.steps.filter((x) => x.depth === 0).length;
+    try {
+      change(insertStep(source, listPath, at, step), `Added: ${label}`);
+      setSelection({ kind: "step", id: [...listPath, at].join(".") });
+    } catch (e) {
+      fail(e);
+    }
+  };
+  const onColumnAction = (a: ColumnAction) => insertAfter(a.step, a.label);
+
+  async function chooseWorkspace() {
+    try {
+      const picked = await native<{ path: string } | null>("choose_workspace");
+      if (!picked) return;
+      setWorkspace(picked.path);
+      await loadEntries();
+      addLog(`Opened folder ${picked.path}`);
+    } catch (e) {
+      fail(e);
+    }
+  }
+  async function loadEntries() {
+    const list = await native<{ paths: string[] }>("list_workflows");
+    const out: WorkflowEntry[] = [];
+    for (const path of list.paths) {
+      try {
+        const file = await native<{ source: string }>("read_workflow", { path });
+        const y = parse(file.source) as { name?: string; service?: { route?: string } };
+        out.push({ path, name: y?.name ?? "", route: y?.service?.route ?? base(path) });
+      } catch {
+        out.push({ path, name: "", route: base(path) });
+      }
+    }
+    setEntries(out);
+  }
+  const guard = (action: () => void) => (doc.dirty ? setPendingDiscard(() => action) : action());
+  const resetEditor = () => {
+    selections.current = { undo: [], redo: [] };
+    setSkipped(new Set());
+    setTrace({ key: "", busy: false });
+    setRun(null);
+    setValidation({ source: "" });
+    setSelection({ kind: "step", id: "steps.0" });
+    setView("editor");
+    setPanel("table");
+  };
+  async function openWorkflow(path: string) {
+    try {
+      const file = await native<{ path: string; source: string; revision: string }>("read_workflow", { path });
+      doc.load(file.source);
+      setWorkflowPath(file.path);
+      setRevision(file.revision);
+      resetEditor();
+      addLog(`Opened ${file.path}`);
+    } catch (e) {
+      fail(e);
+    }
+  }
+  function startTemplate(t: Template) {
+    doc.load(t.source);
+    doc.markSaved("");
+    setWorkflowPath("");
+    setRevision(null);
+    resetEditor();
+    const key = `mai.bindings:${workspace}:${readPipeline(t.source).name}`;
+    if (!Object.keys(store.get(key, {})).length && Object.keys(t.samples).length) store.set(key, t.samples);
+    setBindings(store.get(key, t.samples));
+    say(`New workflow from “${t.title}”. Save it to serve it as /api/${slug(readPipeline(t.source).name)}.`);
+  }
+  async function save(path = workflowPath) {
+    if (!desktop || !workspace) return say("Open a project folder to save workflows.");
+    if (!path) return setSaveAs(`workflows/${slug(pipeline.name)}.yaml`);
+    try {
+      setBusy("Saving");
+      const saved = await native<{ path: string; source: string; revision: string }>("save_workflow", {
+        path,
+        source,
+        expectedRevision: path === workflowPath ? revision : null,
+      });
+      doc.markSaved(saved.source);
+      const key = `mai.bindings:${workspace}:${saved.path}`;
+      store.set(key, bindings);
+      setWorkflowPath(saved.path);
+      setRevision(saved.revision);
+      setSaveAs(null);
+      say(`Saved ${saved.path}`);
+      addLog(`Saved ${saved.path}`);
+      loadEntries().catch(() => undefined);
+    } catch (e) {
+      fail(e);
     } finally {
       setBusy("");
     }
   }
-  async function choose() {
-    await task("Opening workspace", async () => {
-      const selected = await invoke<{ path: string } | null>(
-        "choose_workspace",
-      );
-      if (!selected) {
-        setMessage("Workspace selection canceled.");
-        return;
-      }
-      setWorkspace(selected.path);
-      document.load(example);
-      setArgumentDraft(undefined);
-      setBlockDraft(false);
-      setSetupDraft(false);
-      setEditorGeneration((value) => value + 1);
-      setWorkflowPath("");
-      setRevision(null);
-      setWorkflowPaths([]);
-      setValidation(undefined);
-      setValidatedSource("");
-      setSelected(undefined);
-      const listing = await invoke<{ paths: string[] }>("list_workflows");
-      setWorkflowPaths(listing.paths);
-      setArtifact(undefined);
-      setInspection(undefined);
-      setMessage(
-        "Workspace authorized. File paths are relative to this folder.",
-      );
-    });
-  }
-  function discardGuard(action: () => void) {
-    if (document.dirty || hasDraft) setPendingDiscard(() => action);
-    else action();
-  }
-  async function loadWorkflow(path: string) {
-    if (!path) return;
-    await task("Loading workflow", async () => {
-      const loaded = await invoke<{
-        path: string;
-        source: string;
-        revision: string;
-      }>("read_workflow", { path });
-      document.load(loaded.source);
-      setArgumentDraft(undefined);
-      setBlockDraft(false);
-      setSetupDraft(false);
-      setEditorGeneration((value) => value + 1);
-      setWorkflowPath(loaded.path);
-      setSavePath(loaded.path);
-      setRevision(loaded.revision);
-      setSelected(undefined);
-      setValidation(undefined);
-      setValidatedSource("");
-      setMessage(`Loaded ${loaded.path}.`);
-    });
-  }
-  function startTemplate(template: (typeof workflowTemplates)[number]) {
-    document.load(template.source);
-    // A new workflow must be saved before it can be packaged.
-    document.markSaved("");
-    setWorkflowPath("");
-    setSavePath(`workflows/${template.id}.yaml`);
-    setRevision(null);
-    setArgumentDraft(undefined);
-    setBlockDraft(false);
-    setSetupDraft(false);
-    setSelected(undefined);
-    setValidation(undefined);
-    setValidatedSource("");
-    setArtifact(undefined);
-    setInspection(undefined);
-    setEditorGeneration((value) => value + 1);
-    setTab("blocks");
-    setShowTemplates(false);
-    setShowSetup(true);
-    setMessage(
-      "Start with workbook setup, then edit the connected blocks. Open Project & inputs to choose workbook paths.",
-    );
-  }
-  async function saveWorkflow() {
-    if (hasDraft) {
-      setMessage("Apply or discard the argument draft before saving.");
-      return;
-    }
-    await task("Saving workflow", async () => {
-      const saved = await invoke<{
-        path: string;
-        source: string;
-        revision: string;
-      }>("save_workflow", {
-        path: savePath,
-        source,
-        expectedRevision: savePath === workflowPath ? revision : null,
-      });
-      document.markSaved(saved.source);
-      setWorkflowPath(saved.path);
-      setSavePath(saved.path);
-      setRevision(saved.revision);
-      setWorkflowPaths((paths) =>
-        Array.from(new Set([...paths, saved.path])).sort(),
-      );
-      setMessage(`Saved ${saved.path}.`);
-    });
-  }
-  const count = topLevelCount(source);
-  const selectedIndex =
-    selected && /^step\.\d+$/.test(selected)
-      ? Number(selected.split(".")[1])
-      : undefined;
-  function mutateSteps(action: "add" | "delete" | "up" | "down") {
-    if (hasDraft) return;
+  async function runWorkflow() {
+    if (!canPreview) return say(!desktop ? "Running needs the desktop app." : !workspace ? "Open a project folder first." : !bound ? "Give every source a sample file first." : "Fix the YAML first.");
     try {
-      document.transact(action, (current) =>
-        changeSteps(current, action, selectedIndex),
-      );
-      if (action === "add") setSelected(`step.${count}`);
-      else if (action === "delete")
-        setSelected(
-          count > 1 && selectedIndex !== undefined
-            ? `step.${Math.min(selectedIndex, count - 2)}`
-            : undefined,
-        );
-      else if (selectedIndex !== undefined)
-        setSelected(`step.${selectedIndex + (action === "up" ? -1 : 1)}`);
-      if (tab === "blocks" && buildView === "outline")
-        setOutlineFocusRequest((value) => value + 1);
+      setBusy("Running");
+      addLog(`Run started: ${pipeline.inputs.map((i) => bindings[i.id]).join(", ")}`);
+      const result = await request<RunResult>("run", { workspace, yaml: source, inputs: bindings });
+      setRun({ source, result });
+      addLog(`Wrote ${result.path}`);
+      say(`Run finished. Output written to ${result.path}`);
+      setSelection({ kind: "output", index: 0 });
     } catch (e) {
-      setError(true);
-      setMessage(String(e));
+      fail(e);
+      setConsoleTab("problems");
+    } finally {
+      setBusy("");
     }
   }
+  const toggleSkip = (top: number) => {
+    const next = new Set(skipped);
+    if (next.has(top)) next.delete(top);
+    else next.add(top);
+    setSkipped(next);
+  };
+
+  // ---- close guard and shortcuts ------------------------------------------------------------
+  const dirtyRef = useRef(false);
+  dirtyRef.current = doc.dirty;
   useEffect(() => {
-    const keyboard = (event: KeyboardEvent) => {
-      if (showPackageBuilder || showTemplates || pendingDiscard) return;
-      const target = event.target as HTMLElement;
-      const typing =
-        ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName) ||
-        target.isContentEditable;
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
-        event.preventDefault();
-        if (isDesktop() && workspace && !busy && savePath) void saveWorkflow();
-      } else if (
-        !typing &&
-        !busy &&
-        !hasDraft &&
-        (event.ctrlKey || event.metaKey) &&
-        ["z", "y"].includes(event.key.toLowerCase())
-      ) {
-        event.preventDefault();
-        event.stopPropagation();
-        if (event.key.toLowerCase() === "y" || event.shiftKey) document.redo();
-        else document.undo();
-      } else if (
-        !typing &&
-        !busy &&
-        !hasDraft &&
-        (tab === "graph" || (tab === "blocks" && buildView === "outline")) &&
-        event.altKey &&
-        event.key === "Insert"
-      ) {
-        event.preventDefault();
-        setShowLibrary(true);
-      } else if (
-        !typing &&
-        !busy &&
-        !hasDraft &&
-        !showLibrary &&
-        !!target.closest(".workbench-outline, .canvas") &&
-        (tab === "graph" || (tab === "blocks" && buildView === "outline")) &&
-        selectedIndex !== undefined
-      ) {
-        if (event.key === "Delete" || event.key === "Backspace") {
-          event.preventDefault();
-          mutateSteps("delete");
-        } else if (
-          event.altKey &&
-          event.key === "ArrowUp" &&
-          selectedIndex > 0
-        ) {
-          event.preventDefault();
-          mutateSteps("up");
-        } else if (
-          event.altKey &&
-          event.key === "ArrowDown" &&
-          selectedIndex < count - 1
-        ) {
-          event.preventDefault();
-          mutateSteps("down");
-        }
-      }
-    };
-    window.addEventListener("keydown", keyboard, true);
-    return () => window.removeEventListener("keydown", keyboard, true);
-  });
-  async function validate() {
-    if (hasDraft) return;
-    await task("Validating", async () => {
-      const result = await request<Validation>("validate", {
-        workspace,
-        yaml: source,
-      });
-      setValidation(result);
-      setValidatedSource(source);
-      setMessage(
-        `Validated ${result.name}: ${result.inputs.length} inputs, ${result.sheets.length} output sheets.`,
+    if (!("__TAURI_INTERNALS__" in window)) return;
+    let stop: (() => void) | undefined;
+    const w = getCurrentWindow();
+    w.onCloseRequested((e) => {
+      if (!dirtyRef.current) return;
+      e.preventDefault();
+      setPendingDiscard(() => () => void w.destroy());
+    }).then((s) => (stop = s), () => undefined);
+    return () => stop?.();
+  }, []);
+  const keys = useRef<(e: KeyboardEvent) => void>(() => undefined);
+  keys.current = (e: KeyboardEvent) => {
+    const mod = e.metaKey || e.ctrlKey;
+    const typing = /INPUT|TEXTAREA|SELECT/.test((document.activeElement as HTMLElement)?.tagName ?? "");
+    const k = e.key.toLowerCase();
+    if (mod && k === "k") { e.preventDefault(); setPalette("all"); return; }
+    if (mod && k === "s") { e.preventDefault(); (document.activeElement as HTMLElement)?.blur?.(); setTimeout(() => void save(), 0); return; }
+    if (view !== "editor") return;
+    if (mod && e.key === "Enter") { e.preventDefault(); void runWorkflow(); return; }
+    if (mod && e.shiftKey && k === "a") { e.preventDefault(); setPalette("add"); return; }
+    if (mod && k === "1") { e.preventDefault(); setShowNav((v) => !v); return; }
+    if (mod && k === "2") { e.preventDefault(); setShowInsp((v) => !v); return; }
+    if (typing || palette) return;
+    if (mod && k === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
+    if (mod && k === "y") { e.preventDefault(); redo(); return; }
+    if (mod && k === "/" && selectedStep) { e.preventDefault(); toggleSkip(selectedStep.top); return; }
+    if ((e.key === "ArrowDown" || e.key === "ArrowUp") && !mod && (document.activeElement?.closest(".nav") || document.activeElement === document.body)) {
+      e.preventDefault();
+      const i = selectedStep ? pipeline.steps.indexOf(selectedStep) : -1;
+      const next = pipeline.steps[Math.max(0, Math.min(pipeline.steps.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)))];
+      if (next) setSelection({ kind: "step", id: next.id });
+    }
+  };
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => keys.current(e);
+    window.addEventListener("keydown", h);
+    return () => window.removeEventListener("keydown", h);
+  }, []);
+  // Focus the selected row when it changes from the keyboard.
+  useEffect(() => {
+    document.querySelector<HTMLElement>(".nav .row.sel")?.scrollIntoView?.({ block: "nearest" });
+  }, [selection]);
+
+  // ---- commands -------------------------------------------------------------------------------
+  const cols = (() => {
+    const steps = trace.data?.steps;
+    if (!steps || !selectedStep) return [] as string[];
+    const t = steps[selectedStep.top - 1] ?? steps[selectedStep.top];
+    return t?.columns.map((c) => c.name) ?? [];
+  })();
+  const addCommands: Command[] = stepSpecs.map((s) => ({
+    group: "Add step",
+    label: s.title,
+    hint: s.description,
+    glyph: s.icon,
+    run: () => {
+      const arg = parse(s.example || "true");
+      insertAfter(s.op === "if" ? { if: arg, then: [] } : { [s.op]: arg }, s.title);
+    },
+  }));
+  const commands: Command[] = palette === "add" ? addCommands : [
+    { group: "Workflow", label: "Run with sample files", glyph: "▶", kbd: "⌘↵", run: () => void runWorkflow() },
+    { group: "Workflow", label: "Save", glyph: "↓", kbd: "⌘S", run: () => void save() },
+    { group: "Workflow", label: "Save as…", glyph: "↓", run: () => setSaveAs(workflowPath || `workflows/${slug(pipeline.name)}.yaml`) },
+    { group: "Workflow", label: "API endpoint and distribution", glyph: "⇄", run: () => setSelection({ kind: "endpoint" }) },
+    { group: "Workflow", label: "Build Linux package…", glyph: "▣", run: () => setPackaging(true) },
+    { group: "Workflow", label: "All workflows", glyph: "⌂", run: () => setView("home") },
+    { group: "Edit", label: "Undo", glyph: "↶", kbd: "⌘Z", run: undo },
+    { group: "Edit", label: "Redo", glyph: "↷", kbd: "⇧⌘Z", run: redo },
+    ...addCommands,
+    ...pipeline.steps.map((s) => ({ group: "Go to", label: `${s.depth ? "  " : `${s.top + 1}. `}${s.summary}`, glyph: s.spec?.icon, run: () => setSelection({ kind: "step", id: s.id }) })),
+    ...pipeline.inputs.map((i) => ({ group: "Go to", label: `Source ${i.id}`, glyph: "↳", run: () => setSelection({ kind: "source", id: i.id }) })),
+    ...entries.filter((w) => w.path !== workflowPath).map((w) => ({ group: "Open workflow", label: w.name || w.path, hint: w.path, glyph: "▤", run: () => guard(() => void openWorkflow(w.path)) })),
+    ...workflowTemplates.map((t) => ({ group: "New from template", label: t.title, hint: t.description, glyph: "+", run: () => guard(() => startTemplate(t)) })),
+    { group: "View", label: "Toggle steps panel", glyph: "◧", kbd: "⌘1", run: () => setShowNav((v) => !v) },
+    { group: "View", label: "Toggle inspector", glyph: "◨", kbd: "⌘2", run: () => setShowInsp((v) => !v) },
+    { group: "View", label: "Show YAML", glyph: "{}", run: () => setConsoleTab("yaml") },
+    { group: "View", label: "Switch appearance", glyph: "◐", run: () => setTheme(theme === "system" ? "light" : theme === "light" ? "dark" : "system") },
+  ];
+
+  // ---- the stage: what the table shows ---------------------------------------------------------
+  const stage = (() => {
+    const notReady = (title: string, body: React.ReactNode, action?: React.ReactNode) => (
+      <DataGrid columns={[]} rows={[]} total={0} header={<b>{title}</b>} empty={<div className="empty"><b>{title}</b><span>{body}</span>{action}</div>} />
+    );
+    if (selection.kind === "endpoint")
+      return notReady("API endpoint", <>MaiService serves this workflow at <code>/api/{route}</code>. Its settings and request format are in the inspector.</>);
+    if (selection.kind === "source" || selection.kind === "output") {
+      const name = selection.kind === "source" ? `Source ${selection.id}` : `Output ${pipeline.outputs[selection.index]?.name}`;
+      if (!desktop) return notReady(name, "Open the desktop app to read files.");
+      if (!fileToInspect) return notReady(name, selection.kind === "source" ? "Set a sample file in the inspector to see its contents." : "Run the workflow (⌘↵) to write this output and see it here.", selection.kind === "output" ? <button className="primary" onClick={() => void runWorkflow()}>▶ Run</button> : undefined);
+      if (inspection.key !== inspectKey) return notReady(name, "Reading…");
+      if (inspection.error) return notReady(name, <span className="err">{inspection.error}</span>);
+      const d = inspection.data!;
+      const all = (d.rows ?? []).map((r) => r ?? []);
+      // Sources show the raw sheet with column letters, so header rows and
+      // fixed positions can be read off directly; outputs show their header.
+      const raw = selection.kind === "source";
+      const width = Math.max(0, ...all.map((r) => r.length));
+      const head = raw ? Array.from({ length: width }, (_, i) => letters(i)) : all[0] ?? [];
+      const rows = raw ? all : all.slice(1);
+      const total = raw ? d.totalRows : Math.max(0, d.totalRows - 1);
+      return (
+        <DataGrid
+          columns={profileRows(head, rows)}
+          rows={rows}
+          total={total}
+          header={<><b>{name}</b><span className="meta mono">{fileToInspect}{d.sheets.length > 1 || d.sheet !== "Sheet1" ? ` › ${d.sheet}` : ""}</span><span className="meta">{total.toLocaleString()} rows · {head.length} columns</span></>}
+        />
       );
-    });
-  }
-  async function run() {
-    if (hasDraft) return;
-    await task("Running workflow", async () => {
-      const result = await request<RunResult>("run", {
-        workspace,
-        yaml: source,
-        inputs: bindings,
-      });
-      setArtifact(result);
-      setShowData(true);
-      setInspection(result.preview);
-      setRunIdentity(currentIdentity);
-      setInspectPath(result.path);
-      setLoadedInspectPath(result.path);
-      setMessage(
-        result.previewWarning
-          ? `Run completed; workbook saved. Preview unavailable: ${result.previewWarning}`
-          : "Run completed. Inspect the generated workbook in Excel data.",
-      );
-    });
-  }
-  async function inspect(sheet?: string, offset = 0, path = inspectPath) {
-    await task("Reading workbook", async () => {
-      setInspection(
-        await request<Inspection>("inspectWorkbook", {
-          workspace,
-          path,
-          sheet,
-          offset,
-          limit: 100,
-        }),
-      );
-      setLoadedInspectPath(path);
-      setInspectPath(path);
-      setMessage(
-        "Workbook loaded. Cells are read-only; original inputs are preserved.",
-      );
-    });
-  }
-  const ready = isDesktop() && !!workspace && !busy && !packagePending;
+    }
+    const s = selectedStep;
+    if (!s) return notReady("No step selected", "Choose a step on the left.");
+    if (!desktop) return notReady(`${s.top + 1}. ${s.summary}`, "The browser preview edits YAML only. Open the desktop app to see the table after each step.");
+    if (!workspace) return notReady("Open a project folder", "Studio reads sample files from a folder on this computer.", <button className="primary" onClick={() => void chooseWorkspace()}>Open folder…</button>);
+    if (!bound) {
+      const missing = pipeline.inputs.find((i) => !bindings[i.id])!;
+      return notReady("Add a sample file", <>Choose a sample file for source <b>{missing.id}</b> to see the data at every step.</>, <button className="primary" onClick={() => setSelection({ kind: "source", id: missing.id })}>Choose sample file</button>);
+    }
+    if (parsed.error) return notReady("The YAML has an error", <span className="err">{parsed.error}</span>);
+    const steps = trace.data?.steps;
+    if (!steps) return notReady(`${s.top + 1}. ${s.summary}`, trace.error ? <span className="err">{trace.error}</span> : "Running the steps on the sample files…");
+    const t = steps[s.top];
+    if (!t) {
+      const failed = steps.at(-1)!;
+      return notReady(`${s.top + 1}. ${s.summary}`, <>Step {failed.step + 1} failed, so this step did not run.<span className="err">{failed.error}</span></>, <button className="btn" onClick={() => setSelection({ kind: "step", id: `steps.${failed.step}` })}>Go to step {failed.step + 1}</button>);
+    }
+    const prev = s.top > 0 ? steps[s.top - 1] : undefined;
+    const added = new Set(t.columns.filter((c) => prev && !prev.columns.some((p) => p.name === c.name)).map((c) => c.name));
+    const delta = prev ? t.total - prev.total : 0;
+    const header = (
+      <>
+        <b>{s.depth ? `In step ${s.top + 1}` : `${s.top + 1}.`} {s.summary}</b>
+        <span className="meta">{t.total.toLocaleString()} rows · {t.columns.length} columns</span>
+        {delta !== 0 && <span className={`tag ${delta < 0 ? "minus" : "plus"}`}>{delta > 0 ? "+" : "−"}{Math.abs(delta).toLocaleString()} rows</span>}
+        {added.size > 0 && <span className="tag plus">+{[...added].join(", ")}</span>}
+        {t.skipped && <span className="tag mod">left out of preview</span>}
+        {s.depth > 0 && <span className="tag">shows the table after step {s.top + 1}</span>}
+        <span className="spacer" />
+        {trace.busy && <span className="meta">Updating…</span>}
+      </>
+    );
+    if (t.error) return notReady(`${s.top + 1}. ${s.summary}`, <span className="err">{t.error}</span>);
+    if (!t.columns.length) return notReady(`${s.top + 1}. ${s.summary}`, "There is no table yet at this step. Start with a Read step.");
+    return <DataGrid columns={t.columns} rows={t.rows ?? []} total={t.total} added={added} header={header} onAction={onColumnAction} />;
+  })();
+
+  // ---- render -------------------------------------------------------------------------------------
+  const status = busy
+    ? { cls: "busy", text: `${busy}…` }
+    : parsed.error || (validation.source === source && validation.error) || trace.data?.steps.some((s) => s.error)
+      ? { cls: "bad", text: "Has errors" }
+      : !desktop ? { cls: "", text: "Browser preview" }
+      : !workspace ? { cls: "", text: "No folder open" }
+      : !bound ? { cls: "warn", text: "Needs sample files" }
+      : trace.busy ? { cls: "busy", text: "Previewing…" }
+      : trace.data ? { cls: "ok", text: `Valid · ${trace.data.steps.at(-1)?.total.toLocaleString() ?? 0} rows out` }
+      : { cls: "", text: "Ready" };
+  const panes = `panes${showNav ? "" : " no-nav"}${showInsp ? "" : " no-insp"}`;
   return (
-    <div className={`app ${focusMode ? "focus-mode" : ""}`}>
-      <header>
-        <div className="brand">
-          <b className="mark">M</b>
-          <strong>
-            mai<span>studio</span>
-          </strong>
-          <small>WORKFLOW LAB</small>
-        </div>
-        <div className="toolbar">
-          <button
-            aria-expanded={showTemplates}
-            disabled={!!busy || packagePending}
-            onClick={() => setShowTemplates(!showTemplates)}
-          >
-            + New<span className="label-optional">workflow</span>
-          </button>
-          <button
-            aria-expanded={showProject}
-            onClick={() => setShowProject(!showProject)}
-          >
-            Project<span className="label-optional">& inputs</span>
-          </button>
-          <button
-            aria-expanded={showData}
-            onClick={() => setShowData(!showData)}
-          >
-            Excel data{artifact ? " · Output ready" : ""}
-          </button>
-          <button
-            disabled={!ready || hasDraft || document.dirty}
-            onClick={() => setShowPackageBuilder(true)}
-            title={
-              hasDraft || document.dirty
-                ? "Save workflow changes and apply or discard the argument draft first"
-                : "Build an offline Linux deployment ZIP"
-            }
-          >
-            <span className="label-optional">Build</span>Linux package
-          </button>
-          <span className="divider" aria-hidden="true" />
-          <span className="mode">● Offline</span>
-          <button
-            className="ghost theme-toggle"
-            aria-label={`Theme: ${themeChoice}. Switch theme`}
-            title={`Theme: ${themeChoice}`}
-            onClick={() =>
-              setThemeChoice(
-                themeChoice === "system" ? "light" : themeChoice === "light" ? "dark" : "system",
-              )
-            }
-          >
-            {themeIcons[themeChoice]}
-          </button>
-          <button disabled={!ready || hasDraft} onClick={validate}>
-            ✓ Validate
-          </button>
-          <button
-            className="primary"
-            disabled={!ready || !!graph.error || hasDraft}
-            onClick={run}
-          >
-            ▶ Run<span className="label-optional">workflow</span>
-          </button>
-        </div>
-      </header>
-      {!isDesktop() && (
-        <div className="notice">
-          Editor preview · Start the Tauri desktop app to open folders, inspect
-          Excel, validate, and run workflows.
-        </div>
-      )}
-      <main>
-        {showProject && (
-          <aside aria-label="Project and inputs">
-            <div className="eyebrow">WORKSPACE</div>
-            <button
-              className="folder"
-              disabled={!isDesktop() || !!busy || packagePending}
-              onClick={() => discardGuard(() => void choose())}
-            >
-              ▣ {workspace ? "Change workspace" : "Open workspace"}
-            </button>
-            <p className="path">
-              {workspace || "Choose a local project folder"}
-            </p>
-            <hr />
-            <div className="eyebrow">WORKFLOWS</div>
-            <select
-              aria-label="Open workflow"
-              disabled={!ready}
-              value={workflowPath}
-              onChange={(event) => {
-                const path = event.target.value;
-                discardGuard(() => void loadWorkflow(path));
-              }}
-            >
-              <option value="">Open a workflow…</option>
-              {workflowPaths.map((path) => (
-                <option key={path} value={path}>
-                  {path}
-                </option>
-              ))}
-            </select>
-            <p className="hint">
-              Browse workflows/ or open a workspace-relative YAML path.
-            </p>
-            <label>
-              Open path
-              <input
-                aria-label="Workflow open path"
-                disabled={!!busy}
-                value={openPath}
-                onChange={(event) => setOpenPath(event.target.value)}
-              />
-            </label>
-            <button
-              disabled={!ready || !openPath.trim()}
-              onClick={() => discardGuard(() => void loadWorkflow(openPath))}
-            >
-              Open workflow path
-            </button>
-            <label>
-              Save path
-              <input
-                aria-label="Workflow save path"
-                disabled={!!busy}
-                value={savePath}
-                onChange={(event) => setSavePath(event.target.value)}
-              />
-            </label>
-            <button
-              disabled={!ready || !savePath.trim() || hasDraft}
-              onClick={saveWorkflow}
-            >
-              Save workflow{document.dirty || hasDraft ? " •" : ""}
-            </button>
-            <hr />
-            <div className="eyebrow">INPUT FILES</div>
-            <p className="hint">
-              Paths relative to workspace. Validate after changing declared
-              inputs.
-            </p>
-            {(
-              workbookSettings?.inputs.map((input) => ({
-                name: input.id,
-                label: input.label,
-              })) ??
-              validation?.inputs ?? [{ name: "parts", label: "Parts list" }]
-            ).map((input) => (
-              <label key={input.name}>
-                {input.label}
-                <input
-                  value={bindings[input.name] ?? ""}
-                  placeholder="inputs/workbook.xlsx"
-                  onChange={(e) => {
-                    setBindings({ ...bindings, [input.name]: e.target.value });
-                  }}
-                />
-                <span className="hint">{input.name}</span>
-              </label>
-            ))}
-            <hr />
-            <div className="eyebrow">EXECUTION</div>
-            <p>
-              Local Go engine <small>OFFLINE</small>
-            </p>
-            <p className="hint">
-              SQL and external REST connections are disabled in this development
-              slice.
-            </p>
-            <div className="bottom">
-              <div className="eyebrow">LINUX DEPLOYMENT</div>
-              <p className="hint">
-                Build an offline ZIP with selected workflows and Linux service
-                settings from the header.
-              </p>
-            </div>
-          </aside>
-        )}
-        <section
-          className={`workspace ${showData ? "data-open" : ""} ${showData && fullData ? "data-full" : ""}`}
-        >
-          <div className="documentbar">
-            <strong>
-              ◇{" "}
-              {workflowPath ||
-                workbookSettings?.name ||
-                validation?.name ||
-                "Untitled workflow"}
-              {document.dirty || hasDraft ? " • Unsaved" : ""}
-            </strong>
-            <span className="state">
-              {validatedSource === source
-                ? "✓ Validated"
-                : "● Edited · validate to check"}
-            </span>
-          </div>
-          <nav aria-label="Editor views">
-            <button
-              className={tab === "blocks" ? "active" : ""}
-              disabled={hasDraft}
-              onClick={() => {
-                setTab("blocks");
-                setShowLibrary(false);
-              }}
-            >
-              Build
-            </button>
-            <button
-              className={tab === "graph" ? "active" : ""}
-              aria-label="Workflow canvas"
-              disabled={hasDraft}
-              onClick={() => setTab("graph")}
-            >
-              Overview
-            </button>
-            <button
-              className={tab === "source" ? "active" : ""}
-              aria-label="YAML source"
-              disabled={hasDraft}
-              onClick={() => setTab("source")}
-            >
-              Advanced YAML
-            </button>
-            <span>
-              {count} connected steps ·{" "}
-              {tab === "blocks"
-                ? "Drag, snap, and configure"
-                : "Ordered workflow"}
-            </span>
-          </nav>
-          {hasDraft && (
-            <div className="notice" role="status">
-              {blockDraft ? (
-                "Finish connecting and filling in your blocks, or discard block edits, before saving, running, or switching views."
-              ) : setupDraft ? (
-                "Apply or discard workbook settings before saving, running, or switching views."
-              ) : (
-                <>
-                  Unapplied argument draft. Apply or discard it in the inspector
-                  before saving, running, packaging, changing steps, switching
-                  views, or undoing.
-                </>
-              )}
-            </div>
-          )}
-          <details className="next-action"><summary>Workflow checklist</summary><div>
-            <strong>Next:</strong>{" "}
-            {!workspace ? (
-              <button onClick={() => setShowProject(true)}>
-                Set up project and inputs
-              </button>
-            ) : (workbookSettings?.inputs ?? []).some(
-                (input) => !bindings[input.id]?.trim(),
-              ) ? (
-              <button onClick={() => setShowProject(true)}>
-                Choose input files
-              </button>
-            ) : validatedSource !== source ? (
-              <span>Check inputs and steps, then validate.</span>
-            ) : !artifact || runIdentity !== currentIdentity ? (
-              <span>Run workflow locally.</span>
-            ) : (
-              <button onClick={() => setShowData(true)}>View results</button>
-            )}
-          </div></details>
-          <div className="authoring-toolbar" role="toolbar" aria-label="Workflow tools">
-            <button
-              disabled={!document.canUndo || !!busy || hasDraft}
-              onClick={document.undo}
-              title="Ctrl/Cmd+Z outside text fields"
-            >
-              Undo
-            </button>
-            <button
-              disabled={!document.canRedo || !!busy || hasDraft}
-              onClick={document.redo}
-              title="Ctrl/Cmd+Shift+Z outside text fields"
-            >
-              Redo
-            </button>
-            <button
-              aria-expanded={showSetup}
-              disabled={
-                setupDraft ||
-                !!busy ||
-                blockDraft ||
-                argumentDraft !== undefined
-              }
-              onClick={() => setShowSetup(!showSetup)}
-            >
-              Workbook setup
-            </button>
-            {tab === "blocks" && (
-              <div className="build-view" aria-label="Build view">
-                <button
-                  aria-pressed={buildView === "blocks"}
-                  disabled={hasDraft || !!busy}
-                  onClick={() => setBuildView("blocks")}
-                >
-                  Blocks
-                </button>
-                <button
-                  aria-pressed={buildView === "outline"}
-                  disabled={hasDraft || !!busy}
-                  onClick={() => setBuildView("outline")}
-                >
-                  Step outline
-                </button>
-              </div>
-            )}
-            {(tab === "graph" || tab === "blocks") && (
+    <div className="app" data-m={panel}>
+      <header className="toolbar">
+        <div className="tl">
+          {view === "editor" && <button className="tb hide-sm" aria-label="Steps panel" aria-pressed={showNav} title="Steps panel (⌘1)" onClick={() => setShowNav(!showNav)}>{icons.nav}</button>}
+          <div className="title">
+            <button onClick={() => guard(() => setView("home"))} title="All workflows">Workflows</button>
+            {view === "editor" && (
               <>
-                <button
-                  disabled={!!graph.error || !!busy || hasDraft}
-                  onClick={() => setShowLibrary(!showLibrary)}
-                  aria-expanded={showLibrary}
-                  title="Browse steps with descriptions and configure their settings"
-                >
-                  + Add step
-                </button>
-                {(tab === "graph" || buildView === "outline") && (
-                  <>
-                    <button
-                      disabled={
-                        selectedIndex === undefined ||
-                        selectedIndex === 0 ||
-                        !!busy ||
-                        hasDraft
-                      }
-                      onClick={() => mutateSteps("up")}
-                      title="Alt+↑"
-                    >
-                      Move up
-                    </button>
-                    <button
-                      disabled={
-                        selectedIndex === undefined ||
-                        selectedIndex >= count - 1 ||
-                        !!busy ||
-                        hasDraft
-                      }
-                      onClick={() => mutateSteps("down")}
-                      title="Alt+↓"
-                    >
-                      Move down
-                    </button>
-                    <button
-                      disabled={
-                        selectedIndex === undefined || !!busy || hasDraft
-                      }
-                      onClick={() => mutateSteps("delete")}
-                      title="Delete"
-                    >
-                      Delete step
-                    </button>
-                  </>
-                )}
+                <span className="kbd">/</span>
+                <b title={workflowPath || "Not saved yet"}>{pipeline.name || "Untitled"}</b>
+                <span className="edited">{doc.dirty ? (workflowPath ? "— Edited" : "— Not saved") : ""}</span>
               </>
             )}
-            <button className="focus-toggle" aria-pressed={focusMode} onClick={() => setFocusMode(!focusMode)} title="Hide navigation to give the editor more space">
-              {focusMode ? "Exit focus mode" : "Focus mode"}
-            </button>
           </div>
-          {showLibrary && (
-            <section className="node-library" aria-label="Node library">
-              <div className="library-heading">
-                <div>
-                  <strong>Add a step</strong>
-                  <p>
-                    Choose what happens next. Settings open after insertion.
-                  </p>
-                </div>
-                <button onClick={() => setShowLibrary(false)}>
-                  Close library
-                </button>
-              </div>
-              <input
-                aria-label="Search steps"
-                autoFocus
-                placeholder="Search steps: read, filter, group…"
-                value={nodeSearch}
-                onChange={(event) => setNodeSearch(event.target.value)}
-              />
-              <div className="library-filters" role="group" aria-label="Step categories">
-                {["All", ...new Set(operations.map((op) => op.category))].map((category) => (
-                  <button
-                    key={category}
-                    aria-pressed={libraryCategory === category}
-                    onClick={() => setLibraryCategory(category)}
-                  >
-                    {category}
-                  </button>
-                ))}
-              </div>
-              <div className="library-items">
-                {operations
-                  .filter(
-                    (op) =>
-                      (libraryCategory === "All" || op.category === libraryCategory) &&
-                      `${op.title} ${op.operation} ${op.description}`
-                        .toLowerCase()
-                        .includes(nodeSearch.toLowerCase()),
-                  )
-                  .map((op) => (
-                    <button
-                      className={`library-item category-${op.category}`}
-                      key={op.operation}
-                      disabled={hasDraft || !!busy}
-                      onClick={() => {
-                        try {
-                          document.transact("Add step", (current) =>
-                            addOperation(
-                              current,
-                              op.operation,
-                              op.defaultArgument,
-                            ),
-                          );
-                          setSelected(`step.${count}`);
-                          if (tab === "blocks") {
-                            setBuildView("outline");
-                            setOutlineFocusRequest((value) => value + 1);
-                          }
-                          setShowLibrary(false);
-                        } catch (error) {
-                          setError(true);
-                          setMessage(String(error));
-                        }
-                      }}
-                    >
-                      <span className="library-icon">{op.icon}</span>
-                      <span>
-                        <strong>{op.title}</strong>
-                        <small>{op.description}</small>
-                        {op.service && (
-                          <small>
-                            Service only · unavailable in local runs
-                          </small>
-                        )}
-                      </span>
-                    </button>
-                  ))}
-              </div>
-            </section>
+        </div>
+        <div className="center">{view === "editor" && <span className={`pill ${status.cls}`} role="status"><i />{status.text}</span>}</div>
+        <div className="tr">
+          <button className="tb hide-sm" onClick={() => setPalette("all")} title="Command menu">Search <span className="kbd">⌘K</span></button>
+          {view === "editor" && (
+            <>
+              <button className="tb" aria-label="Undo" title="Undo (⌘Z)" disabled={!doc.canUndo} onClick={undo}>{icons.undo}</button>
+              <button className="tb hide-sm" aria-label="Redo" title="Redo (⇧⌘Z)" disabled={!doc.canRedo} onClick={redo}>{icons.redo}</button>
+            </>
           )}
-          <div className={`editor ${showSetup ? "with-setup" : ""}`}>
-            {showSetup && (
-              <WorkflowSetup
-                key={`setup-${editorGeneration}`}
-                source={source}
-                onChange={setSource}
-                onDraftChange={setSetupDraft}
-                disabled={!!busy || blockDraft || argumentDraft !== undefined}
-              />
-            )}
-            <div className="editor-content">
-              {tab === "blocks" && buildView === "outline" ? (
-                <div className="outline-layout">
-                  {graph.error ? (
-                    <div className="workbench-outline" role="alert">
-                      {graph.error}{" "}
-                      <button
-                        disabled={hasDraft}
-                        onClick={() => setTab("source")}
-                      >
-                        Fix in YAML
-                      </button>
-                    </div>
-                  ) : (
-                    <WorkbenchOutline
-                      nodes={graph.nodes}
-                      selected={selected}
-                      focusRequest={outlineFocusRequest}
-                      disabled={hasDraft || !!busy}
-                      onSelect={setSelected}
-                    />
-                  )}
-                  <StepInspector
-                    columnSuggestions={suggestColumns(
-                      source,
-                      selected,
-                      inspection,
-                      loadedInspectPath,
-                      bindings,
-                    )}
-                    draft={argumentDraft}
-                    onDraftChange={setArgumentDraft}
-                    disabled={!!busy || setupDraft}
-                    source={source}
-                    selected={selected}
-                    onChange={setSource}
-                    onSource={() => setTab("source")}
-                  />
-                </div>
-              ) : tab === "blocks" ? (
-                <Suspense
-                  fallback={
-                    <div className="editor-loading" role="status">
-                      Opening block editor…
-                    </div>
-                  }
-                >
-                  <BlockEditor
-                    key={editorGeneration}
-                    source={source}
-                    onChange={setSource}
-                    disabled={!!busy || setupDraft}
-                    onDraftChange={setBlockDraft}
-                    onAdvanced={() => setTab("source")}
-                  />
-                </Suspense>
-              ) : tab === "graph" ? (
-                <div className="canvas-layout">
-                  <div className="canvas">
-                    <ReactFlow<WorkflowGraphNode>
-                      nodes={graph.nodes.map((node) => ({
-                        ...node,
-                        selected: node.id === selected,
-                      }))}
-                      onNodeClick={(_, node) => {
-                        if (!hasDraft) setSelected(node.id);
-                      }}
-                      onPaneClick={() => {
-                        if (!hasDraft) setSelected(undefined);
-                      }}
-                      deleteKeyCode={null}
-                      edges={graph.edges}
-                      nodeTypes={workflowNodeTypes}
-                      onInit={(instance) => {
-                        flow.current = instance;
-                      }}
-                      defaultViewport={{ x: 48, y: 80, zoom: 1 }}
-                      fitViewOptions={{
-                        minZoom: 0.1,
-                        maxZoom: 1,
-                        padding: 0.15,
-                      }}
-                      nodesConnectable={false}
-                      nodesDraggable={false}
-                      edgesReconnectable={false}
-                      minZoom={0.1}
-                      maxZoom={1.75}
-                    >
-                      <Background gap={22} color="#d9e0e8" />
-                      <Controls showFitView={false} showInteractive={false} />
-                      <MiniMap pannable zoomable />
-                    </ReactFlow>
-                    <div
-                      className="canvas-navigation"
-                      aria-label="Canvas navigation"
-                    >
-                      <button
-                        onClick={() =>
-                          void flow.current?.setViewport(
-                            { x: 48, y: 80, zoom: 1 },
-                            { duration: 200 },
-                          )
-                        }
-                      >
-                        Readable 100%
-                      </button>
-                      <button
-                        onClick={() =>
-                          void flow.current?.fitView({
-                            padding: 0.15,
-                            duration: 200,
-                          })
-                        }
-                      >
-                        Overview
-                      </button>
-                      <button
-                        disabled={!selected}
-                        onClick={() =>
-                          void flow.current?.fitView({
-                            nodes: [{ id: selected! }],
-                            minZoom: 1,
-                            maxZoom: 1,
-                            duration: 200,
-                          })
-                        }
-                      >
-                        Focus selected
-                      </button>
-                    </div>
-                    {graph.error && (
-                      <div role="alert" className="graph-error">
-                        {graph.error}
-                        <button
-                          disabled={hasDraft}
-                          onClick={() => setTab("source")}
-                        >
-                          Fix in YAML
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                  {selected && (
-                    <StepInspector
-                      columnSuggestions={suggestColumns(
-                        source,
-                        selected,
-                        inspection,
-                        loadedInspectPath,
-                        bindings,
-                      )}
-                      draft={argumentDraft}
-                      onDraftChange={setArgumentDraft}
-                      disabled={!!busy || setupDraft}
-                      source={source}
-                      selected={selected}
-                      onChange={setSource}
-                      onSource={() => setTab("source")}
-                    />
-                  )}
-                </div>
-              ) : (
-                <div className="source-editor">
-                  <div className="source-help">
-                    Advanced editing · Blocks and workbook setup generate this
-                    file automatically. Validation uses the production Go
-                    parser.
-                  </div>
-                  <textarea
-                    aria-label="Workflow YAML source"
-                    spellCheck={false}
-                    disabled={!!busy || setupDraft}
-                    value={source}
-                    onChange={(e) => setSource(e.target.value)}
-                  />
-                </div>
-              )}
-            </div>
-          </div>
-          {showData && (
-            <WorkbookPanel
-              inspection={inspection}
-              artifact={artifact}
-              ready={ready}
-              path={inspectPath}
-              loadedPath={loadedInspectPath}
-              onPath={setInspectPath}
-              onInspect={(path, sheet, offset) =>
-                void inspect(sheet, offset, path)
-              }
-              onClose={() => setShowData(false)}
-              fullScreen={fullData}
-              onExpand={() => setFullData(!fullData)}
-              stale={runIdentity !== currentIdentity}
-              inputs={bindings}
+          <button className="tb" aria-label={`Appearance: ${theme}`} title={`Appearance: ${theme}`} onClick={() => setTheme(theme === "system" ? "light" : theme === "light" ? "dark" : "system")}>{icons.theme}</button>
+          {view === "editor" && (
+            <>
+              <button className="tb hide-sm" aria-label="Inspector" aria-pressed={showInsp} title="Inspector (⌘2)" onClick={() => setShowInsp(!showInsp)}>{icons.insp}</button>
+              <button className="tb hide-sm" onClick={() => void save()} disabled={!!busy} title="Save (⌘S)">Save</button>
+              <button className="primary" onClick={() => void runWorkflow()} disabled={!!busy} title="Run with sample files (⌘↵)">▶ Run <span className="kbd hide-sm">⌘↵</span></button>
+            </>
+          )}
+        </div>
+      </header>
+
+      {view === "home" ? (
+        <Home
+          workspace={workspace}
+          desktop={desktop}
+          workflows={entries}
+          onOpenWorkspace={() => guard(() => void chooseWorkspace())}
+          onOpen={(p) => guard(() => void openWorkflow(p))}
+          onTemplate={(t) => guard(() => startTemplate(t))}
+          onBack={doc.dirty || workflowPath ? () => setView("editor") : undefined}
+        />
+      ) : (
+        <div className={panes}>
+          <Navigator
+            hidden={!showNav}
+            pipeline={pipeline}
+            selection={selection}
+            onSelect={(s) => { setSelection(s); if (panel === "steps") setPanel("table"); }}
+            trace={trace.data?.steps}
+            skipped={skipped}
+            onToggleSkip={toggleSkip}
+            onAdd={() => setPalette("add")}
+            onAddInput={() => {
+              const id = ["data", "lookup", "extra", "more"].find((n) => !pipeline.inputs.some((i) => i.id === n)) ?? `input${pipeline.inputs.length + 1}`;
+              try {
+                change(addInput(source, id, id[0].toUpperCase() + id.slice(1)), "Add source");
+                setSelection({ kind: "source", id });
+              } catch (e) { fail(e); }
+            }}
+            onAddOutput={() => {
+              const from = pipeline.datasets.at(-1) ?? "result";
+              const next = addItem(expandSheets(source), ["output", "sheets"], { name: `Sheet${pipeline.outputs.length + 1}`, from });
+              change(next, "Add output sheet");
+              setSelection({ kind: "output", index: pipeline.outputs.length });
+            }}
+            route={route}
+            bindings={bindings}
+          />
+          {stage}
+          {showInsp && (
+            <Inspector
+              source={source}
+              pipeline={pipeline}
+              selection={selection}
+              onChange={change}
+              onError={fail}
+              onSelect={setSelection}
+              onClose={() => (panel === "insp" ? setPanel("table") : setShowInsp(false))}
+              trace={trace.data?.steps}
+              columns={cols}
+              bindings={bindings}
+              onBind={bind}
+              inspection={selection.kind === "source" && inspection.key === inspectKey ? inspection.data : undefined}
+              route={route}
+              workflowPath={workflowPath}
+              canPackage={desktop && !!workspace && !!workflowPath && !doc.dirty}
+              onPackage={() => setPackaging(true)}
+              onAddRead={(input) => {
+                change(insertStep(source, ["steps"], 0, { from: input }), `Read ${input}`);
+                setSelection({ kind: "step", id: "steps.0" });
+              }}
             />
           )}
-        </section>
-      </main>
-      {showTemplates && (
-        <WorkflowTemplatePicker
-          onClose={() => setShowTemplates(false)}
-          onSelect={(template) => {
-            setShowTemplates(false);
-            discardGuard(() => startTemplate(template));
-          }}
+        </div>
+      )}
+      {view === "editor" && (
+        <Console
+          problems={problems}
+          log={log}
+          source={source}
+          onSource={(s) => change(s, "Edit YAML")}
+          onGoTo={(id) => setSelection({ kind: "step", id })}
+          open={consoleTab}
+          onOpen={setConsoleTab}
         />
       )}
-      {showPackageBuilder && (
+      {view === "editor" && (
+        <nav className="mtabs" aria-label="Panels">
+          {(["steps", "table", "insp"] as Panel[]).map((p) => (
+            <button key={p} aria-pressed={panel === p} onClick={() => { setPanel(p); if (p === "insp") setShowInsp(true); }}>
+              {p === "steps" ? "Steps" : p === "table" ? "Table" : "Settings"}
+            </button>
+          ))}
+        </nav>
+      )}
+
+      {palette && <CommandMenu commands={commands} placeholder={palette === "add" ? "Add a step after the selected one…" : "Search commands, steps and workflows…"} onClose={() => setPalette(null)} />}
+      {saveAs !== null && (
+        <div className="scrim" onMouseDown={(e) => e.target === e.currentTarget && setSaveAs(null)}>
+          <form className="dialog" role="dialog" aria-label="Save workflow" onSubmit={(e) => { e.preventDefault(); void save(saveAs); }}>
+            <h2>Save workflow</h2>
+            <p>Files in <code>workflows/</code> become API endpoints. The file name is the route unless the service settings name another.</p>
+            <input className="ctl" aria-label="File path" autoFocus value={saveAs} onChange={(e) => setSaveAs(e.target.value)} />
+            <div className="hint">Serves <code>/api/{String(pipeline.service.route ?? "") || base(saveAs)}</code></div>
+            <div className="actions">
+              <button type="button" className="btn" onClick={() => setSaveAs(null)}>Cancel</button>
+              <button className="primary" disabled={!/\.ya?ml$/.test(saveAs)}>Save</button>
+            </div>
+          </form>
+        </div>
+      )}
+      {packaging && (
         <PackageBuilder
           workspace={workspace}
-          workflows={workflowPaths}
-          blocked={hasDraft || document.dirty}
-          onPending={(pending) => {
-            packagePendingRef.current = pending;
-            setPackagePending(pending);
-          }}
-          onClose={() => {
-            if (!packagePendingRef.current) setShowPackageBuilder(false);
-          }}
+          workflows={entries.map((e) => e.path)}
+          blocked={doc.dirty}
+          onPending={setPackagePending}
+          onClose={() => !packagePending && setPackaging(false)}
         />
       )}
       {pendingDiscard && (
         <DiscardChangesDialog
-          onCancel={() => setPendingDiscard(undefined)}
+          onCancel={() => setPendingDiscard(null)}
           onDiscard={() => {
-            const action = pendingDiscard;
-            setPendingDiscard(undefined);
-            action();
+            const a = pendingDiscard;
+            setPendingDiscard(null);
+            a();
           }}
         />
       )}
-      <footer role="status" aria-live="polite" className={error ? "error" : ""}>
-        <span>{busy ? `${busy}…` : message}</span>
-        <span>Mai Studio · 0.1</span>
-      </footer>
+      {toast && (
+        <div className="toast" role="status">
+          <span>{toast.text}</span>
+          {toast.undo && doc.canUndo && <button onClick={() => { undo(); setToast(null); }}>Undo</button>}
+        </div>
+      )}
     </div>
   );
 }
