@@ -123,8 +123,8 @@ func TestEndpoints(t *testing.T) {
 	if left, _ := os.ReadDir(filepath.Join(dir, "uploads")); len(left) != 0 {
 		t.Errorf("uploads not cleaned: %d files", len(left))
 	}
-	if c, b := post(t, ts.URL+"/api/bom/upload", map[string]string{"bam": "1"}, [2]string{"a.xlsx", "../../../testdata/bom_basic.xlsx"}, [2]string{"b.xlsx", "../../../testdata/bom_basic.xlsx"}); c != 500 || b["message"] != `Priority workbook has no sheet named "Shortage"` {
-		t.Errorf("missing Shortage sheet should be 500 with the reader's message, got %d %v", c, b)
+	if c, b := post(t, ts.URL+"/api/bom/upload", map[string]string{"bam": "1"}, [2]string{"a.xlsx", "../../../testdata/bom_basic.xlsx"}, [2]string{"b.xlsx", "../../../testdata/bom_basic.xlsx"}); c != 500 || !strings.HasPrefix(b["message"], "Priority file has no priorities.") {
+		t.Errorf("a BOM given as the Priority file should be 500 with the workflow's message, got %d %v", c, b)
 	}
 }
 

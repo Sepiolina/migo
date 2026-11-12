@@ -144,3 +144,77 @@ func TestBOMFixesDashesInMfrPN(t *testing.T) {
 		t.Errorf("no dash log line in %q", logs)
 	}
 }
+
+// The Priority workbook comes in different layouts and sheet names; the FPN
+// and Priority columns are found by their titles.
+func TestBOMPriorityLayouts(t *testing.T) {
+	dir := t.TempDir()
+	// write saves rows on sheet; with first, a junk sheet named first comes before it.
+	write := func(name, sheet string, rows map[string][]any, first ...string) string {
+		f := excelize.NewFile()
+		if len(first) > 0 {
+			f.SetSheetName("Sheet1", first[0])
+			f.SetCellValue(first[0], "A1", "junk")
+			f.NewSheet(sheet)
+		} else {
+			f.SetSheetName("Sheet1", sheet)
+		}
+		for cell, row := range rows {
+			if err := f.SetSheetRow(sheet, cell, &row); err != nil {
+				t.Fatal(err)
+			}
+		}
+		// The reader honours the stored dimension, which excelize leaves at A1.
+		if err := f.SetSheetDimension(sheet, "A1:M10"); err != nil {
+			t.Fatal(err)
+		}
+		p := filepath.Join(dir, name)
+		if err := f.SaveAs(p); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	long := make([]any, 13)
+	long[0], long[1], long[12] = "FPN", "customer P/N", "Priority"
+	longHdr := make([]any, 13)
+	longHdr[0], longHdr[12] = "FPN", "Priority"
+	model := make([]any, 13)
+	model[9], model[10] = "1441229", "20563-0107-00001"
+	cases := map[string]string{
+		// short export, any sheet name: header in row 3, Priority in B
+		"short": write("short.xlsx", "Data", map[string][]any{
+			"A2": {"MMDATA"}, "A3": {"FPN", "Priority"}, "A4": {"FP-1", 1}, "A5": {"FP-2", 0}, "A6": {"FP-3", "2"},
+		}),
+		// long export: header in row 1 with Priority in M, model rows, then
+		// MMDATA and the header again before the data
+		"long": write("long.xlsx", "Shortage", map[string][]any{
+			"A1": long, "A2": model, "A3": {"MMDATA"}, "A4": longHdr,
+			"A5": append([]any{"FP-1"}, append(make([]any, 11), 1)...),
+			"A6": append([]any{"FP-2"}, append(make([]any, 11), 0)...),
+			"A7": append([]any{"FP-3"}, append(make([]any, 11), "2")...),
+		}),
+		// a named Shortage sheet wins over the first sheet
+		"named": write("named.xlsx", "Shortage", map[string][]any{
+			"A1": {"FPN", "Priority"}, "A2": {"FP-1", 1}, "A3": {"FP-2", 0}, "A4": {"FP-3", 2},
+		}, "Notes"),
+	}
+	for name, prio := range cases {
+		var logs []string
+		rt := Runtime{Cfg: cfg(t, `{}`), Log: func(s string) { logs = append(logs, s) }}
+		inputs := map[string]string{"bom": "../../testdata/bom_basic.xlsx", "priority": prio}
+		if err := loadBOM(t).Run(context.Background(), rt, inputs, filepath.Join(dir, name+"-out.xlsx")); err != nil {
+			t.Errorf("%s: %v\n%v", name, err, logs)
+			continue
+		}
+		if !contains(logs, "Loaded 3 Priority entries.") {
+			t.Errorf("%s: want 3 entries (FPN/MMDATA lines and model rows dropped), logs %v", name, logs)
+		}
+	}
+	// A workbook without FPN/Priority columns is refused with a clear message.
+	rt := Runtime{Cfg: cfg(t, `{}`), Log: func(string) {}}
+	bad := write("bad.xlsx", "Sheet", map[string][]any{"A1": {"Part", "Qty"}, "A2": {"X", 1}})
+	err := loadBOM(t).Run(context.Background(), rt, map[string]string{"bom": "../../testdata/bom_basic.xlsx", "priority": bad}, filepath.Join(dir, "bad-out.xlsx"))
+	if err == nil || err.Error() != "Priority file has no priorities. Expected FPN and Priority columns on its Shortage sheet or, without one, its first sheet." {
+		t.Errorf("bad priority: %v", err)
+	}
+}

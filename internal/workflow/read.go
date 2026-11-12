@@ -21,6 +21,7 @@ import (
 //	from:
 //	  input: bom
 //	  sheet: 1                  1-based index or name (default: the first)
+//	  sheet: [Shortage, 1]      choices in order: the first that exists
 //	  header:                   find the header row by accepted titles
 //	    columns: {Level: [level, lvl], Qty: [qty, quantity]}
 //	    search: 15              ... within the first 15 rows
@@ -79,7 +80,11 @@ func compileFrom(arg *yaml.Node, sc *scope) (Runner, error) {
 		if !sc.inputs[src] {
 			return nil, fmt.Errorf("unknown input or dataset %q", src)
 		}
-		return readStep(readOpts{input: src, sheet: sheetName}), nil
+		var refs []sheetRef
+		if sheetName != "" {
+			refs = []sheetRef{{name: sheetName}}
+		}
+		return readStep(readOpts{input: src, sheets: refs}), nil
 	}
 	var spec fromSpec
 	if err := strictDecode(arg, &spec); err != nil {
@@ -88,16 +93,9 @@ func compileFrom(arg *yaml.Node, sc *scope) (Runner, error) {
 	if !sc.inputs[spec.Input] {
 		return nil, fmt.Errorf("unknown input %q", spec.Input)
 	}
-	sheetName, sheetIndex := "", 0
-	if spec.Sheet.Kind != 0 {
-		if n, err := strconv.Atoi(spec.Sheet.Value); err == nil && spec.Sheet.Tag == "!!int" {
-			if n < 1 {
-				return nil, fmt.Errorf("sheet index starts at 1")
-			}
-			sheetIndex = n - 1
-		} else {
-			sheetName = spec.Sheet.Value
-		}
+	refs, err := parseSheetRefs(&spec.Sheet)
+	if err != nil {
+		return nil, err
 	}
 	var cols []headerCol
 	if spec.Header != nil {
@@ -156,7 +154,7 @@ func compileFrom(arg *yaml.Node, sc *scope) (Runner, error) {
 	if spec.Header != nil {
 		search, min = spec.Header.Search, spec.Header.Min
 	}
-	return readStep(readOpts{input: spec.Input, sheet: sheetName, index: sheetIndex, header: cols, fixed: fixed, start: spec.Start,
+	return readStep(readOpts{input: spec.Input, sheets: refs, header: cols, fixed: fixed, start: spec.Start,
 		trim: spec.Trim, skipBlank: spec.SkipBlank, rowNumber: spec.RowNumber, search: search, min: min, empty: spec.Empty}), nil
 }
 
@@ -181,8 +179,8 @@ func columnNumber(s string) (int, error) {
 }
 
 type readOpts struct {
-	input, sheet       string
-	index              int
+	input              string
+	sheets             []sheetRef // nil: the first sheet
 	header, fixed      []headerCol
 	start, search, min int
 	trim, skipBlank    bool
@@ -192,7 +190,7 @@ type readOpts struct {
 func readStep(o readOpts) Runner {
 	input, header, fixed, start, trim, skipBlank, rowNumber := o.input, o.header, o.fixed, o.start, o.trim, o.skipBlank, o.rowNumber
 	return func(_ context.Context, s *State) error {
-		grid, name, err := readGrid(s.Inputs[input], o.sheet, o.index)
+		grid, name, err := readGrid(s.Inputs[input], o.sheets)
 		if o.empty != "" && (errors.Is(err, errNoSheets) || err == nil && len(grid) == 0) {
 			return errors.New(o.empty)
 		}
@@ -295,7 +293,85 @@ func findHeader(grid [][]string, cols []headerCol, search, min int) (int, int) {
 
 var errNoSheets = errors.New("workbook has no sheets")
 
-func readGrid(path, name string, index int) ([][]string, string, error) {
+// sheetRef picks a sheet by name (case and surrounding spaces ignored) or
+// by 0-based index.
+type sheetRef struct {
+	name  string
+	index int
+}
+
+func (r sheetRef) String() string {
+	if r.name != "" {
+		return fmt.Sprintf("%q", r.name)
+	}
+	return strconv.Itoa(r.index + 1)
+}
+
+// parseSheetRefs reads the sheet option: a 1-based index, a name, or a list
+// of those tried in order.
+func parseSheetRefs(n *yaml.Node) ([]sheetRef, error) {
+	if n.Kind == 0 {
+		return nil, nil
+	}
+	items := []*yaml.Node{n}
+	if n.Kind == yaml.SequenceNode {
+		if len(n.Content) == 0 {
+			return nil, fmt.Errorf("sheet: the list is empty")
+		}
+		items = n.Content
+	}
+	var refs []sheetRef
+	for _, it := range items {
+		if it.Kind != yaml.ScalarNode || strings.TrimSpace(it.Value) == "" {
+			return nil, fmt.Errorf("sheet: a 1-based index, a name, or a list of those")
+		}
+		if num, err := strconv.Atoi(it.Value); err == nil && it.Tag == "!!int" {
+			if num < 1 {
+				return nil, fmt.Errorf("sheet index starts at 1")
+			}
+			refs = append(refs, sheetRef{index: num - 1})
+		} else {
+			refs = append(refs, sheetRef{name: it.Value})
+		}
+	}
+	return refs, nil
+}
+
+// pickSheet returns the first of refs the workbook has (none: the first sheet).
+func pickSheet(names []string, refs []sheetRef) (string, error) {
+	if len(refs) == 0 {
+		refs = []sheetRef{{}}
+	}
+	for _, r := range refs {
+		if r.name == "" {
+			if r.index < len(names) {
+				return names[r.index], nil
+			}
+			continue
+		}
+		if contains(names, r.name) {
+			return r.name, nil
+		}
+		for _, n := range names {
+			if strings.EqualFold(strings.TrimSpace(n), strings.TrimSpace(r.name)) {
+				return n, nil
+			}
+		}
+	}
+	if len(refs) == 1 {
+		if refs[0].name != "" {
+			return "", fmt.Errorf("workbook has no sheet named %q", refs[0].name)
+		}
+		return "", fmt.Errorf("workbook has %d sheet(s), no sheet %d", len(names), refs[0].index+1)
+	}
+	want := make([]string, len(refs))
+	for i, r := range refs {
+		want[i] = r.String()
+	}
+	return "", fmt.Errorf("workbook has none of the sheets %s (it has %d: %s)", strings.Join(want, ", "), len(names), strings.Join(names, ", "))
+}
+
+func readGrid(path string, refs []sheetRef) ([][]string, string, error) {
 	wb, err := sheet.Open(path)
 	if err != nil {
 		return nil, "", err
@@ -305,13 +381,9 @@ func readGrid(path, name string, index int) ([][]string, string, error) {
 	if len(names) == 0 {
 		return nil, "", errNoSheets
 	}
-	if name == "" {
-		if index >= len(names) {
-			return nil, "", fmt.Errorf("workbook has %d sheet(s), no sheet %d", len(names), index+1)
-		}
-		name = names[index]
-	} else if !contains(names, name) {
-		return nil, "", fmt.Errorf("workbook has no sheet named %q", name)
+	name, err := pickSheet(names, refs)
+	if err != nil {
+		return nil, "", err
 	}
 	grid, err := wb.Rows(name)
 	return grid, name, err
