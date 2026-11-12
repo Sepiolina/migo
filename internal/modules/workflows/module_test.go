@@ -89,7 +89,7 @@ func TestEndpoints(t *testing.T) {
 	if c != 200 || out["status"] != "success" || out["fileName"] != "Customer BOM_113280.xlsx" || out["bam"] != "113280" {
 		t.Fatalf("upload: %d %v", c, out)
 	}
-	if !strings.HasSuffix(out["downloadUrl"], "/api/bom/download?bam=113280&file=Customer+BOM_113280.xlsx") {
+	if !strings.HasSuffix(out["downloadUrl"], "/api/bom/download?bam=113280") {
 		t.Errorf("downloadUrl %q", out["downloadUrl"])
 	}
 	resp, _ = http.Get(out["downloadUrl"])
@@ -101,9 +101,10 @@ func TestEndpoints(t *testing.T) {
 		t.Fatalf("second upload: %d %v", c, out)
 	}
 	for q, want := range map[string]string{
-		"employeeId=113280": "Customer BOM_113280.xlsx",
-		"bam=113280":        "Customer BOM_113280.xlsx",
-		"employeeId=999":    "Other_999.xlsx",
+		"employeeId=113280":                 "Customer BOM_113280.xlsx",
+		"bam=113280":                        "Customer BOM_113280.xlsx",
+		"bam=113280&file=Customer+BOM.xlsx": "Customer BOM_113280.xlsx", // file (an input name) is ignored
+		"employeeId=999":                    "Other_999.xlsx",
 	} {
 		resp, _ := http.Get(ts.URL + "/api/bom/download?" + q)
 		if resp.StatusCode != 200 || !strings.Contains(resp.Header.Get("Content-Disposition"), want) {
@@ -111,11 +112,9 @@ func TestEndpoints(t *testing.T) {
 		}
 	}
 	for q, code := range map[string]int{
-		"":                                      400, // no owner: never "latest of anyone"
-		"employeeId=../x":                       400,
-		"bam=999&file=Customer+BOM_113280.xlsx": 404, // someone else's file
-		"bam=113280&file=..%2Fx.xlsx":           400,
-		"employeeId=555":                        404,
+		"":                400, // no owner: never "latest of anyone"
+		"employeeId=../x": 400,
+		"employeeId=555":  404,
 	} {
 		if resp, _ := http.Get(ts.URL + "/api/bom/download?" + q); resp.StatusCode != code {
 			t.Errorf("download ?%s: %d, want %d", q, resp.StatusCode, code)
@@ -146,7 +145,7 @@ output:
 		t.Errorf("no file: %d %v", c, b)
 	}
 	c, out := post(t, ts.URL+"/api/parts/upload", map[string]string{"bam": "7"}, [2]string{"My BOM.xlsx", "../../../examples/parts.xlsx"})
-	if c != 200 || out["message"] != "Parts processed successfully." || out["fileName"] != "My BOM_7.xlsx" || !strings.HasSuffix(out["downloadUrl"], "/api/parts/download?bam=7&file=My+BOM_7.xlsx") {
+	if c != 200 || out["message"] != "Parts processed successfully." || out["fileName"] != "My BOM_7.xlsx" || !strings.HasSuffix(out["downloadUrl"], "/api/parts/download?bam=7") {
 		t.Fatalf("upload: %d %v", c, out)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "outputs", "parts", "My BOM_7.xlsx")); err != nil {

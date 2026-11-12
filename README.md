@@ -481,7 +481,7 @@ in the service; `<config directory>/workflows/<name>.yaml` can replace or add on
 | --- | --- |
 | `GET /api/health` | Liveness response |
 | `POST /api/<name>/upload` | Multipart `files` plus employee number `bam` |
-| `GET /api/<name>/download?bam=E[&file=F]` (or `?employeeId=E`) | Employee E's output F, or E's newest output; never another employee's. No owner → 400 |
+| `GET /api/<name>/download?bam=E` (or `?employeeId=E`) | Employee E's newest output; never another employee's. No owner → 400 |
 
 BOM upload takes a BOM workbook and a Priority workbook. A filename containing
 `prio` or `shortage` is recognized as Priority. Outputs live in

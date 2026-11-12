@@ -3,7 +3,7 @@
 //	GET  /api/workflows        catalog: every workflow, its inputs and routes
 //	GET  /api/<name>           this workflow's description
 //	POST /api/<name>/upload    multipart "files" (one per input) + "bam"
-//	ANY  /api/<name>/download  the caller's result: ?bam=E[&file=F] or ?employeeId=E
+//	ANY  /api/<name>/download  the caller's newest result: ?bam=E (or ?employeeId=E)
 //	POST /api/<name>/run       same form; responds with the workbook itself
 //
 // <name> is the file name, or the workflow's service.route. Adding a

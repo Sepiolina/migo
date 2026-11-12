@@ -118,7 +118,7 @@ func (e *endpoint) upload(w http.ResponseWriter, r *http.Request) error {
 		Message:  e.wf.Name + " processed successfully.",
 		FileName: req.fileName,
 		DownloadURL: fmt.Sprintf("%s://%s/api/%s/download?%s", scheme, r.Host, e.name,
-			url.Values{e.wf.Service.OwnerField: {req.owner}, "file": {req.fileName}}.Encode()),
+			url.Values{e.wf.Service.OwnerField: {req.owner}}.Encode()),
 		Bam: req.owner,
 	})
 }
@@ -247,35 +247,26 @@ func (e *endpoint) generate(r *http.Request, inputs map[string]string, fileName,
 	return outPath, nil
 }
 
-// download handles GET /api/<name>/download. It only ever serves the
-// caller's own outputs:
-//
-//	?bam=E&file=F               E's output F
-//	?bam=E or ?employeeId=E     E's newest output
-//
-// Without an owner it answers 400 (when the workflow requires one): there is
-// no "latest of anyone", which used to hand one user another user's file.
+// download handles GET /api/<name>/download?bam=E (or ?employeeId=E):
+// employee E's newest output. It only ever serves the caller's own output;
+// without an owner it answers 400 (when the workflow requires one), since
+// there is no "latest of anyone", which used to hand one user another
+// user's file. Other query parameters (such as file) are ignored.
 func (e *endpoint) download(w http.ResponseWriter, r *http.Request) error {
 	q := r.URL.Query()
 	raw := q.Get(e.wf.Service.OwnerField)
 	if raw == "" {
 		raw = q.Get("employeeId")
 	}
-	var owner string
-	if strings.TrimSpace(raw) == "" && !e.wf.Service.OwnerRequired {
-		owner = "anonymous"
-	} else {
+	owner := "anonymous"
+	if strings.TrimSpace(raw) != "" || e.wf.Service.OwnerRequired {
 		v, ok := ParseEmployeeNumber(raw)
 		if !ok {
 			return httpx.Fail(http.StatusBadRequest, fmt.Sprintf("Missing or invalid '%s' or 'employeeId' (employee number). Use letters, digits, '-' or '_' only.", e.wf.Service.OwnerField))
 		}
 		owner = v
 	}
-	file := q.Get("file")
-	if file != "" && (file != filepath.Base(file) || strings.ContainsAny(file, `/\`) || strings.HasPrefix(file, ".")) {
-		return httpx.Fail(http.StatusBadRequest, "Invalid 'file'.")
-	}
-	path, ok := e.store.Find(owner, file)
+	path, ok := e.store.Newest(owner)
 	if !ok {
 		return httpx.Fail(http.StatusNotFound, "No output file found.")
 	}

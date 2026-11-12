@@ -239,16 +239,15 @@ func (s *OutputStore) StartCleanupScheduler(log logx.Logger, stop <-chan struct{
 	}()
 }
 
-// Find returns the path of an output owned by owner: the named file, or with
-// fileName "" the owner's newest one. Outputs of other owners are never
-// returned. A hit counts as a use for retention.
-func (s *OutputStore) Find(owner, fileName string) (string, bool) {
+// Newest returns the path of owner's most recent output. Outputs of other
+// owners are never returned. A hit counts as a use for retention.
+func (s *OutputStore) Newest(owner string) (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	m := s.readManifest()
 	best := -1
 	for i, e := range m.Entries {
-		if e.Owner != owner || (fileName != "" && e.File != fileName) {
+		if e.Owner != owner {
 			continue
 		}
 		if best < 0 || e.CreatedAt > m.Entries[best].CreatedAt {
