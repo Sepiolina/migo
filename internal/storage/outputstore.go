@@ -238,3 +238,30 @@ func (s *OutputStore) StartCleanupScheduler(log logx.Logger, stop <-chan struct{
 		}
 	}()
 }
+
+// Newest returns the path of owner's most recent output. Outputs of other
+// owners are never returned. A hit counts as a use for retention.
+func (s *OutputStore) Newest(owner string) (string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	m := s.readManifest()
+	best := -1
+	for i, e := range m.Entries {
+		if e.Owner != owner {
+			continue
+		}
+		if best < 0 || e.CreatedAt > m.Entries[best].CreatedAt {
+			best = i
+		}
+	}
+	if best < 0 {
+		return "", false
+	}
+	path := filepath.Join(s.OutputDir, m.Entries[best].File)
+	if st, err := os.Stat(path); err != nil || !st.Mode().IsRegular() {
+		return "", false
+	}
+	m.Entries[best].LastUsed = time.Now().UnixMilli()
+	_ = s.writeManifest(m)
+	return path, true
+}

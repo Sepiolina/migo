@@ -103,7 +103,7 @@ for exact syntax and examples.
 - Shut down gracefully on supported termination signals.
 - Run the Linux binary under PM2 using the configuration example in the README.
 
-The latest-download state and storage registries belong to one process. The
+The storage registries belong to one process. The
 current PM2 instructions therefore use a single instance. Health reports liveness,
 not full dependency readiness. Multi-user/job output authorization, service-level
 access controls, and high-availability deployment remain further work; deployment

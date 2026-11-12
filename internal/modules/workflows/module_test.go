@@ -68,7 +68,7 @@ func TestEndpoints(t *testing.T) {
 	if resp.StatusCode != 200 || string(b) != `{"status":"online","service":"BOM Processor Node.js API"}` {
 		t.Errorf("health %d %s", resp.StatusCode, b)
 	}
-	resp, _ = http.Get(ts.URL + "/api/bom/download")
+	resp, _ = http.Get(ts.URL + "/api/bom/download?employeeId=113280")
 	if resp.StatusCode != 404 {
 		t.Error("download before upload must be 404")
 	}
@@ -89,9 +89,36 @@ func TestEndpoints(t *testing.T) {
 	if c != 200 || out["status"] != "success" || out["fileName"] != "Customer BOM_113280.xlsx" || out["bam"] != "113280" {
 		t.Fatalf("upload: %d %v", c, out)
 	}
-	resp, _ = http.Get(ts.URL + "/api/bom/download")
-	if resp.StatusCode != 200 || resp.Header.Get("Content-Disposition") == "" {
+	if !strings.HasSuffix(out["downloadUrl"], "/api/bom/download?bam=113280") {
+		t.Errorf("downloadUrl %q", out["downloadUrl"])
+	}
+	resp, _ = http.Get(out["downloadUrl"])
+	if resp.StatusCode != 200 || resp.Header.Get("Content-Disposition") == "" || resp.Header.Get("Cache-Control") != "no-store" {
 		t.Errorf("download %d %v", resp.StatusCode, resp.Header)
+	}
+	// Another employee uploads afterwards: each one still gets only their own file.
+	if c, out := post(t, ts.URL+"/api/bom/upload", map[string]string{"bam": "999"}, [2]string{"Other.xlsx", bomF[1]}, prioF); c != 200 || out["fileName"] != "Other_999.xlsx" {
+		t.Fatalf("second upload: %d %v", c, out)
+	}
+	for q, want := range map[string]string{
+		"employeeId=113280":                 "Customer BOM_113280.xlsx",
+		"bam=113280":                        "Customer BOM_113280.xlsx",
+		"bam=113280&file=Customer+BOM.xlsx": "Customer BOM_113280.xlsx", // file (an input name) is ignored
+		"employeeId=999":                    "Other_999.xlsx",
+	} {
+		resp, _ := http.Get(ts.URL + "/api/bom/download?" + q)
+		if resp.StatusCode != 200 || !strings.Contains(resp.Header.Get("Content-Disposition"), want) {
+			t.Errorf("%s: %d %q, want %s", q, resp.StatusCode, resp.Header.Get("Content-Disposition"), want)
+		}
+	}
+	for q, code := range map[string]int{
+		"":                400, // no owner: never "latest of anyone"
+		"employeeId=../x": 400,
+		"employeeId=555":  404,
+	} {
+		if resp, _ := http.Get(ts.URL + "/api/bom/download?" + q); resp.StatusCode != code {
+			t.Errorf("download ?%s: %d, want %d", q, resp.StatusCode, code)
+		}
 	}
 	if left, _ := os.ReadDir(filepath.Join(dir, "uploads")); len(left) != 0 {
 		t.Errorf("uploads not cleaned: %d files", len(left))
@@ -118,16 +145,16 @@ output:
 		t.Errorf("no file: %d %v", c, b)
 	}
 	c, out := post(t, ts.URL+"/api/parts/upload", map[string]string{"bam": "7"}, [2]string{"My BOM.xlsx", "../../../examples/parts.xlsx"})
-	if c != 200 || out["message"] != "Parts processed successfully." || out["fileName"] != "My BOM_7.xlsx" || !strings.HasSuffix(out["downloadUrl"], "/api/parts/download") {
+	if c != 200 || out["message"] != "Parts processed successfully." || out["fileName"] != "My BOM_7.xlsx" || !strings.HasSuffix(out["downloadUrl"], "/api/parts/download?bam=7") {
 		t.Fatalf("upload: %d %v", c, out)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "outputs", "parts", "My BOM_7.xlsx")); err != nil {
 		t.Error(err)
 	}
-	if resp, _ := http.Get(ts.URL + "/api/parts/download"); resp.StatusCode != 200 {
+	if resp, _ := http.Get(ts.URL + "/api/parts/download?employeeId=7"); resp.StatusCode != 200 {
 		t.Errorf("parts download %d", resp.StatusCode)
 	}
-	if resp, _ := http.Get(ts.URL + "/api/bom/download"); resp.StatusCode != 404 {
+	if resp, _ := http.Get(ts.URL + "/api/bom/download?employeeId=7"); resp.StatusCode != 404 {
 		t.Errorf("bom download must not see the parts result: %d", resp.StatusCode)
 	}
 }

@@ -174,7 +174,7 @@ Open a **second PowerShell window** in the repository folder:
 ```powershell
 curl.exe --fail http://localhost:3081/api/health
 curl.exe --fail -F "files=@testdata/bom_basic.xlsx" -F "files=@testdata/prio_basic.xlsx" -F "bam=113280" http://localhost:3081/api/bom/upload
-curl.exe --fail -o "$env:TEMP/mai-output.xlsx" http://localhost:3081/api/bom/download
+curl.exe --fail -o "$env:TEMP/mai-output.xlsx" "http://localhost:3081/api/bom/download?bam=113280"
 ```
 
 Expected results: health reports `"status":"online"`, upload reports
@@ -204,7 +204,7 @@ In a second terminal in the repository folder:
 ```sh
 curl --fail http://localhost:3081/api/health
 curl --fail -F files=@testdata/bom_basic.xlsx -F files=@testdata/prio_basic.xlsx -F bam=113280 http://localhost:3081/api/bom/upload
-curl --fail -o /tmp/mai-output.xlsx http://localhost:3081/api/bom/download
+curl --fail -o /tmp/mai-output.xlsx "http://localhost:3081/api/bom/download?bam=113280"
 ```
 
 Config lookup is `-config`, then `MAISERVICE_CONFIG`, then `config.json` in the
@@ -375,7 +375,7 @@ module.exports = {
 };
 ```
 
-Keep `instances: 1`: latest-download state and file registries belong to one
+Keep `instances: 1`: file registries belong to one
 process. `kill_timeout` allows time for the service's graceful shutdown. Adjust
 memory limits to the server's budget.
 
@@ -481,7 +481,7 @@ in the service; `<config directory>/workflows/<name>.yaml` can replace or add on
 | --- | --- |
 | `GET /api/health` | Liveness response |
 | `POST /api/<name>/upload` | Multipart `files` plus employee number `bam` |
-| `GET /api/<name>/download` | Latest output for that workflow |
+| `GET /api/<name>/download?bam=E` (or `?employeeId=E`) | Employee E's newest output; never another employee's. No owner → 400 |
 
 BOM upload takes a BOM workbook and a Priority workbook. A filename containing
 `prio` or `shortage` is recognized as Priority. Outputs live in
