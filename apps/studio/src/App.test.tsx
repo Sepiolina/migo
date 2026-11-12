@@ -27,6 +27,7 @@ function bridge() {
       calls.push({ command, args });
       if (command === "choose_workspace") return { path: "/work" };
       if (command === "list_workflows") return { paths: [] };
+      if (command === "choose_sample_file") return { path: "samples/parts.xlsx", copied: true };
       if (command === "runner_request") {
         const req = (args as { request: { command: string; params: { step: number } } }).request;
         if (req.command === "trace") return { ok: true, result: { steps: trace(req.params.step), format: "xlsx" } };
@@ -95,5 +96,20 @@ describe("Studio", () => {
     // The new step is selected and previewed in its turn.
     await waitFor(() => expect(document.querySelector(".nav .row.sel")?.textContent).toContain("Sort by Quantity, largest first"));
   });
-});
 
+  it("binds a sample file chosen with Browse", async () => {
+    const calls = bridge();
+    render(<App />);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Open folder…" })));
+    fireEvent.click(screen.getByRole("button", { name: /Summarize by group/ }));
+    const nav = screen.getByRole("complementary", { name: "Workflow" });
+    const source = within(nav).getAllByRole("button").find((b) => b.querySelector(".name")?.firstChild?.textContent === "parts")!;
+    fireEvent.click(source);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Browse…" })));
+    expect((screen.getByLabelText("Path") as HTMLInputElement).value).toBe("samples/parts.xlsx");
+    await waitFor(() => {
+      const traces = calls.filter((c) => (c.args as { request?: { command: string } })?.request?.command === "trace");
+      expect((traces.at(-1)!.args as { request: { params: { inputs: unknown } } }).request.params.inputs).toEqual({ parts: "samples/parts.xlsx" });
+    });
+  });
+});

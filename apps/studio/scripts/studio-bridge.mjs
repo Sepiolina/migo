@@ -1,5 +1,5 @@
 // A stand-in for the Tauri host, for browser smoke tests and screenshots.
-// It answers the same commands (choose_workspace, list_workflows,
+// It answers the same commands (choose_workspace, choose_sample_file, list_workflows,
 // read_workflow, save_workflow, runner_request) against a real workspace
 // folder and the real Go runner, through window.__maiBridge.
 import { execFileSync } from "node:child_process";
@@ -35,6 +35,9 @@ export async function installBridge(page, { workspace, runner }) {
     switch (command) {
       case "choose_workspace":
         return { path: workspace };
+      case "choose_sample_file":
+        // The native picker cannot be driven here; answer with a workspace file.
+        return { path: "testdata/prio_basic.xlsx", copied: false };
       case "list_workflows": {
         const dir = join(workspace, "workflows");
         return { paths: readdirSync(dir).filter((f) => /\.ya?ml$/.test(f)).map((f) => `workflows/${f}`).sort() };

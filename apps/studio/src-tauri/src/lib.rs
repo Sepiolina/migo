@@ -62,6 +62,101 @@ async fn choose_workspace(
     Ok(json!({"path": path}))
 }
 
+const SAMPLE_EXTENSIONS: [&str; 3] = ["xlsx", "xls", "csv"];
+const SAMPLE_DIR: &str = "samples";
+
+/// Opens a file picker for a sample input, starting in the workspace. The
+/// runner only reads files inside the workspace, so a file picked elsewhere
+/// is copied into <workspace>/samples first. Returns the workspace-relative
+/// path and whether the file was copied, or null when cancelled.
+#[tauri::command]
+async fn choose_sample_file(
+    app: tauri::AppHandle,
+    workspace: State<'_, Workspace>,
+) -> Result<Value, String> {
+    let root = workspace
+        .root
+        .lock()
+        .map_err(|_| "Workspace lock failed")?
+        .clone()
+        .ok_or("Choose a workspace first")?;
+    let start = root.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .add_filter("Spreadsheets", &SAMPLE_EXTENSIONS)
+            .set_directory(start)
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|_| "File picker failed")?;
+    let Some(picked) = picked else {
+        return Ok(Value::Null);
+    };
+    let file = picked
+        .into_path()
+        .map_err(|_| "Choose a local file")?
+        .canonicalize()
+        .map_err(|_| "Cannot access the selected file")?;
+    let (path, copied) = place_sample(&root, &file)?;
+    Ok(json!({"path": path, "copied": copied}))
+}
+
+/// Returns `file` as a workspace-relative path with forward slashes, copying
+/// it into <root>/samples when it lies outside `root`. A same-named file with
+/// different contents is never overwritten: the copy gets a "-2", "-3"...
+/// suffix. `root` and `file` must be canonical.
+fn place_sample(root: &Path, file: &Path) -> Result<(String, bool), String> {
+    if !file.is_file() {
+        return Err("Choose a file".into());
+    }
+    let ext = file
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    if !SAMPLE_EXTENSIONS.contains(&ext.as_str()) {
+        return Err("Choose an .xlsx, .xls or .csv file".into());
+    }
+    let relative = |path: &Path| -> String {
+        path.strip_prefix(root)
+            .unwrap_or(path)
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/")
+    };
+    if file.starts_with(root) {
+        return Ok((relative(file), false));
+    }
+    let dir = root.join(SAMPLE_DIR);
+    std::fs::create_dir_all(&dir).map_err(|_| "Cannot create the samples folder")?;
+    let stem = file
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "sample".into());
+    let contents = std::fs::read(file).map_err(|_| "Cannot read the selected file")?;
+    for n in 1.. {
+        let name = if n == 1 {
+            format!("{stem}.{ext}")
+        } else {
+            format!("{stem}-{n}.{ext}")
+        };
+        let dest = dir.join(&name);
+        match std::fs::read(&dest) {
+            Ok(existing) if existing == contents => return Ok((relative(&dest), false)),
+            Ok(_) => continue,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                std::fs::write(&dest, &contents)
+                    .map_err(|_| "Cannot copy the file into the samples folder")?;
+                return Ok((relative(&dest), true));
+            }
+            Err(_) => return Err("Cannot access the samples folder".into()),
+        }
+    }
+    unreachable!()
+}
+
 fn authorize(request: &mut Value, root: Option<&Path>) -> Result<(), String> {
     if request.get("version").and_then(Value::as_u64) != Some(1) {
         return Err("Unsupported runner protocol version".into());
@@ -482,6 +577,7 @@ pub fn run() {
         .manage(Workspace::default())
         .invoke_handler(tauri::generate_handler![
             choose_workspace,
+            choose_sample_file,
             runner_request,
             list_workflows,
             read_workflow,
@@ -497,6 +593,55 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn place_sample_uses_workspace_files_and_copies_outside_ones() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("project");
+        let outside = dir.path().join("Downloads");
+        std::fs::create_dir_all(root.join("examples")).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+        let root = root.canonicalize().unwrap();
+        let outside = outside.canonicalize().unwrap();
+
+        let inside = root.join("examples").join("orders.xlsx");
+        std::fs::write(&inside, b"in").unwrap();
+        assert_eq!(
+            place_sample(&root, &inside).unwrap(),
+            ("examples/orders.xlsx".into(), false)
+        );
+
+        let picked = outside.join("Priority.XLSX");
+        std::fs::write(&picked, b"one").unwrap();
+        assert_eq!(
+            place_sample(&root, &picked).unwrap(),
+            ("samples/Priority.xlsx".into(), true)
+        );
+        assert_eq!(
+            std::fs::read(root.join("samples/Priority.xlsx")).unwrap(),
+            b"one"
+        );
+        // the same file again: reused, not copied twice
+        assert_eq!(
+            place_sample(&root, &picked).unwrap(),
+            ("samples/Priority.xlsx".into(), false)
+        );
+        // a different file with the same name: never overwrites
+        std::fs::write(&picked, b"two").unwrap();
+        assert_eq!(
+            place_sample(&root, &picked).unwrap(),
+            ("samples/Priority-2.xlsx".into(), true)
+        );
+        assert_eq!(
+            std::fs::read(root.join("samples/Priority.xlsx")).unwrap(),
+            b"one"
+        );
+
+        let text = outside.join("notes.txt");
+        std::fs::write(&text, b"x").unwrap();
+        assert!(place_sample(&root, &text).is_err());
+        assert!(place_sample(&root, &outside).is_err());
+    }
 
     #[cfg(windows)]
     #[test]

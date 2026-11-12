@@ -162,6 +162,17 @@ export default function App() {
     store.set(bindingKey, next);
   };
 
+  async function browseSample(id: string) {
+    try {
+      const picked = await native<{ path: string; copied: boolean } | null>("choose_sample_file");
+      if (!picked) return;
+      bind(id, picked.path);
+      addLog(picked.copied ? `Copied the sample file into ${picked.path}` : `Using ${picked.path} for ${id}`);
+    } catch (e) {
+      fail(e);
+    }
+  }
+
   // ---- live preview: trace the workflow on the sample files ----------------------------
   const focus = selectedStep?.top ?? -1;
   const traceKey = JSON.stringify({ source, bindings, focus, skip: [...skipped].sort(), workspace });
@@ -601,6 +612,7 @@ export default function App() {
               columns={cols}
               bindings={bindings}
               onBind={bind}
+              onBrowse={desktop && workspace ? (id) => void browseSample(id) : undefined}
               inspection={selection.kind === "source" && inspection.key === inspectKey ? inspection.data : undefined}
               route={route}
               workflowPath={workflowPath}
