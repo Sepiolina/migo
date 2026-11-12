@@ -3,7 +3,7 @@
 # generic ones described in docs/WORKFLOWS.md.
 #
 # POST /api/bom/upload   files: Customer BOM + Priority (any order), bam: employee number
-# GET  /api/bom/download latest result of this workflow
+# GET  /api/bom/download?bam=E  employee E's newest result
 name: BOM
 input:
   bom: {label: Customer BOM}
@@ -11,10 +11,11 @@ input:
 
 steps:
   # ---- read the customer BOM ------------------------------------------------
-  # First sheet. The header row is the first of the top 15 rows where at least
+  # First sheet (sheet: 1), whatever it is called. The header row is the first of the top 15 rows where at least
   # 4 columns carry a known title; otherwise the standard layout applies.
   - from:
       input: bom
+      sheet: 1
       header:
         search: 15
         min: 4
@@ -46,17 +47,33 @@ steps:
       MfrPN: CleanMfrPN
   - save: parts
 
-  # ---- read the Priority workbook: Forth P/N (A) -> priority (M), from row 168
-  - fail:
-      when: '"Shortage" not in sheets("priority")'
-      message: Priority workbook has no sheet named "Shortage"
-  - from: {input: priority, sheet: Shortage, columns: {ForthPN: A, Value: M}, start: 168}
+  # ---- read the Priority workbook: FPN -> Priority --------------------------
+  # The sheet named Shortage, else the first sheet (sheet 1). The FPN and Priority columns are
+  # found by their titles in the top 300 rows, so both exports work: the long
+  # one (header in row 1, Priority in M, data from row 168) and the short one
+  # (header in row 3, Priority in B). Without such a header, FPN is A and
+  # Priority M. Rows without an FPN (the long export's model rows) and repeated
+  # header lines (MMDATA, FPN) are dropped below.
+  - from:
+      input: priority
+      sheet: [Shortage, 1]
+      header:
+        search: 300
+        min: 2
+        columns:
+          ForthPN: [fpn, forth pn, forth p/n, forth part number]
+          Value: [priority, prio]
+        fallback: {ForthPN: A, Value: M}
+      trim: true
   - set:
       Key: norm(ForthPN)
       # 1, 1.0, 01, P1 mean P1; otherwise the number (0 and non-numbers: none)
       P: 'norm(Value) in ["1", "1.0", "01", "P1", "01.0"] ? 1 : (parseFloat(Value) == 0 ? nil : parseFloat(Value))'
-  - filter: Key != ""
+  - filter: 'Key != "" && Key not in ["FPN", "MMDATA"]'
   - dedupe: {by: [Key], keep: last}
+  - fail:
+      when: 'none(rows, #.P != nil)'
+      message: 'Priority file has no priorities. Expected FPN and Priority columns on its Shortage sheet or, without one, its first sheet.'
   - log: Loaded {len(rows)} Priority entries.
   - save: priorities
 
