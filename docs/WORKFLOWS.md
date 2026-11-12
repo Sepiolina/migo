@@ -12,7 +12,7 @@ about any particular process.
 | `workflows/<name>.yaml` | `POST /api/<name>/upload`, `GET /api/<name>/download`, `POST /api/<name>/run`, `GET /api/<name>` |
 | (all files) | `GET /api/workflows` |
 
-- `upload` runs the workflow and keeps the result for `download` (the original contract, unchanged).
+- `upload` runs the workflow and keeps the result for `download`. `download` takes `?bam=E` or `?employeeId=E` (that employee's newest output) and optionally `&file=F`; it never serves another employee's file, and answers 400 without an owner.
 - `run` takes the same form and answers with the workbook itself. Nothing is kept, so concurrent
   callers never see each other's result: use it from scripts and other services.
 - `GET /api/<name>` describes the workflow: inputs, output sheets, owner field, upload limit and routes.
@@ -23,7 +23,7 @@ All workflows use the same request and response. Upload sends multipart
 response is:
 
 ```json
-{"status":"success","message":"<name> processed successfully.","fileName":"<first input>_<bam>.xlsx","downloadUrl":"http://host/api/<name>/download","bam":"113280"}
+{"status":"success","message":"<name> processed successfully.","fileName":"<first input>_<bam>.xlsx","downloadUrl":"http://host/api/<name>/download?bam=113280&file=<first input>_113280.xlsx","bam":"113280"}
 ```
 
 Download returns the latest result of that workflow.

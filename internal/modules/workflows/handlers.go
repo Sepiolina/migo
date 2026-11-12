@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"mime"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -104,24 +105,21 @@ func (e *endpoint) upload(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	defer req.done()
-	outPath, err := e.generate(r, req.inputs, req.fileName, req.owner)
-	if err != nil {
+	if _, err := e.generate(r, req.inputs, req.fileName, req.owner); err != nil {
 		return err
 	}
-	e.mu.Lock()
-	e.latest = outPath
-	e.mu.Unlock()
 
 	scheme := "http"
 	if r.TLS != nil {
 		scheme = "https"
 	}
 	return httpx.WriteJSON(w, http.StatusOK, successBody{
-		Status:      "success",
-		Message:     e.wf.Name + " processed successfully.",
-		FileName:    req.fileName,
-		DownloadURL: fmt.Sprintf("%s://%s/api/%s/download", scheme, r.Host, e.name),
-		Bam:         req.owner,
+		Status:   "success",
+		Message:  e.wf.Name + " processed successfully.",
+		FileName: req.fileName,
+		DownloadURL: fmt.Sprintf("%s://%s/api/%s/download?%s", scheme, r.Host, e.name,
+			url.Values{e.wf.Service.OwnerField: {req.owner}, "file": {req.fileName}}.Encode()),
+		Bam: req.owner,
 	})
 }
 
@@ -249,15 +247,39 @@ func (e *endpoint) generate(r *http.Request, inputs map[string]string, fileName,
 	return outPath, nil
 }
 
-// download serves the latest workbook of this workflow.
+// download handles GET /api/<name>/download. It only ever serves the
+// caller's own outputs:
+//
+//	?bam=E&file=F               E's output F
+//	?bam=E or ?employeeId=E     E's newest output
+//
+// Without an owner it answers 400 (when the workflow requires one): there is
+// no "latest of anyone", which used to hand one user another user's file.
 func (e *endpoint) download(w http.ResponseWriter, r *http.Request) error {
-	e.mu.Lock()
-	file := e.latest
-	e.mu.Unlock()
-	if file == "" {
+	q := r.URL.Query()
+	raw := q.Get(e.wf.Service.OwnerField)
+	if raw == "" {
+		raw = q.Get("employeeId")
+	}
+	var owner string
+	if strings.TrimSpace(raw) == "" && !e.wf.Service.OwnerRequired {
+		owner = "anonymous"
+	} else {
+		v, ok := ParseEmployeeNumber(raw)
+		if !ok {
+			return httpx.Fail(http.StatusBadRequest, fmt.Sprintf("Missing or invalid '%s' or 'employeeId' (employee number). Use letters, digits, '-' or '_' only.", e.wf.Service.OwnerField))
+		}
+		owner = v
+	}
+	file := q.Get("file")
+	if file != "" && (file != filepath.Base(file) || strings.ContainsAny(file, `/\`) || strings.HasPrefix(file, ".")) {
+		return httpx.Fail(http.StatusBadRequest, "Invalid 'file'.")
+	}
+	path, ok := e.store.Find(owner, file)
+	if !ok {
 		return httpx.Fail(http.StatusNotFound, "No output file found.")
 	}
-	return serveWorkbook(w, r, file, filepath.Base(file), e.wf.ContentType())
+	return serveWorkbook(w, r, path, filepath.Base(path), e.wf.ContentType())
 }
 
 func serveWorkbook(w http.ResponseWriter, r *http.Request, file, name, contentType string) error {
@@ -272,6 +294,9 @@ func serveWorkbook(w http.ResponseWriter, r *http.Request, file, name, contentTy
 	}
 	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": name}))
 	w.Header().Set("Content-Type", contentType)
+	// The URL is the same for every upload of an owner; never let a browser
+	// or proxy answer it from cache.
+	w.Header().Set("Cache-Control", "no-store")
 	http.ServeContent(w, r, name, st.ModTime(), f)
 	return nil
 }
