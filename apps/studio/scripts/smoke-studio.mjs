@@ -42,12 +42,31 @@ try {
   const rows = page.locator(".nav .row");
   assert.ok((await rows.count()) > 40, "every BOM step is listed");
 
-  // Bind the sample files, then the table shows the data after a step.
-  for (const [id, file] of [["bom", "testdata/bom_basic.xlsx"], ["priority", "testdata/prio_basic.xlsx"]]) {
-    await page.locator(".nav .row", { hasText: new RegExp(`^\\w+${id}`) }).click();
-    await page.locator("#in-file").fill(file);
-    await page.locator("#in-file").press("Enter");
-  }
+  // Bind the sample files: one import picks both, matched to the sources by
+  // file name; a typed path works too.
+  // With both sources missing, the empty table offers the same import.
+  await page.locator(".empty", { hasText: "Import sample files for bom and priority" }).getByRole("button", { name: "Import sample files…" }).waitFor();
+  await page.getByRole("button", { name: "Import sample files", exact: true }).click();
+  await page.locator(".nav .row", { hasText: /^\w+bom.*bom_basic\.xlsx/ }).waitFor();
+  await page.locator(".nav .row", { hasText: /^\w+priority.*prio_basic\.xlsx/ }).waitFor();
+  await page.locator(".nav .row", { hasText: /^\w+priority/ }).click();
+  await page.locator("#in-file").fill("testdata/prio_basic.xlsx");
+  await page.locator("#in-file").press("Enter");
+  // Files dropped on the window (the host's event) bind the same way.
+  await page.evaluate(() => window.__maiEmit("samples-dropped", { files: [{ name: "prio_basic.xlsx", path: "testdata/prio_basic.xlsx", copied: false }] }));
+  await page.getByRole("tab", { name: "Run log" }).click();
+  await page.locator(".cline", { hasText: "priority ← testdata/prio_basic.xlsx" }).first().waitFor();
+  await page.getByRole("tab", { name: "Problems" }).click();
+
+  // Panels resize by dragging their edge.
+  const split = page.getByRole("separator", { name: "Resize the workflow panel" });
+  const edge = await split.boundingBox();
+  await page.mouse.move(edge.x + 4, edge.y + 300);
+  await page.mouse.down();
+  await page.mouse.move(edge.x + 64, edge.y + 300, { steps: 4 });
+  await page.mouse.up();
+  assert.equal(await split.getAttribute("aria-valuenow"), "320");
+  assert.equal(Math.round((await page.locator(".nav").boundingBox()).width), 320);
   await page.locator(".nav .row", { hasText: "Fill blanks down" }).click();
   await page.locator(".grid tbody tr").first().waitFor();
   assert.match(await page.locator(".sbar").innerText(), /6 rows/);
@@ -100,7 +119,7 @@ try {
   assert.ok(!(await page.locator(".stage").isVisible()));
 
   assert.deepEqual(failures, [], "no page errors");
-  console.log("Studio smoke passed: BOM preview, column action, undo, one-line edit, endpoint page, template run and save, phone layout.");
+  console.log("Studio smoke passed: sample import and drop, panel resize, BOM preview, column action, undo, one-line edit, endpoint page, template run and save, phone layout.");
 } finally {
   await browser?.close();
   await new Promise((resolve) => (server ? server.httpServer.close(resolve) : resolve()));

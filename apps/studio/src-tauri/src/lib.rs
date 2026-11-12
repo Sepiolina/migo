@@ -10,7 +10,7 @@ use std::{
     process::Stdio,
     sync::Mutex,
 };
-use tauri::State;
+use tauri::{DragDropEvent, Emitter, Manager, State, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -65,41 +65,91 @@ async fn choose_workspace(
 const SAMPLE_EXTENSIONS: [&str; 3] = ["xlsx", "xls", "csv"];
 const SAMPLE_DIR: &str = "samples";
 
-/// Opens a file picker for a sample input, starting in the workspace. The
-/// runner only reads files inside the workspace, so a file picked elsewhere
-/// is copied into <workspace>/samples first. Returns the workspace-relative
-/// path and whether the file was copied, or null when cancelled.
-#[tauri::command]
-async fn choose_sample_file(
-    app: tauri::AppHandle,
-    workspace: State<'_, Workspace>,
-) -> Result<Value, String> {
-    let root = workspace
+fn workspace_root(workspace: &Workspace) -> Result<PathBuf, String> {
+    workspace
         .root
         .lock()
-        .map_err(|_| "Workspace lock failed")?
+        .map_err(|_| "Workspace lock failed".to_string())?
         .clone()
-        .ok_or("Choose a workspace first")?;
+        .ok_or_else(|| "Choose a workspace first".to_string())
+}
+
+/// Makes picked or dropped files usable as samples: each becomes
+/// {path, name, copied} or {name, error}.
+fn import_samples(root: &Path, files: Vec<PathBuf>) -> Vec<Value> {
+    files
+        .into_iter()
+        .map(|file| {
+            let name = file
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            match file
+                .canonicalize()
+                .map_err(|_| "Cannot access the file".to_string())
+                .and_then(|file| place_sample(root, &file))
+            {
+                Ok((path, copied)) => json!({"path": path, "name": name, "copied": copied}),
+                Err(error) => json!({"name": name, "error": error}),
+            }
+        })
+        .collect()
+}
+
+/// Opens a file picker for sample inputs, starting in the workspace. The
+/// runner only reads files inside the workspace, so a file picked elsewhere
+/// is copied into <workspace>/samples first. With `multiple`, several files
+/// can be picked at once. Returns the imported files (empty when cancelled).
+#[tauri::command]
+async fn choose_sample_files(
+    app: tauri::AppHandle,
+    workspace: State<'_, Workspace>,
+    multiple: Option<bool>,
+) -> Result<Value, String> {
+    let root = workspace_root(&workspace)?;
     let start = root.clone();
+    let multiple = multiple.unwrap_or(false);
     let picked = tauri::async_runtime::spawn_blocking(move || {
-        app.dialog()
+        let dialog = app
+            .dialog()
             .file()
             .add_filter("Spreadsheets", &SAMPLE_EXTENSIONS)
-            .set_directory(start)
-            .blocking_pick_file()
+            .set_directory(start);
+        if multiple {
+            dialog.blocking_pick_files().unwrap_or_default()
+        } else {
+            dialog.blocking_pick_file().into_iter().collect()
+        }
     })
     .await
     .map_err(|_| "File picker failed")?;
-    let Some(picked) = picked else {
-        return Ok(Value::Null);
+    let files = picked
+        .into_iter()
+        .map(|f| f.into_path().map_err(|_| "Choose local files".to_string()))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(json!({"files": import_samples(&root, files)}))
+}
+
+/// Files dropped on the window come from the operating system's drop event,
+/// never from the page, so they carry the same authority as a picked file.
+fn on_drop(window: &tauri::Window, event: &WindowEvent) {
+    let WindowEvent::DragDrop(event) = event else {
+        return;
     };
-    let file = picked
-        .into_path()
-        .map_err(|_| "Choose a local file")?
-        .canonicalize()
-        .map_err(|_| "Cannot access the selected file")?;
-    let (path, copied) = place_sample(&root, &file)?;
-    Ok(json!({"path": path, "copied": copied}))
+    let _ = match event {
+        DragDropEvent::Enter { .. } => window.emit("samples-drag", true),
+        DragDropEvent::Leave => window.emit("samples-drag", false),
+        DragDropEvent::Drop { paths, .. } => {
+            let _ = window.emit("samples-drag", false);
+            let workspace = window.state::<Workspace>();
+            let payload = match workspace_root(&workspace) {
+                Ok(root) => json!({"files": import_samples(&root, paths.clone())}),
+                Err(error) => json!({"files": [], "error": error}),
+            };
+            window.emit("samples-dropped", payload)
+        }
+        _ => Ok(()),
+    };
 }
 
 /// Returns `file` as a workspace-relative path with forward slashes, copying
@@ -575,9 +625,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(Workspace::default())
+        .on_window_event(on_drop)
         .invoke_handler(tauri::generate_handler![
             choose_workspace,
-            choose_sample_file,
+            choose_sample_files,
             runner_request,
             list_workflows,
             read_workflow,
@@ -636,6 +687,12 @@ mod tests {
             std::fs::read(root.join("samples/Priority.xlsx")).unwrap(),
             b"one"
         );
+
+        let imported = import_samples(&root, vec![inside.clone(), outside.join("missing.csv")]);
+        assert_eq!(imported[0]["path"], "examples/orders.xlsx");
+        assert_eq!(imported[0]["name"], "orders.xlsx");
+        assert_eq!(imported[1]["name"], "missing.csv");
+        assert!(imported[1]["error"].is_string());
 
         let text = outside.join("notes.txt");
         std::fs::write(&text, b"x").unwrap();
