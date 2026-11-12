@@ -1,5 +1,5 @@
 // A stand-in for the Tauri host, for browser smoke tests and screenshots.
-// It answers the same commands (choose_workspace, choose_sample_file, list_workflows,
+// It answers the same commands (choose_workspace, choose_sample_files, list_workflows,
 // read_workflow, save_workflow, runner_request) against a real workspace
 // folder and the real Go runner, through window.__maiBridge.
 import { execFileSync } from "node:child_process";
@@ -35,9 +35,15 @@ export async function installBridge(page, { workspace, runner }) {
     switch (command) {
       case "choose_workspace":
         return { path: workspace };
-      case "choose_sample_file":
-        // The native picker cannot be driven here; answer with a workspace file.
-        return { path: "testdata/prio_basic.xlsx", copied: false };
+      case "choose_sample_files":
+        // The native picker cannot be driven here; answer with workspace files.
+        return {
+          files: (args.multiple ? ["testdata/bom_basic.xlsx", "testdata/prio_basic.xlsx"] : ["testdata/prio_basic.xlsx"]).map((path) => ({
+            path,
+            name: path.split("/").pop(),
+            copied: false,
+          })),
+        };
       case "list_workflows": {
         const dir = join(workspace, "workflows");
         return { paths: readdirSync(dir).filter((f) => /\.ya?ml$/.test(f)).map((f) => `workflows/${f}`).sort() };
@@ -66,6 +72,15 @@ export async function installBridge(page, { workspace, runner }) {
     throw new Error(`Unsupported command ${command}`);
   });
   await page.addInitScript(() => {
-    window.__maiBridge = { invoke: (command, args) => window.__maiNative(command, args) };
+    const handlers = {};
+    window.__maiBridge = {
+      invoke: (command, args) => window.__maiNative(command, args),
+      listen: (event, handler) => {
+        (handlers[event] ??= new Set()).add(handler);
+        return () => handlers[event].delete(handler);
+      },
+    };
+    // Tests stand in for the host's events (such as files dropped on the window).
+    window.__maiEmit = (event, payload) => handlers[event]?.forEach((h) => h(payload));
   });
 }
