@@ -11,11 +11,10 @@ input:
 
 steps:
   # ---- read the customer BOM ------------------------------------------------
-  # First sheet (sheet: 1), whatever it is called. The header row is the first of the top 15 rows where at least
+  # First sheet, whatever it is called. The header row is the first of the top 15 rows where at least
   # 4 columns carry a known title; otherwise the standard layout applies.
   - from:
       input: bom
-      sheet: 1
       header:
         search: 15
         min: 4
