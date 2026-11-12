@@ -31,6 +31,8 @@ interface Props {
   columns: string[];
   bindings: Record<string, string>;
   onBind: (id: string, path: string) => void;
+  /** Opens a file picker and binds the chosen file; absent outside the desktop app. */
+  onBrowse?: (id: string) => void;
   inspection?: Inspection;
   route: string;
   workflowPath: string;
@@ -207,8 +209,15 @@ export function Inspector(p: Props) {
             <div className="prop">
               <span><label htmlFor="in-file">Path</label></span>
               <div style={{ display: "grid", gap: 3 }}>
-                <Draft id="in-file" value={p.bindings[input.id] ?? ""} placeholder="examples/orders.xlsx" onCommit={(v) => p.onBind(input.id, v.trim())} />
-                <span className="hint">An .xlsx, .xls or .csv file inside the workspace. Used for previews and local runs only.</span>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <Draft id="in-file" value={p.bindings[input.id] ?? ""} placeholder="examples/orders.xlsx" onCommit={(v) => p.onBind(input.id, v.trim())} />
+                  </div>
+                  {p.onBrowse && (
+                    <button className="btn" onClick={() => p.onBrowse!(input.id)}>Browse…</button>
+                  )}
+                </div>
+                <span className="hint">An .xlsx, .xls or .csv file, for previews and local runs. Files from outside the workspace are copied into samples/.</span>
               </div>
             </div>
             {p.inspection && (
