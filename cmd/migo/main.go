@@ -1,9 +1,13 @@
-// migo runs a workflow file on local files, without HTTP:
+// migo creates, checks, runs and tests workflow files without HTTP:
 //
-//	migo -in bom=Customer.xlsx -in priority=Prio.xlsx -out out.xlsx workflows/bom.yaml
+//	migo new order-totals -template parts-summary
+//	migo validate workflows/order-totals.yaml
+//	migo run -in parts=examples/parts.xlsx -out out.xlsx workflows/order-totals.yaml
+//	migo test examples
 //
-// -check runs everything but keeps no output. -cfg takes config.json keys as
-// JSON ("{}" skips DB and SAP); -sql-stub stands in for the database.
+// "migo help" lists every command; docs/CLI.md is the guide. For run, -check
+// runs everything but keeps no output, -cfg takes config.json keys as JSON
+// ("{}" skips DB and SAP) and -sql-stub stands in for the database.
 package main
 
 import (
@@ -47,23 +51,31 @@ func (f inputFlags) Set(v string) error {
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	if len(args) > 0 && generators[args[0]] != nil {
-		return generate(args[0], args[1:], stdout, stderr)
+	if len(args) > 0 {
+		switch name := args[0]; {
+		case generators[name] != nil:
+			return generate(name, args[1:], stdout, stderr)
+		case commands[name] != nil:
+			return commands[name](ctx, args[1:], stdout, stderr)
+		case name == "run":
+			args = args[1:]
+		}
+	} else {
+		fmt.Fprint(stderr, usage)
+		return 2
 	}
 	flags := flag.NewFlagSet("migo", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	inputs := inputFlags{}
 	flags.Var(inputs, "in", "input file as name=path (repeat per workflow input)")
-	out := flags.String("out", "", "output .xlsx (required unless -check)")
+	out := flags.String("out", "", "output file, .xlsx or .csv as the workflow writes (required unless -check)")
 	check := flags.Bool("check", false, "run the workflow but keep no output")
 	cfgJSON := flags.String("cfg", "{}", "runtime config as JSON (keys like config.json)")
 	stub := flags.String("sql-stub", "", `JSON table every sql step returns: {"columns": [...], "rows": [[...]]}`)
 	flags.Usage = func() {
-		fmt.Fprintln(stderr, "usage: migo [-in name=path ...] [-out file.xlsx | -check] [-cfg json] [-sql-stub file] workflow.yaml")
+		fmt.Fprintln(stderr, "usage: migo run [-in name=path ...] [-out file | -check] [-cfg json] [-sql-stub file] workflow.yaml")
 		flags.PrintDefaults()
-		fmt.Fprintln(stderr, "\n       migo describe [-out file.json]   the step, item and function catalog as JSON")
-		fmt.Fprintln(stderr, "       migo schema   [-out file.json]   a JSON Schema for workflow files (editor completion)")
-		fmt.Fprintln(stderr, "       migo docs     [-out file.md]     the step reference as Markdown")
+		fmt.Fprintln(stderr, "\nOther commands: migo help")
 	}
 	// Accept flags before and after the workflow path.
 	var positional []string
@@ -109,8 +121,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 
 	dir := os.TempDir()
 	if !*check {
-		if !strings.EqualFold(filepath.Ext(*out), ".xlsx") {
-			return fail(2, fmt.Errorf("-out must be an .xlsx file"))
+		if !strings.EqualFold(filepath.Ext(*out), wf.Ext()) {
+			return fail(2, fmt.Errorf("-out must be an %s file", wf.Ext()))
 		}
 		for _, p := range inputs {
 			if samePath(p, *out) {
@@ -119,7 +131,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 		dir = filepath.Dir(*out)
 	}
-	tmp, err := os.CreateTemp(dir, ".migo-*.xlsx")
+	tmp, err := os.CreateTemp(dir, ".migo-*"+wf.Ext())
 	if err != nil {
 		return fail(1, err)
 	}

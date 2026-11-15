@@ -39,6 +39,7 @@ pretend to have successfully executed a workflow.
 | --- | --- |
 | `steps.generated.json` | The step catalog, generated from the Go step descriptors by `make describe`. Never edited by hand; `go test ./...` fails when it is out of date. |
 | `stepRegistry.ts` | Loads the catalog into one `StepSpec` per engine step and one `ItemSpec` per nested item (set entries, header titles, pick rules, output sheets, columns, styles, the service block), and adds the checks that need code. Forms, the add-step menu and summaries come from it. |
+| `workflowTemplates.ts` | The starter templates, read from the catalog. They are declared in Go and shared with `migo new` ([Extending, section 6](EXTENDING.md#6-add-a-starter-template)). |
 | `completion.ts` | Formula completion: the helpers from the catalog and the columns in scope, for the word being typed. `Draft` in `StepForm.tsx` shows the list. |
 | `pipeline.ts` | Reads a workflow into sources, a step tree and outputs; `readForm`/`writeField` edit any field through a spec; inserts, moves, duplicates and deletes steps; keeps short forms (`save: x`, `from: a[Sheet]`) and CRLF. |
 | `yamlSplice.ts` | After an edit, reuses the original text of every unchanged mapping, so a one-field change is a one-line diff. |

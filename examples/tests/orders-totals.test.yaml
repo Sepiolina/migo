@@ -1,0 +1,9 @@
+# Tests for the customer order totals tutorial. Run them with:  migo test examples
+workflow: ../orders-totals.yaml
+tests:
+  - name: totals per customer
+    in: {orders: ../orders.xlsx}
+    expect: orders-totals.xlsx
+  - name: a workbook without an Orders sheet is refused
+    in: {orders: ../parts.xlsx}
+    error: Orders
