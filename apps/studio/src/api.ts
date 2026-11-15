@@ -47,7 +47,10 @@ export type Trace = { steps: StepTrace[]; format: string };
  * window.__maiBridge = { invoke(command, args) } answers the same commands
  * the Tauri host does (runner_request, list_workflows, read_workflow...).
  */
-type Bridge = { invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown> };
+type Bridge = {
+  invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
+  listen?: (event: string, handler: (payload: unknown) => void) => () => void;
+};
 const bridge = () => (window as unknown as { __maiBridge?: Bridge }).__maiBridge;
 
 export function isDesktop() {
@@ -58,6 +61,14 @@ export function native<T>(command: string, args?: Record<string, unknown>): Prom
   const b = bridge();
   if (b) return b.invoke(command, args) as Promise<T>;
   return invoke<T>(command, args);
+}
+/** Subscribe to an event the native host emits; resolves to an unsubscribe function. */
+export async function listenNative<T>(event: string, handler: (payload: T) => void): Promise<() => void> {
+  const b = bridge();
+  if (b) return b.listen ? b.listen(event, (p) => handler(p as T)) : () => undefined;
+  if (!isDesktop()) return () => undefined;
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<T>(event, (e) => handler(e.payload));
 }
 /** Send a request to the Go runner through the native host. */
 export async function request<T>(command: string, params: Record<string, unknown>): Promise<T> {

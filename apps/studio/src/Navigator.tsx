@@ -23,6 +23,12 @@ const Eye = ({ off }: { off: boolean }) => (
   </svg>
 );
 
+const ImportIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M8 2.5v7M5 6.8 8 9.8l3-3M2.5 10.5v2a1 1 0 0 0 1 1h9a1 1 0 0 0 1-1v-2" />
+  </svg>
+);
+
 export function Navigator({
   pipeline,
   selection,
@@ -35,6 +41,7 @@ export function Navigator({
   onAddOutput,
   route,
   bindings,
+  onImport,
   hidden,
 }: {
   pipeline: Pipeline;
@@ -48,6 +55,8 @@ export function Navigator({
   onAddOutput: () => void;
   route: string;
   bindings: Record<string, string>;
+  /** Import sample files: for one source, or (no id) for all of them by file name. */
+  onImport?: (id?: string) => void;
   hidden?: boolean;
 }) {
   const sel = (s: Selection) => JSON.stringify(s) === JSON.stringify(selection);
@@ -82,18 +91,51 @@ export function Navigator({
         <div className="group">
           <div className="glabel">
             Sources
-            <button className="tb" aria-label="Add source" title="Add source" onClick={onAddInput}>+</button>
+            <span>
+              {onImport && (
+                <button className="tb" aria-label="Import sample files" title="Import sample files… (or drop files on the window)" onClick={() => onImport()}>
+                  <ImportIcon />
+                </button>
+              )}
+              <button className="tb" aria-label="Add source" title="Add source" onClick={onAddInput}>+</button>
+            </span>
           </div>
           {pipeline.inputs.map((i) => {
             const file = bindings[i.id];
             const ext = file?.match(/\.(xlsx|xls|csv|tsv|txt)$/i)?.[1] ?? "file";
             return (
-              <button key={i.id} className={`row ${sel({ kind: "source", id: i.id }) ? "sel" : ""}`} onClick={() => onSelect({ kind: "source", id: i.id })}>
+              <div
+                key={i.id}
+                role="button"
+                tabIndex={0}
+                className={`row ${sel({ kind: "source", id: i.id }) ? "sel" : ""} ${file ? "" : "unbound"}`}
+                onClick={() => onSelect({ kind: "source", id: i.id })}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    onSelect({ kind: "source", id: i.id });
+                  }
+                }}
+              >
                 <span />
                 <span className="fmt">{ext}</span>
-                <span className="name">{i.id}<small>{file || "no sample file"}</small></span>
-                <span />
-              </button>
+                <span className="name" title={file}>{i.id}<small>{file || "no sample file"}</small></span>
+                <span className="side">
+                  {onImport && (
+                    <button
+                      className="eye imp"
+                      aria-label={`Import a sample file for ${i.id}`}
+                      title="Import a sample file"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onImport(i.id);
+                      }}
+                    >
+                      <ImportIcon />
+                    </button>
+                  )}
+                </span>
+              </div>
             );
           })}
         </div>

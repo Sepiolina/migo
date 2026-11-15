@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./studio.css";
-import { isDesktop, native, request, type Inspection, type RunResult, type Trace, type Validation } from "./api";
+import { isDesktop, listenNative, native, request, type Inspection, type RunResult, type Trace, type Validation } from "./api";
 import { useDocument } from "./useDocument";
 import { readPipeline, insertStep, addInput, expandSheets, addItem, keepLineEndings, type Pipeline } from "./pipeline";
 import { Navigator, type Selection } from "./Navigator";
 import { Inspector } from "./Inspector";
 import { DataGrid, profileRows, type ColumnAction } from "./DataGrid";
 import { Console, type LogLine, type Problem } from "./Console";
+import { Splitter } from "./Splitter";
+import { assignSamples, type ImportedFile } from "./samples";
 import { CommandMenu, type Command } from "./CommandMenu";
 import { Home, type WorkflowEntry } from "./Home";
 import { PackageBuilder } from "./PackageBuilder";
@@ -62,6 +64,14 @@ export default function App() {
   const [showNav, setShowNav] = useState(true);
   const [showInsp, setShowInsp] = useState(true);
   const [panel, setPanel] = useState<Panel>("table");
+  // Panel sizes (px), remembered across sessions. consoleH null: the default.
+  const [navW, setNavW] = useState(() => store.get("mai.layout.nav", 260));
+  const [inspW, setInspW] = useState(() => store.get("mai.layout.insp", 300));
+  const [consoleH, setConsoleH] = useState<number | null>(() => store.get<number | null>("mai.layout.console", null));
+  useEffect(() => store.set("mai.layout.nav", navW), [navW]);
+  useEffect(() => store.set("mai.layout.insp", inspW), [inspW]);
+  useEffect(() => store.set("mai.layout.console", consoleH), [consoleH]);
+  const [dropping, setDropping] = useState(false);
   const [consoleTab, setConsoleTab] = useState<"problems" | "log" | "yaml" | null>("problems");
   const [bindings, setBindings] = useState<Record<string, string>>({});
   const [skipped, setSkipped] = useState<Set<number>>(new Set());
@@ -162,16 +172,51 @@ export default function App() {
     store.set(bindingKey, next);
   };
 
-  async function browseSample(id: string) {
+  /** Binds imported files to sources: all to `only`, or by file name (see assignSamples). */
+  function applySamples(files: ImportedFile[], opts: { only?: string; preferred?: string } = {}) {
+    for (const f of files) if (f.error) addLog(`Could not import ${f.name}: ${f.error}`, true);
+    const ok = files.filter((f) => f.path);
+    if (!ok.length) return;
+    const { bind: pairs, unassigned } = opts.only
+      ? { bind: { [opts.only]: ok[0].path! }, unassigned: ok.slice(1).map((f) => f.name) }
+      : assignSamples(pipeline.inputs, bindings, ok, opts.preferred);
+    const next = { ...bindings, ...pairs };
+    setBindings(next);
+    store.set(bindingKey, next);
+    for (const [id, path] of Object.entries(pairs)) {
+      const f = ok.find((x) => x.path === path)!;
+      addLog(`${id} ← ${path}${f.copied ? " (copied into the folder)" : ""}`);
+    }
+    if (unassigned.length) addLog(`Not used: ${unassigned.join(", ")}. Select a source and import again, or name the file after it.`, true);
+    const first = Object.keys(pairs)[0];
+    if (first) setSelection({ kind: "source", id: first });
+  }
+  /** Opens the file picker: one file for source `id`, or several matched to sources by name. */
+  async function importSamples(id?: string) {
     try {
-      const picked = await native<{ path: string; copied: boolean } | null>("choose_sample_file");
-      if (!picked) return;
-      bind(id, picked.path);
-      addLog(picked.copied ? `Copied the sample file into ${picked.path}` : `Using ${picked.path} for ${id}`);
+      const picked = await native<{ files: ImportedFile[] }>("choose_sample_files", { multiple: !id });
+      applySamples(picked.files, { only: id });
     } catch (e) {
       fail(e);
     }
   }
+  // Files dropped on the window (desktop app). The handler reads the latest state.
+  const onDrop = useRef<(p: { files: ImportedFile[]; error?: string }) => void>(() => undefined);
+  onDrop.current = (p) => {
+    if (p.error) return fail(new Error(p.error));
+    if (view !== "editor") return addLog("Open a workflow, then drop its sample files.", true);
+    applySamples(p.files, { preferred: selection.kind === "source" ? selection.id : undefined });
+  };
+  useEffect(() => {
+    let alive = true;
+    const offs: (() => void)[] = [];
+    void listenNative<{ files: ImportedFile[]; error?: string }>("samples-dropped", (p) => onDrop.current(p)).then((off) => (alive ? offs.push(off) : off()));
+    void listenNative<boolean>("samples-drag", (on) => setDropping(on)).then((off) => (alive ? offs.push(off) : off()));
+    return () => {
+      alive = false;
+      offs.forEach((off) => off());
+    };
+  }, []);
 
   // ---- live preview: trace the workflow on the sample files ----------------------------
   const focus = selectedStep?.top ?? -1;
@@ -482,8 +527,18 @@ export default function App() {
     if (!desktop) return notReady(`${s.top + 1}. ${s.summary}`, "The browser preview edits YAML only. Open the desktop app to see the table after each step.");
     if (!workspace) return notReady("Open a project folder", "Studio reads sample files from a folder on this computer.", <button className="primary" onClick={() => void chooseWorkspace()}>Open folder…</button>);
     if (!bound) {
-      const missing = pipeline.inputs.find((i) => !bindings[i.id])!;
-      return notReady("Add a sample file", <>Choose a sample file for source <b>{missing.id}</b> to see the data at every step.</>, <button className="primary" onClick={() => setSelection({ kind: "source", id: missing.id })}>Choose sample file</button>);
+      const missing = pipeline.inputs.filter((i) => !bindings[i.id]);
+      const many = missing.length > 1;
+      return notReady(
+        many ? "Add sample files" : "Add a sample file",
+        <>
+          {many ? <>Import sample files for {missing.map((i, n) => <span key={i.id}>{n ? (n === missing.length - 1 ? " and " : ", ") : ""}<b>{i.id}</b></span>)}</> : <>Import a sample file for source <b>{missing[0].id}</b></>} to see the data at every step.
+          {desktop && " You can also drop files on this window."}
+        </>,
+        <button className="primary" onClick={() => (desktop ? void importSamples(many ? undefined : missing[0].id) : setSelection({ kind: "source", id: missing[0].id }))}>
+          {many ? "Import sample files…" : "Import sample file…"}
+        </button>,
+      );
     }
     if (parsed.error) return notReady("The YAML has an error", <span className="err">{parsed.error}</span>);
     const steps = trace.data?.steps;
@@ -525,8 +580,10 @@ export default function App() {
       : trace.data ? { cls: "ok", text: `Valid · ${trace.data.steps.at(-1)?.total.toLocaleString() ?? 0} rows out` }
       : { cls: "", text: "Ready" };
   const panes = `panes${showNav ? "" : " no-nav"}${showInsp ? "" : " no-insp"}`;
+  const maxSide = Math.max(200, (typeof window === "undefined" ? 1440 : window.innerWidth) - 420);
+  const layout = { "--nav-w": `${navW}px`, "--insp-w": `${inspW}px`, ...(consoleH ? { "--console-h": `${consoleH}px` } : {}) } as React.CSSProperties;
   return (
-    <div className="app" data-m={panel}>
+    <div className="app" data-m={panel} style={layout}>
       <header className="toolbar">
         <div className="tl">
           {view === "editor" && <button className="tb hide-sm" aria-label="Steps panel" aria-pressed={showNav} title="Steps panel (⌘1)" onClick={() => setShowNav(!showNav)}>{icons.nav}</button>}
@@ -573,6 +630,8 @@ export default function App() {
         />
       ) : (
         <div className={panes}>
+          {showNav && <Splitter className="split-nav" label="Resize the workflow panel" axis="x" value={navW} min={180} max={maxSide} fallback={260} onChange={setNavW} />}
+          {showInsp && <Splitter className="split-insp" label="Resize the inspector" axis="x" invert value={inspW} min={240} max={maxSide} fallback={300} onChange={setInspW} />}
           <Navigator
             hidden={!showNav}
             pipeline={pipeline}
@@ -597,6 +656,7 @@ export default function App() {
             }}
             route={route}
             bindings={bindings}
+            onImport={desktop && workspace ? (id) => void importSamples(id) : undefined}
           />
           {stage}
           {showInsp && (
@@ -612,7 +672,7 @@ export default function App() {
               columns={cols}
               bindings={bindings}
               onBind={bind}
-              onBrowse={desktop && workspace ? (id) => void browseSample(id) : undefined}
+              onBrowse={desktop && workspace ? (id) => void importSamples(id) : undefined}
               inspection={selection.kind === "source" && inspection.key === inspectKey ? inspection.data : undefined}
               route={route}
               workflowPath={workflowPath}
@@ -635,7 +695,30 @@ export default function App() {
           onGoTo={(id) => setSelection({ kind: "step", id })}
           open={consoleTab}
           onOpen={setConsoleTab}
+          resizer={
+            consoleTab && (
+              <Splitter
+                className="split-console"
+                label="Resize the console"
+                axis="y"
+                invert
+                value={consoleH ?? (consoleTab === "yaml" ? Math.round(window.innerHeight * 0.4) : 128)}
+                min={60}
+                max={Math.max(120, window.innerHeight - 220)}
+                fallback={128}
+                onChange={setConsoleH}
+              />
+            )
+          }
         />
+      )}
+      {dropping && view === "editor" && (
+        <div className="dropzone" aria-live="polite">
+          <div>
+            <b>Drop to use as sample files</b>
+            <span>.xlsx, .xls or .csv · matched to sources by file name{selection.kind === "source" ? `, else ${selection.id}` : ""}</span>
+          </div>
+        </div>
       )}
       {view === "editor" && (
         <nav className="mtabs" aria-label="Panels">

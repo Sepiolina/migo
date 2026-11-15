@@ -13,6 +13,7 @@ export function Console({
   onGoTo,
   open,
   onOpen,
+  resizer,
 }: {
   problems: Problem[];
   log: LogLine[];
@@ -21,6 +22,8 @@ export function Console({
   onGoTo: (step: string) => void;
   open: Tab | null;
   onOpen: (tab: Tab | null) => void;
+  /** A drag handle on the console's top edge. */
+  resizer?: React.ReactNode;
 }) {
   const [draft, setDraft] = useState(source);
   useEffect(() => setDraft(source), [source]);
@@ -32,6 +35,7 @@ export function Console({
   );
   return (
     <section className="console" aria-label="Console">
+      {resizer}
       <div className="ctabs" role="tablist">
         {tab("problems", <>Problems {problems.length > 0 && <span className={`count ${errors ? "bad" : ""}`}>{problems.length}</span>}</>)}
         {tab("log", "Run log")}
