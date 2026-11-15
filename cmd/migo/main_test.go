@@ -77,22 +77,23 @@ func TestUsageErrors(t *testing.T) {
 	}
 }
 
-// Mai Studio's copy of the step catalog is generated; it must match the engine.
-func TestStudioStepCatalogIsCurrent(t *testing.T) {
-	const path = "../../apps/studio/src/steps.generated.json"
-	want, err := catalogJSON()
-	if err != nil {
-		t.Fatal(err)
-	}
-	got, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(bytes.ReplaceAll(got, []byte("\r\n"), []byte("\n")), want) {
-		t.Fatalf("%s is out of date: run `make describe` and commit the result", path)
-	}
-	var stdout, stderr bytes.Buffer
-	if code := run(context.Background(), []string{"describe"}, &stdout, &stderr); code != 0 || !bytes.Equal(stdout.Bytes(), want) {
-		t.Fatalf("migo describe: code %d: %s", code, &stderr)
+// The files generated from the step descriptors must match the engine.
+func TestGeneratedFilesAreCurrent(t *testing.T) {
+	for name, path := range map[string]string{
+		"describe": "../../apps/studio/src/steps.generated.json",
+		"schema":   "../../docs/workflow.schema.json",
+		"docs":     "../../docs/STEP_REFERENCE.md",
+	} {
+		var stdout, stderr bytes.Buffer
+		if code := run(context.Background(), []string{name}, &stdout, &stderr); code != 0 {
+			t.Fatalf("migo %s: code %d: %s", name, code, &stderr)
+		}
+		got, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(bytes.ReplaceAll(got, []byte("\r\n"), []byte("\n")), stdout.Bytes()) {
+			t.Errorf("%s is out of date: run `make describe` and commit the result", path)
+		}
 	}
 }

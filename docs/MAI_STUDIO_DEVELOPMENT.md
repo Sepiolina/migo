@@ -39,6 +39,7 @@ pretend to have successfully executed a workflow.
 | --- | --- |
 | `steps.generated.json` | The step catalog, generated from the Go step descriptors by `make describe`. Never edited by hand; `go test ./...` fails when it is out of date. |
 | `stepRegistry.ts` | Loads the catalog into one `StepSpec` per engine step and one `ItemSpec` per nested item (set entries, header titles, pick rules, output sheets, columns, styles, the service block), and adds the checks that need code. Forms, the add-step menu and summaries come from it. |
+| `completion.ts` | Formula completion: the helpers from the catalog and the columns in scope, for the word being typed. `Draft` in `StepForm.tsx` shows the list. |
 | `pipeline.ts` | Reads a workflow into sources, a step tree and outputs; `readForm`/`writeField` edit any field through a spec; inserts, moves, duplicates and deletes steps; keeps short forms (`save: x`, `from: a[Sheet]`) and CRLF. |
 | `yamlSplice.ts` | After an edit, reuses the original text of every unchanged mapping, so a one-field change is a one-line diff. |
 | `App.tsx` | State: document and undo (with selection restore), selection, sample-file bindings (localStorage per workspace and workflow), live `trace`/`validate`/`inspectWorkbook` requests, run, save, shortcuts, commands. |
@@ -66,7 +67,8 @@ Steps are declared once, in Go. Studio has no per-step code to write.
    `entries` or `items` field at it.
 3. From the repository root, run `make describe` (or
    `go run ./cmd/migo describe -out apps/studio/src/steps.generated.json`)
-   and commit the regenerated file.
+   and commit the regenerated files: the catalog, plus the editor schema and
+   the step reference under `docs/`.
 4. Optionally give the step a sentence in `summarize` (`pipeline.ts`), a
    column action in `DataGrid.tsx`, or a cross-field check in `validators`
    (`stepRegistry.ts`).

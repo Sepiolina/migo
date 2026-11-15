@@ -112,9 +112,6 @@ dataset) and `sheets("input")` (an input's sheet names).
 | `fields(v)`, `splitAny(v, ",;")` | whitespace-separated words; pieces between any of the characters |
 | `replaceRe(v, "^0+", "")` | regexp replace |
 
-`migo describe` prints every step with its fields, help and example, and
-these helpers, as JSON; `GET /api/workflows` returns the same under `reference`.
-
 **Text with expressions.** `log`, `fail`, `reason`, `url`, `headers` and
 `on_error` are text with `{expression}` parts: `"Loaded {len(rows)} rows"`.
 
@@ -126,7 +123,34 @@ workbook with one sheet, `Sheet1`; its delimiter (comma, semicolon, tab or `|`)
 is detected from the first line, and text that is not UTF-8 is read as
 Windows-1252.
 
+## Editor support
+
+`docs/workflow.schema.json` is a JSON Schema for workflow files. With it an
+editor completes step names and keys, shows each one's help on hover and
+underlines unknown keys while you type.
+
+- **VS Code, in this repository:** install the
+  [YAML extension](https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml).
+  `.vscode/settings.json` already maps `workflows/*.yaml` and `examples/*.yaml` to the schema.
+- **Any other folder or editor** (anything using yaml-language-server): put
+  this comment on the first line of the workflow, with the path or URL of the schema:
+
+  ```yaml
+  # yaml-language-server: $schema=https://raw.githubusercontent.com/Sepiolina/migo/main/docs/workflow.schema.json
+  ```
+- **A build with extra steps:** write its own schema with `migo schema -out workflow.schema.json`.
+
+The schema checks structure only (step names, keys, required settings, fixed
+choices). Expressions, column names and dataset names are checked by the
+parser: `migo -check` or Mai Studio.
+
 ## Steps
+
+The [step reference](STEP_REFERENCE.md) lists every step with all its settings;
+it is generated from the engine, as is the catalog that `migo describe` prints
+as JSON and `GET /api/workflows` returns under `reference`. The sections below
+explain the steps by task.
+
 
 ### Reading
 

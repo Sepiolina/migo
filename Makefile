@@ -11,7 +11,7 @@ help:
 	@echo 'make test        Run vet and unit tests'
 	@echo 'make check       Run the same quality checks as CI (requires a C compiler)'
 	@echo 'make fmt         Format Go source files'
-	@echo 'make describe    Regenerate the Studio step catalog after changing a step descriptor'
+	@echo 'make describe    Regenerate the Studio catalog, JSON Schema and step reference after changing a step descriptor'
 	@echo 'make workflows   Validate the three example workflows without company services'
 	@echo 'make linux/windows  Cross-build a static service binary into dist/'
 	@echo 'make dist        Build a deploy folder: binary, config.json, PM2 file (TARGET=linux|windows|all; asks if unset)'
@@ -40,9 +40,12 @@ fmt:
 fmt-check:
 	@files="$$($(GOFMT) -l cmd internal tools workflows)" || exit 1; \
 	if [ -n "$$files" ]; then echo "Run make fmt to format:"; echo "$$files"; exit 1; fi
-# Regenerate Mai Studio's step catalog from the engine's step descriptors.
+# Regenerate everything derived from the engine's step descriptors: Mai
+# Studio's step catalog, the editor JSON Schema and the step reference.
 describe:
 	$(GO) run ./cmd/migo describe -out apps/studio/src/steps.generated.json
+	$(GO) run ./cmd/migo schema -out docs/workflow.schema.json
+	$(GO) run ./cmd/migo docs -out docs/STEP_REFERENCE.md
 workflows:
 	$(GO) run ./cmd/migo -check -in bom=testdata/bom_basic.xlsx -in priority=testdata/prio_basic.xlsx workflows/bom.yaml
 	$(GO) run ./cmd/migo -check -cfg '{"db_enabled": true}' -sql-stub testdata/stub_master.json -in bom=testdata/bom_random7.xls -in priority=testdata/prio_random7.xls workflows/bom.yaml

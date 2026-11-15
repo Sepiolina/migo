@@ -4,3 +4,5 @@
 *.bat -text
 *.cmd -text
 apps/studio/src/steps.generated.json text eol=lf linguist-generated
+docs/workflow.schema.json text eol=lf linguist-generated
+docs/STEP_REFERENCE.md text eol=lf linguist-generated

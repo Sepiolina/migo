@@ -178,16 +178,17 @@ when it is generic, meaning not tied to one process.
    },
    ```
    `describe.go` documents every `StepInfo` and `FieldInfo` setting.
-4. Run `make describe`. It rewrites `apps/studio/src/steps.generated.json`,
-   and the step appears in Studio's step library, command menu and inspector
-   with no TypeScript change. `GET /api/workflows` serves the same catalog
+4. Run `make describe`. It rewrites `apps/studio/src/steps.generated.json`
+   (the step appears in Studio's step library, command menu and inspector
+   with no TypeScript change), `docs/workflow.schema.json` (editors complete
+   and check it) and `docs/STEP_REFERENCE.md`. `GET /api/workflows` serves the same catalog
    under `reference`, and `migo describe` prints it.
 5. Test it in `internal/workflow/workflow_test.go` (`TestTableSteps` runs a
    small workflow on `testdata/parts.xls`), and document it in `docs/WORKFLOWS.md`.
 
 `go test ./...` fails when a step has no descriptor, when a descriptor is
-invalid, when its example does not compile, or when the Studio catalog was not
-regenerated.
+invalid, when its example does not compile, when the schema rejects a workflow
+in this repository, or when a generated file was not regenerated.
 
 **After touching the engine or `bom.yaml`, run `go test ./...`.** It includes
 `TestBOMMatchesGolden`. If the BOM output is *supposed* to change, regenerate
