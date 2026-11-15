@@ -226,3 +226,17 @@ Elsewhere:
 * Inject external systems (database, HTTP, clock) as function values or small
   structs so tests never need the real thing (`workflow.Runtime{SQL, HTTP, Sleep}`).
 * `gofmt` + `go vet ./...` + `go test ./...` before every commit.
+
+## 6. Add a starter template
+
+Templates are what `migo new -template <id>` and Mai Studio's start page offer.
+
+1. Add `internal/workflow/templates/<id>.yaml`: a complete workflow whose
+   first line is `name: ...`.
+2. Add its entry to `templates` in `internal/workflow/templates.go`: the id,
+   a title, a one-line description, and a sample file for each input
+   (relative to the repository root, usually in `examples/`).
+3. Run `make describe` and commit the regenerated files.
+
+`go test ./...` creates a workflow from every template, validates it and runs
+it on its sample files.

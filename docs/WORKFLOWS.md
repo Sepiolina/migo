@@ -317,11 +317,11 @@ and SAP stubs) gave identical values.
 ## Run locally
 
 ```sh
-go run ./cmd/migo -in bom=testdata/bom_basic.xlsx -in priority=testdata/prio_basic.xlsx -out out.xlsx workflows/bom.yaml
-go run ./cmd/migo -in parts=examples/parts.xlsx -check examples/parts-summary.yaml
+go run ./cmd/migo validate workflows/bom.yaml
+go run ./cmd/migo run -in bom=testdata/bom_basic.xlsx -in priority=testdata/prio_basic.xlsx -out out.xlsx workflows/bom.yaml
+go run ./cmd/migo test examples
 ```
 
-The flags:
-- `-check` runs everything and keeps no file.
-- `-cfg '<json>'` takes `config.json` keys. The default `{}` turns the database and SAP off.
-- `-sql-stub file.json` gives every `sql` step a fixed table, `{"columns": [...], "rows": [[...]]}`. See `testdata/stub_master.json`.
+`validate` checks a file without running it, `run` runs it on local files and
+`test` compares a run with an expected output. The [CLI guide](CLI.md) has
+every command and flag, including `-check`, `-cfg` and `-sql-stub`.

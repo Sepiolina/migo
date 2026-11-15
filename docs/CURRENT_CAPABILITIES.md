@@ -86,8 +86,10 @@ exposes:
   supported cell styles, including row-dependent styles resolved while writing.
   These are not a general Excel formula engine.
 
-Run any workflow through `migo`, either writing a workbook or using `-check` to
-execute without keeping output. `migo describe`, `migo schema` and `migo docs` write
+`migo` creates a workflow from a template (`new`), checks files without running
+them (`validate`), runs them on local files (`run`, with `-check` to keep no
+output) and runs workflow tests that compare a run with an expected output
+(`test`); see the [CLI guide](CLI.md). `migo describe`, `migo schema` and `migo docs` write
 the step catalog, a JSON Schema for editors and the step reference. The CLI also accepts runtime JSON configuration
 and a SQL stub for fixture-based testing. See the [workflow reference](WORKFLOWS.md)
 for exact syntax and examples.
@@ -165,6 +167,7 @@ live company integrations. Test those on the intended desktop and Linux server.
 - [README: installation, Windows desktop, microservice, and PM2](../README.md)
 - [Studio user guide](MAI_STUDIO_USER_GUIDE.md)
 - [Studio developer guide](MAI_STUDIO_DEVELOPMENT.md)
+- [CLI guide: create, check, run and test workflows](CLI.md)
 - [Workflow syntax and supported operations](WORKFLOWS.md)
 - [Step reference: every step and setting](STEP_REFERENCE.md), and
   [editor completion for workflow files](WORKFLOWS.md#editor-support)

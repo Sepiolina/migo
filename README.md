@@ -414,21 +414,27 @@ restore the previous executable and restart if verification fails.
 
 ## Run a workflow without a server
 
-From the repository folder, this command works in PowerShell and Linux shells:
+The `migo` command line creates, checks, runs and tests workflows. From the
+repository folder, these commands work in PowerShell and Linux shells:
 
 ```sh
-go run ./cmd/migo -in parts=examples/parts.xlsx -out parts-output.xlsx examples/parts-summary.yaml
+go run ./cmd/migo new order-totals -template parts-summary -dir my-workflows
 ```
-
-Open `parts-output.xlsx` to inspect the result. To validate by executing without
-keeping output:
 
 ```sh
-go run ./cmd/migo -check -in bom=testdata/bom_basic.xlsx -in priority=testdata/prio_basic.xlsx workflows/bom.yaml
+go run ./cmd/migo validate my-workflows/order-totals.yaml
 ```
+
+```sh
+go run ./cmd/migo run -in parts=examples/parts.xlsx -out parts-output.xlsx my-workflows/order-totals.yaml
+```
+
+Open `parts-output.xlsx` to inspect the result. `go run ./cmd/migo test examples`
+runs the example workflows' tests.
 
 Default CLI configuration disables database and SAP enrichment. The
-[workflow reference](docs/WORKFLOWS.md) covers SQL stubs, expressions, and steps.
+[CLI guide](docs/CLI.md) covers every command, workflow tests and SQL stubs;
+the [workflow reference](docs/WORKFLOWS.md) covers expressions and steps.
 
 ## Development checks
 

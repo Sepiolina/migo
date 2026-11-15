@@ -1620,5 +1620,85 @@
       "signature": "replaceRe(v, \"^0+\", \"\")",
       "doc": "Replace every match of a regular expression."
     }
+  ],
+  "templates": [
+    {
+      "id": "clean-sheet",
+      "title": "Clean a sheet",
+      "description": "Trim cells, drop blank and duplicate rows, and write a tidy copy.",
+      "inputs": [
+        "xlsx"
+      ],
+      "output": "xlsx",
+      "samples": {
+        "sheet": "examples/parts.xlsx"
+      },
+      "source": "name: Clean a sheet\ninput:\n  sheet: {label: Workbook to clean}\nsteps:\n  - from: {input: sheet, trim: true, skip_blank: true}\n  - dedupe: [Part Number]\n  - save: clean\noutput:\n  sheets: {Clean: clean}\n"
+    },
+    {
+      "id": "parts-summary",
+      "title": "Summarize by group",
+      "description": "Keep rows with a positive quantity, then total the quantity for each part.",
+      "inputs": [
+        "xlsx"
+      ],
+      "output": "xlsx",
+      "samples": {
+        "parts": "examples/parts.xlsx"
+      },
+      "source": "name: Parts summary\ninput:\n  parts: {label: Parts list}\nsteps:\n  - from: {input: parts, sheet: Parts, trim: true}\n  - filter: num(Quantity) > 0\n  - group: {by: [Part Number], sum: [Quantity]}\n  - save: summary\noutput:\n  sheets: {Parts: summary}\n"
+    },
+    {
+      "id": "lookup-enrich",
+      "title": "Look up and enrich",
+      "description": "Add each customer's region from a CSV list, then total sales per region.",
+      "inputs": [
+        "xlsx",
+        "csv"
+      ],
+      "output": "xlsx",
+      "samples": {
+        "orders": "examples/orders.xlsx",
+        "regions": "examples/regions.csv"
+      },
+      "source": "name: Sales by region\ninput:\n  orders: {label: Orders workbook}\n  regions: {label: Customer regions, match: \"(?i)region\"}\nsteps:\n  - from: regions\n  - save: region_list\n  - from: {input: orders, sheet: Orders, trim: true}\n  - filter: num(Quantity) > 0\n  - join: {with: region_list, on: [Customer], take: {Region: Region}}\n  - set:\n      Line total: num(Quantity) * num(col(\"Unit price\"))\n  - group: {by: [Region], sum: [Line total], count: [Customer]}\n  - save: by_region\noutput:\n  sheets: {By region: by_region}\n"
+    },
+    {
+      "id": "orders-totals",
+      "title": "Customer order totals",
+      "description": "The tutorial: filter quantities, calculate line totals and total each customer.",
+      "inputs": [
+        "xlsx"
+      ],
+      "output": "xlsx",
+      "samples": {
+        "orders": "examples/orders.xlsx"
+      },
+      "source": "name: Customer order totals\ninput:\n  orders: {label: Orders workbook}\nsteps:\n  - from: {input: orders, sheet: Orders, trim: true}\n  - filter: num(Quantity) > 0\n  - set:\n      Line total: num(Quantity) * num(col(\"Unit price\"))\n  - group: {by: [Customer], sum: [Line total]}\n  - save: totals\noutput:\n  sheets: {Totals: totals}\n"
+    },
+    {
+      "id": "excel-to-csv",
+      "title": "Excel to CSV",
+      "description": "Convert a sheet to a UTF-8 CSV file, for imports into other systems.",
+      "inputs": [
+        "xlsx"
+      ],
+      "output": "csv",
+      "samples": {
+        "sheet": "examples/parts.xlsx"
+      },
+      "source": "name: Excel to CSV\ninput:\n  sheet: {label: Workbook}\nsteps:\n  - from: {input: sheet, trim: true}\n  - save: rows\noutput:\n  format: csv\n  sheets: {Rows: rows}\n"
+    },
+    {
+      "id": "blank",
+      "title": "Blank workflow",
+      "description": "One source, one output. Add steps from the table or the command menu.",
+      "inputs": [
+        "xlsx"
+      ],
+      "output": "xlsx",
+      "samples": {},
+      "source": "name: New workflow\ninput:\n  data: {label: Data file}\nsteps:\n  - from: data\n  - save: result\noutput:\n  sheets: {Result: result}\n"
+    }
   ]
 }

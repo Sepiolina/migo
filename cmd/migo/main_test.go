@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/xuri/excelize/v2"
+
+	"miservice/internal/workflow"
 )
 
 func TestExampleWorkflow(t *testing.T) {
@@ -95,5 +97,124 @@ func TestGeneratedFilesAreCurrent(t *testing.T) {
 		if !bytes.Equal(bytes.ReplaceAll(got, []byte("\r\n"), []byte("\n")), stdout.Bytes()) {
 			t.Errorf("%s is out of date: run `make describe` and commit the result", path)
 		}
+	}
+}
+
+func migo(t *testing.T, args ...string) (int, string) {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	code := run(context.Background(), args, &stdout, &stderr)
+	return code, stdout.String() + stderr.String()
+}
+
+// Every starter template is created by `migo new`, validates and runs on
+// its sample files.
+func TestTemplatesRun(t *testing.T) {
+	for _, tpl := range workflow.Templates() {
+		dir := t.TempDir()
+		if code, out := migo(t, "new", "my-flow", "-template", tpl.ID, "-dir", dir); code != 0 {
+			t.Fatalf("new %s: %s", tpl.ID, out)
+		}
+		file := filepath.Join(dir, "my-flow.yaml")
+		if code, out := migo(t, "validate", file); code != 0 || !strings.HasPrefix(out, "ok ") {
+			t.Fatalf("validate %s: %s", tpl.ID, out)
+		}
+		wf, err := workflow.Load(file)
+		if err != nil || wf.Name != "My flow" {
+			t.Fatalf("%s: name %q, err %v", tpl.ID, wf.Name, err)
+		}
+		if len(tpl.Samples) == 0 {
+			continue // blank: nothing to run on
+		}
+		args := []string{"run", "-out", filepath.Join(dir, "out"+wf.Ext()), file}
+		for name, sample := range tpl.Samples {
+			args = append(args, "-in", name+"="+filepath.Join("../..", sample))
+		}
+		if code, out := migo(t, args...); code != 0 {
+			t.Errorf("run %s: %s", tpl.ID, out)
+		}
+	}
+}
+
+func TestNewAndValidateRefuseMistakes(t *testing.T) {
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"new", "Bad_Name", "-dir", dir},
+		{"new", "ok-name", "-template", "nope", "-dir", dir},
+		{"new", "-dir", dir},
+	} {
+		if code, out := migo(t, args...); code != 2 || !strings.Contains(out, "ERR") {
+			t.Errorf("%v: code %d: %s", args, code, out)
+		}
+	}
+	if code, _ := migo(t, "new", "twice", "-dir", dir); code != 0 {
+		t.Fatal("first new failed")
+	}
+	if code, out := migo(t, "new", "twice", "-dir", dir); code != 2 || !strings.Contains(out, "already exists") {
+		t.Errorf("second new: code %d: %s", code, out)
+	}
+	bad := filepath.Join(dir, "bad.yaml")
+	os.WriteFile(bad, []byte("name: X\ninput: {a: {}}\nsteps:\n  - sorted: 1\noutput: {sheets: {A: a}}\n"), 0o644)
+	if code, out := migo(t, "validate", filepath.Join(dir, "twice.yaml"), bad); code != 1 || !strings.Contains(out, `unknown step "sorted"`) || !strings.Contains(out, "ok ") {
+		t.Errorf("validate: code %d: %s", code, out)
+	}
+	if code, out := migo(t, "new", "-list"); code != 0 || !strings.Contains(out, "parts-summary") {
+		t.Errorf("list: %s", out)
+	}
+	if code, out := migo(t, "help"); code != 0 || !strings.Contains(out, "migo test") {
+		t.Errorf("help: %s", out)
+	}
+}
+
+// The repository's own workflow tests pass, and the runner reports a
+// difference, creates expected files with -update and checks error cases.
+func TestWorkflowTests(t *testing.T) {
+	if code, out := migo(t, "test", "../../examples"); code != 0 || !strings.Contains(out, "3 passed, 0 failed") {
+		t.Fatalf("examples: code %d: %s", code, out)
+	}
+	dir := t.TempDir()
+	abs, _ := filepath.Abs("../../examples")
+	spec := "workflow: " + filepath.ToSlash(abs) + "/parts-summary.yaml\ntests:\n" +
+		"  - name: summary\n    in: {parts: " + filepath.ToSlash(abs) + "/parts.xlsx}\n    expect: want.xlsx\n" +
+		"  - name: wrong error\n    in: {parts: " + filepath.ToSlash(abs) + "/orders.xlsx}\n    error: no such text\n"
+	file := filepath.Join(dir, "parts.test.yaml")
+	os.WriteFile(file, []byte(spec), 0o644)
+	if code, out := migo(t, "test", dir); code != 1 || !strings.Contains(out, "run with -update") || !strings.Contains(out, "expected it to contain") {
+		t.Fatalf("before update: code %d: %s", code, out)
+	}
+	if code, out := migo(t, "test", "-update", file); code != 1 || !strings.Contains(out, "1 written") {
+		t.Fatalf("update: code %d: %s", code, out)
+	}
+	// A changed expectation is reported by sheet and cell.
+	f, err := excelize.OpenFile(filepath.Join(dir, "want.xlsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.SetCellValue("Parts", "A2", "changed")
+	if err := f.Save(); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+	if code, out := migo(t, "test", file); code != 1 || !strings.Contains(out, `sheet "Parts" cell A2: got "00123", expected "changed"`) {
+		t.Fatalf("difference: code %d: %s", code, out)
+	}
+	if code, out := migo(t, "test", t.TempDir()); code != 2 || !strings.Contains(out, "no *.test.yaml files") {
+		t.Fatalf("empty folder: code %d: %s", code, out)
+	}
+}
+
+// A CSV workflow writes .csv; run names the temp and output file after it.
+func TestRunWritesCSV(t *testing.T) {
+	dir := t.TempDir()
+	migo(t, "new", "to-csv", "-template", "excel-to-csv", "-dir", dir)
+	file := filepath.Join(dir, "to-csv.yaml")
+	if code, out := migo(t, "run", "-in", "sheet=../../examples/parts.xlsx", "-out", filepath.Join(dir, "o.xlsx"), file); code != 2 || !strings.Contains(out, ".csv file") {
+		t.Fatalf("xlsx name for csv: code %d: %s", code, out)
+	}
+	if code, out := migo(t, "-in", "sheet=../../examples/parts.xlsx", "-out", filepath.Join(dir, "o.csv"), file); code != 0 {
+		t.Fatalf("csv: %s", out)
+	}
+	if data, _ := os.ReadFile(filepath.Join(dir, "o.csv")); !bytes.Contains(data, []byte("Part Number")) {
+		t.Fatalf("csv content: %q", data)
 	}
 }

@@ -1,0 +1,9 @@
+name: Excel to CSV
+input:
+  sheet: {label: Workbook}
+steps:
+  - from: {input: sheet, trim: true}
+  - save: rows
+output:
+  format: csv
+  sheets: {Rows: rows}

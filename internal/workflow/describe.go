@@ -96,9 +96,10 @@ type FuncInfo struct {
 
 // Catalog is everything an editor needs to offer and edit steps.
 type Catalog struct {
-	Steps     []StepInfo `json:"steps"`
-	Items     []ItemInfo `json:"items"`
-	Functions []FuncInfo `json:"functions"`
+	Steps     []StepInfo     `json:"steps"`
+	Items     []ItemInfo     `json:"items"`
+	Functions []FuncInfo     `json:"functions"`
+	Templates []TemplateInfo `json:"templates"`
 }
 
 // Categories are the step library sections, in display order.
@@ -142,7 +143,7 @@ func DescribeStep(info StepInfo) {
 // Describe returns the catalog: the built-in steps in library order, then
 // the steps described from outside by name, with names and ids filled in.
 func Describe() Catalog {
-	c := Catalog{Functions: append([]FuncInfo{}, functions...)}
+	c := Catalog{Functions: append([]FuncInfo{}, functions...), Templates: Templates()}
 	extra := append([]StepInfo{}, extraSteps...)
 	sort.Slice(extra, func(i, j int) bool { return extra[i].Op < extra[j].Op })
 	for _, s := range append(append([]StepInfo{}, builtinSteps...), extra...) {

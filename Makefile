@@ -12,7 +12,7 @@ help:
 	@echo 'make check       Run the same quality checks as CI (requires a C compiler)'
 	@echo 'make fmt         Format Go source files'
 	@echo 'make describe    Regenerate the Studio catalog, JSON Schema and step reference after changing a step descriptor'
-	@echo 'make workflows   Validate the three example workflows without company services'
+	@echo 'make workflows   Check, run and test the example workflows without company services'
 	@echo 'make linux/windows  Cross-build a static service binary into dist/'
 	@echo 'make dist        Build a deploy folder: binary, config.json, PM2 file (TARGET=linux|windows|all; asks if unset)'
 
@@ -50,4 +50,6 @@ workflows:
 	$(GO) run ./cmd/migo -check -in bom=testdata/bom_basic.xlsx -in priority=testdata/prio_basic.xlsx workflows/bom.yaml
 	$(GO) run ./cmd/migo -check -cfg '{"db_enabled": true}' -sql-stub testdata/stub_master.json -in bom=testdata/bom_random7.xls -in priority=testdata/prio_random7.xls workflows/bom.yaml
 	$(GO) run ./cmd/migo -check -in parts=examples/parts.xlsx examples/parts-summary.yaml
+	$(GO) run ./cmd/migo validate workflows/*.yaml examples/*.yaml
+	$(GO) run ./cmd/migo test examples
 check: fmt-check vet build-all race workflows
