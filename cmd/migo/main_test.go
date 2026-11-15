@@ -76,3 +76,23 @@ func TestUsageErrors(t *testing.T) {
 		t.Fatal("input damaged")
 	}
 }
+
+// Mai Studio's copy of the step catalog is generated; it must match the engine.
+func TestStudioStepCatalogIsCurrent(t *testing.T) {
+	const path = "../../apps/studio/src/steps.generated.json"
+	want, err := catalogJSON()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(bytes.ReplaceAll(got, []byte("\r\n"), []byte("\n")), want) {
+		t.Fatalf("%s is out of date: run `make describe` and commit the result", path)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := run(context.Background(), []string{"describe"}, &stdout, &stderr); code != 0 || !bytes.Equal(stdout.Bytes(), want) {
+		t.Fatalf("migo describe: code %d: %s", code, &stderr)
+	}
+}

@@ -3,3 +3,4 @@
 # convert them.
 *.bat -text
 *.cmd -text
+apps/studio/src/steps.generated.json text eol=lf linguist-generated

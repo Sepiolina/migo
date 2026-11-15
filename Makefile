@@ -3,7 +3,7 @@ GOFMT ?= gofmt
 CONFIG ?= config.json
 
 .DEFAULT_GOAL := help
-.PHONY: help build build-all linux windows dist test vet race fmt fmt-check workflows check run
+.PHONY: help build build-all linux windows dist test vet race fmt fmt-check workflows describe check run
 
 help:
 	@echo 'make build       Build the service and CLI'
@@ -11,6 +11,7 @@ help:
 	@echo 'make test        Run vet and unit tests'
 	@echo 'make check       Run the same quality checks as CI (requires a C compiler)'
 	@echo 'make fmt         Format Go source files'
+	@echo 'make describe    Regenerate the Studio step catalog after changing a step descriptor'
 	@echo 'make workflows   Validate the three example workflows without company services'
 	@echo 'make linux/windows  Cross-build a static service binary into dist/'
 	@echo 'make dist        Build a deploy folder: binary, config.json, PM2 file (TARGET=linux|windows|all; asks if unset)'
@@ -39,6 +40,9 @@ fmt:
 fmt-check:
 	@files="$$($(GOFMT) -l cmd internal tools workflows)" || exit 1; \
 	if [ -n "$$files" ]; then echo "Run make fmt to format:"; echo "$$files"; exit 1; fi
+# Regenerate Mai Studio's step catalog from the engine's step descriptors.
+describe:
+	$(GO) run ./cmd/migo describe -out apps/studio/src/steps.generated.json
 workflows:
 	$(GO) run ./cmd/migo -check -in bom=testdata/bom_basic.xlsx -in priority=testdata/prio_basic.xlsx workflows/bom.yaml
 	$(GO) run ./cmd/migo -check -cfg '{"db_enabled": true}' -sql-stub testdata/stub_master.json -in bom=testdata/bom_random7.xls -in priority=testdata/prio_random7.xls workflows/bom.yaml

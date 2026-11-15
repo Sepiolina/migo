@@ -7,6 +7,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -46,6 +47,9 @@ func (f inputFlags) Set(v string) error {
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "describe" {
+		return describe(args[1:], stdout, stderr)
+	}
 	flags := flag.NewFlagSet("migo", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	inputs := inputFlags{}
@@ -57,6 +61,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	flags.Usage = func() {
 		fmt.Fprintln(stderr, "usage: migo [-in name=path ...] [-out file.xlsx | -check] [-cfg json] [-sql-stub file] workflow.yaml")
 		flags.PrintDefaults()
+		fmt.Fprintln(stderr, "\n       migo describe [-out file.json]   the step, item and function catalog as JSON")
 	}
 	// Accept flags before and after the workflow path.
 	var positional []string
@@ -182,4 +187,44 @@ func runtime(cfgJSON, stub string, log func(string)) (workflow.Runtime, func(), 
 	})
 	rt.SQL = workflows.SQL(db)
 	return rt, func() { _ = db.Close() }, nil
+}
+
+// describe prints the catalog of steps, nested items and expression helpers
+// as JSON: the file Mai Studio builds its step library and forms from.
+func describe(args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("migo describe", flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	out := flags.String("out", "", "write to this file instead of standard output")
+	if err := flags.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	if flags.NArg() != 0 {
+		fmt.Fprintln(stderr, "ERR describe takes no arguments")
+		return 2
+	}
+	data, err := catalogJSON()
+	if err == nil {
+		if *out == "" {
+			_, err = stdout.Write(data)
+		} else {
+			err = os.WriteFile(*out, data, 0o644)
+		}
+	}
+	if err != nil {
+		fmt.Fprintln(stderr, "ERR", err)
+		return 1
+	}
+	return 0
+}
+
+func catalogJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	err := enc.Encode(workflow.Describe())
+	return buf.Bytes(), err
 }

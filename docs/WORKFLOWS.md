@@ -112,6 +112,9 @@ dataset) and `sheets("input")` (an input's sheet names).
 | `fields(v)`, `splitAny(v, ",;")` | whitespace-separated words; pieces between any of the characters |
 | `replaceRe(v, "^0+", "")` | regexp replace |
 
+`migo describe` prints every step with its fields, help and example, and
+these helpers, as JSON; `GET /api/workflows` returns the same under `reference`.
+
 **Text with expressions.** `log`, `fail`, `reason`, `url`, `headers` and
 `on_error` are text with `{expression}` parts: `"Loaded {len(rows)} rows"`.
 
