@@ -64,6 +64,28 @@ describe("Studio", () => {
     expect(parse(yaml()).steps[1].filter).toBe("num(Quantity) > 0");
   });
 
+  it("completes helpers in a formula box", async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /Summarize by group/ }));
+    const nav = screen.getByRole("complementary", { name: "Workflow" });
+    fireEvent.click(within(nav).getByText("Keep rows where num(Quantity) > 0"));
+    const condition = () => screen.getByLabelText("Condition") as HTMLTextAreaElement;
+    fireEvent.change(condition(), { target: { value: "!bl" } });
+    const options = within(screen.getByRole("listbox", { name: "Suggestions" })).getAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual(["blank(v)True for nil and for whitespace-only text."]);
+    fireEvent.keyDown(condition(), { key: "Tab" });
+    expect(condition().value).toBe("!blank(");
+    expect(screen.queryByRole("listbox", { name: "Suggestions" })).toBeNull();
+    // Escape dismisses the list without discarding the edit.
+    fireEvent.change(condition(), { target: { value: "!blank(Quantity) && tr" } });
+    fireEvent.keyDown(condition(), { key: "Escape" });
+    expect(screen.queryByRole("listbox", { name: "Suggestions" })).toBeNull();
+    expect(condition().value).toBe("!blank(Quantity) && tr");
+    fireEvent.change(condition(), { target: { value: "!blank(Quantity)" } });
+    fireEvent.blur(condition());
+    expect(parse(yaml()).steps[1].filter).toBe("!blank(Quantity)");
+  });
+
   it("adds steps from the command menu and documents the endpoint", async () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /Summarize by group/ }));

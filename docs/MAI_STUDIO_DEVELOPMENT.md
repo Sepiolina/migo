@@ -37,7 +37,9 @@ pretend to have successfully executed a workflow.
 
 | File | Role |
 | --- | --- |
-| `stepRegistry.ts` | One `StepSpec` per engine step and one `ItemSpec` per nested item (set entries, header titles, pick rules, output sheets, columns, styles, the service block). Forms, the add-step menu and summaries come from it. |
+| `steps.generated.json` | The step catalog, generated from the Go step descriptors by `make describe`. Never edited by hand; `go test ./...` fails when it is out of date. |
+| `stepRegistry.ts` | Loads the catalog into one `StepSpec` per engine step and one `ItemSpec` per nested item (set entries, header titles, pick rules, output sheets, columns, styles, the service block), and adds the checks that need code. Forms, the add-step menu and summaries come from it. |
+| `completion.ts` | Formula completion: the helpers from the catalog and the columns in scope, for the word being typed. `Draft` in `StepForm.tsx` shows the list. |
 | `pipeline.ts` | Reads a workflow into sources, a step tree and outputs; `readForm`/`writeField` edit any field through a spec; inserts, moves, duplicates and deletes steps; keeps short forms (`save: x`, `from: a[Sheet]`) and CRLF. |
 | `yamlSplice.ts` | After an edit, reuses the original text of every unchanged mapping, so a one-field change is a one-line diff. |
 | `App.tsx` | State: document and undo (with selection restore), selection, sample-file bindings (localStorage per workspace and workflow), live `trace`/`validate`/`inspectWorkbook` requests, run, save, shortcuts, commands. |
@@ -51,28 +53,27 @@ its YAML and is saved unchanged.
 
 ### Add a step to Studio
 
-1. Add a `StepSpec` to `steps` in `src/stepRegistry.ts`:
+Steps are declared once, in Go. Studio has no per-step code to write.
 
-   ```ts
-   {
-     op: "upper", type: "mai_upper", title: "Upper-case columns",
-     heading: "Upper-case", category: "Columns", icon: "A",
-     description: "Upper-case text in columns.", help: "Column titles separated by commas.",
-     form: "map", list: "", fields: [list("", "", { name: "COLUMNS" })],
-     example: "[Column]",
-   },
-   ```
-   `form` says where fields live (`map`, `entries` for a whole-map argument,
-   `inline` for if/then/else); `scalar`/`list` name the field a short form fills.
+1. Add a `StepInfo` for the step to `builtinSteps` in
+   `internal/workflow/steps_info.go`
+   ([Extending, section 3](EXTENDING.md#3-add-a-generic-step-type) has an example):
+   `Form` says where fields live (`map`, `entries` for a whole-map argument,
+   `inline` for if/then/else); `Scalar`/`List` name the field a short form fills.
    Field kinds: `text`, `template`, `number`, `bool`, `enum`, `list`, `expr`,
-   `entries`, `items`, `steps`, `yaml`. Mark rarely used ones `advanced`; the
+   `entries`, `items`, `steps`, `yaml`. Mark rarely used ones `Advanced`; the
    inspector hides them until used or **Show all**.
-3. Optionally give it a sentence in `summarize` (`pipeline.ts`) and a column
-   action in `DataGrid.tsx`.
-2. For nested structures add an `ItemSpec` and point an `entries` or `items`
-   field at it.
-4. `npm test` checks every registry example round-trips through its form
-   (`pipeline.test.ts`).
+2. For nested structures add an `ItemInfo` to `builtinItems` and point an
+   `entries` or `items` field at it.
+3. From the repository root, run `make describe` (or
+   `go run ./cmd/migo describe -out apps/studio/src/steps.generated.json`)
+   and commit the regenerated files: the catalog, plus the editor schema and
+   the step reference under `docs/`.
+4. Optionally give the step a sentence in `summarize` (`pipeline.ts`), a
+   column action in `DataGrid.tsx`, or a cross-field check in `validators`
+   (`stepRegistry.ts`).
+5. `go test ./...` checks the descriptor and its example; `npm test` checks
+   every example round-trips through its form (`pipeline.test.ts`).
 
 ## Checks
 

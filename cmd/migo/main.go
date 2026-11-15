@@ -7,6 +7,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -46,6 +47,9 @@ func (f inputFlags) Set(v string) error {
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && generators[args[0]] != nil {
+		return generate(args[0], args[1:], stdout, stderr)
+	}
 	flags := flag.NewFlagSet("migo", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	inputs := inputFlags{}
@@ -57,6 +61,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	flags.Usage = func() {
 		fmt.Fprintln(stderr, "usage: migo [-in name=path ...] [-out file.xlsx | -check] [-cfg json] [-sql-stub file] workflow.yaml")
 		flags.PrintDefaults()
+		fmt.Fprintln(stderr, "\n       migo describe [-out file.json]   the step, item and function catalog as JSON")
+		fmt.Fprintln(stderr, "       migo schema   [-out file.json]   a JSON Schema for workflow files (editor completion)")
+		fmt.Fprintln(stderr, "       migo docs     [-out file.md]     the step reference as Markdown")
 	}
 	// Accept flags before and after the workflow path.
 	var positional []string
@@ -182,4 +189,51 @@ func runtime(cfgJSON, stub string, log func(string)) (workflow.Runtime, func(), 
 	})
 	rt.SQL = workflows.SQL(db)
 	return rt, func() { _ = db.Close() }, nil
+}
+
+// generators are the commands that write a file derived from the step
+// descriptors: the catalog Mai Studio builds its forms from, the JSON Schema
+// editors complete workflow files with, and the Markdown step reference.
+var generators = map[string]func() ([]byte, error){
+	"describe": func() ([]byte, error) { return indentJSON(workflow.Describe()) },
+	"schema":   func() ([]byte, error) { return indentJSON(workflow.Schema()) },
+	"docs":     func() ([]byte, error) { return []byte(workflow.Reference()), nil },
+}
+
+func generate(name string, args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("migo "+name, flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	out := flags.String("out", "", "write to this file instead of standard output")
+	if err := flags.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	if flags.NArg() != 0 {
+		fmt.Fprintf(stderr, "ERR %s takes no arguments\n", name)
+		return 2
+	}
+	data, err := generators[name]()
+	if err == nil {
+		if *out == "" {
+			_, err = stdout.Write(data)
+		} else {
+			err = os.WriteFile(*out, data, 0o644)
+		}
+	}
+	if err != nil {
+		fmt.Fprintln(stderr, "ERR", err)
+		return 1
+	}
+	return 0
+}
+
+func indentJSON(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	err := enc.Encode(v)
+	return buf.Bytes(), err
 }

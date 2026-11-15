@@ -42,7 +42,8 @@ workflow on the computer, not in the YAML.
 - Column actions (sort, filter, dedupe, fill, convert, trim, group, rename,
   remove) add steps.
 - The inspector edits every engine step, nested pick rules, output columns and
-  styles, and the service settings; formulas are text with column chips.
+  styles, and the service settings; formulas are text with column chips and
+  completion for columns and helpers as you type.
 - The command menu (⌘K) adds steps and reaches every command.
 - The console shows problems from the parser and the preview, the run log and
   the editable YAML.
@@ -86,7 +87,8 @@ exposes:
   These are not a general Excel formula engine.
 
 Run any workflow through `migo`, either writing a workbook or using `-check` to
-execute without keeping output. The CLI also accepts runtime JSON configuration
+execute without keeping output. `migo describe`, `migo schema` and `migo docs` write
+the step catalog, a JSON Schema for editors and the step reference. The CLI also accepts runtime JSON configuration
 and a SQL stub for fixture-based testing. See the [workflow reference](WORKFLOWS.md)
 for exact syntax and examples.
 
@@ -164,4 +166,6 @@ live company integrations. Test those on the intended desktop and Linux server.
 - [Studio user guide](MAI_STUDIO_USER_GUIDE.md)
 - [Studio developer guide](MAI_STUDIO_DEVELOPMENT.md)
 - [Workflow syntax and supported operations](WORKFLOWS.md)
+- [Step reference: every step and setting](STEP_REFERENCE.md), and
+  [editor completion for workflow files](WORKFLOWS.md#editor-support)
 - [Planned implementation](MAI_DEV_TOOL_IMPLEMENTATION_PLAN.md)
