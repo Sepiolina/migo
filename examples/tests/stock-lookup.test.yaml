@@ -1,0 +1,13 @@
+# Tests for the stock lookup example. Run them with:  migo test examples
+workflow: ../stock-lookup.yaml
+tests:
+  - name: stock levels are added
+    in: {parts: ../parts.xlsx}
+    mocks: stock-lookup.mocks.yaml
+    expect: stock-lookup.xlsx
+  - name: an API failure stops the run
+    in: {parts: ../parts.xlsx}
+    mocks:
+      config: {stock_url: "http://stock.example"}
+      rest: [{status: 503}]
+    error: status code 503

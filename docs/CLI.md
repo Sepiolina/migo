@@ -100,15 +100,21 @@ migo run -in <input>=<file> [-in ...] -out <file> <workflow.yaml>
 | `-check` | Run everything but keep no output (instead of `-out`) |
 | `-cfg '<json>'` | `config.json` keys as JSON. The default `{}` turns the database and SAP off |
 | `-sql-stub file.json` | Give every `sql` step this table, `{"columns": [...], "rows": [[...]]}`. See `testdata/stub_master.json` |
+| `-mocks file.yaml` | Answer `sql` and `rest` steps from a [mocks file](#mocks) instead of real systems |
+| `-record file.yaml` | Write this run's SQL results and HTTP responses to a mocks file |
 
 `migo [flags] workflow.yaml`, without `run`, does the same.
 
 ## Test a workflow
 
 A test file lists runs of a workflow and what each must produce. By
-convention it is `tests/<workflow>.test.yaml` beside the workflow. (Keep test
-files out of the `workflows/` folder itself: every `.yaml` file there is
-served as a workflow.)
+convention it is `tests/<workflow>.test.yaml`, in a `tests` folder next to the
+`workflows` folder of a project (in this repository: `examples/tests/`). Keep
+test files out of `workflows/` and its subfolders: `.yaml` files there are
+listed as workflows.
+
+Mai Studio writes the same files: **Save as test…** on an output adds a test
+for the run you are looking at.
 
 ```yaml
 workflow: ../parts-summary.yaml     # paths are relative to this file
@@ -160,10 +166,69 @@ Styles, widths and colours are not compared. For CSV: the text, line by line.
 | `expect` | The expected output file, or |
 | `error` | text the run's error must contain |
 | `config` | `config.json` keys for this run, e.g. `{db_enabled: true}` |
-| `sql_stub` | A JSON table that every `sql` step returns |
+| `mocks` | The answers for `sql` and `rest` steps: a [mocks file](#mocks), or the same content inline |
+| `sql_stub` | A JSON table that every `sql` step returns (a shortcut for one `sql` mock) |
 
-Tests never use the network: a `sql` step needs `sql_stub`, and a `rest` step
-fails if it runs, so test the branch where it is switched off by `config`.
+Tests never use the network: a `sql` or `rest` step that no mock answers fails
+the test, and the message names the query or URL.
+
+## Mocks
+
+A mocks file stands in for the database and HTTP services a workflow calls.
+`migo test`, `migo run -mocks` and Mai Studio all read the same format, so
+one file gives you tests, offline runs and realistic previews.
+
+```yaml
+config: {stock_url: "http://stock.example"}   # config.json keys the workflow reads
+sql:
+  - query: Material_Master      # answers queries that contain this text (omit: any query)
+    columns: [FPN, Status]
+    rows:
+      - [A-1, Active]
+rest:
+  - url: /stock                 # answers requests whose URL contains this text (omit: any)
+    method: POST                # optional
+    status: 200                 # optional; 4xx and 5xx make the step fail, to test error handling
+    body:                       # the JSON response
+      items:
+        - {code: "00123", qty: 40}
+```
+
+**Which entry answers.** A call uses the first entry that matches it and has
+not been used yet; when all matching entries are used, the last one answers
+again. So one entry serves every batch of a step, and several entries answer
+its batches in order.
+
+**Where it goes.** `tests/<workflow>.mocks.yaml`, beside the tests. Mai Studio
+looks for exactly that file and, when it exists, uses it for previews and runs.
+
+**Run with mocks.**
+
+```sh
+migo run -in parts=examples/parts.xlsx -mocks examples/tests/stock-lookup.mocks.yaml -out stock.xlsx examples/stock-lookup.yaml
+```
+
+**Record mocks from the real systems.** Run once with real configuration and
+`-record`; every SQL result and HTTP response of that run is written as a
+mocks file:
+
+```sh
+migo run -in parts=parts.xlsx -cfg '{"stock_url": "https://erp.example.com"}' -record tests/stock-lookup.mocks.yaml -check workflows/stock-lookup.yaml
+```
+
+Then finish the file by hand:
+
+- Add the `config:` keys the workflow reads. They are not recorded, because a
+  configuration holds passwords. Any value works for a URL: a recorded `url:`
+  is the path only, without the host.
+- Read the recorded data before you commit it. It is real data from your
+  systems; remove or replace anything confidential. Request headers and
+  bodies are never recorded.
+- Trim it if you like: shorten long results, or loosen a `query:` or `url:`
+  to a short piece of text that still identifies the call.
+
+`examples/stock-lookup.yaml` with `examples/tests/stock-lookup.mocks.yaml` is
+a complete example.
 
 The repository's own tests are in `examples/tests/`; `go test ./...` and
 `make workflows` run them.

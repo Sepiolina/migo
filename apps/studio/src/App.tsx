@@ -74,6 +74,8 @@ export default function App() {
   const [toast, setToast] = useState<Toast>(null);
   const [palette, setPalette] = useState<null | "all" | "add">(null);
   const [saveAs, setSaveAs] = useState<string | null>(null);
+  /** The name being typed for a new workflow test, while its dialog is open. */
+  const [testName, setTestName] = useState<string | null>(null);
   const [packaging, setPackaging] = useState(false);
   const [packagePending, setPackagePending] = useState(false);
   const [pendingDiscard, setPendingDiscard] = useState<(() => void) | null>(null);
@@ -175,14 +177,16 @@ export default function App() {
 
   // ---- live preview: trace the workflow on the sample files ----------------------------
   const focus = selectedStep?.top ?? -1;
-  const traceKey = JSON.stringify({ source, bindings, focus, skip: [...skipped].sort(), workspace });
+  // Recorded answers for sql and rest steps live beside the tests, by convention.
+  const mocksPath = workflowPath ? `tests/${base(workflowPath)}.mocks.yaml` : "";
+  const traceKey = JSON.stringify({ source, bindings, focus, skip: [...skipped].sort(), workspace, mocksPath });
   const canPreview = desktop && !!workspace && bound && !parsed.error && view === "editor";
   useEffect(() => {
     if (!canPreview || trace.key === traceKey) return;
     let live = true;
     setTrace((t) => ({ ...t, busy: true }));
     const timer = setTimeout(() => {
-      request<Trace>("trace", { workspace, yaml: source, inputs: bindings, step: focus, skip: [...skipped], limit: 200 })
+      request<Trace>("trace", { workspace, yaml: source, inputs: bindings, step: focus, skip: [...skipped], limit: 200, mocks: mocksPath })
         .then((data) => {
           if (!live) return;
           setTrace({ key: traceKey, data, busy: false });
@@ -238,7 +242,7 @@ export default function App() {
   pipeline.inputs.forEach((i) => !bindings[i.id] && problems.push({ level: "warning", text: `Source “${i.id}” has no sample file, so the table cannot be previewed.` }));
   // The parser and the trace can report the same error.
   for (let i = problems.length - 1; i > 0; i--) if (problems.slice(0, i).some((p) => p.text.endsWith(problems[i].text.replace(/^Step \d+: /, "")) || problems[i].text.endsWith(p.text))) problems.splice(i, 1);
-  if (pipeline.steps.some((s) => s.spec?.service)) problems.push({ level: "info", text: "SQL and REST steps run on the server only. Local previews skip them and use the fallback values." });
+  if (pipeline.steps.some((s) => s.spec?.service)) problems.push({ level: "info", text: trace.data?.mocks ? `SQL and REST steps are answered from ${mocksPath}, not the real systems.` : `SQL and REST steps run on the server only. Local previews skip them and use the fallback values.${mocksPath ? ` To preview them, record their responses to ${mocksPath} (docs/CLI.md, “Mocks”).` : ""}` });
 
   // ---- actions -------------------------------------------------------------------------------
   const insertAfter = (step: Record<string, unknown>, label: string) => {
@@ -338,12 +342,27 @@ export default function App() {
       setBusy("");
     }
   }
+  /** Why a run cannot be kept as a test right now ("" when it can). */
+  const testBlocker = !desktop ? "Saving a test needs the desktop app." : !workspace ? "Open a project folder first." : !workflowPath || doc.dirty ? "Save the workflow first: a test runs the saved file." : !bound ? "Give every source a sample file first." : "";
+  async function saveTest(name: string) {
+    try {
+      setBusy("Saving test");
+      const saved = await request<{ file: string; expected: string }>("saveTest", { workspace, path: workflowPath, inputs: bindings, mocks: mocksPath, name });
+      setTestName(null);
+      addLog(`Test “${name}” added to ${saved.file}; expected output ${saved.expected}`);
+      say(`Test saved to ${saved.file}. Run the tests with: migo test tests`);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setBusy("");
+    }
+  }
   async function runWorkflow() {
     if (!canPreview) return say(!desktop ? "Running needs the desktop app." : !workspace ? "Open a project folder first." : !bound ? "Give every source a sample file first." : "Fix the YAML first.");
     try {
       setBusy("Running");
       addLog(`Run started: ${pipeline.inputs.map((i) => bindings[i.id]).join(", ")}`);
-      const result = await request<RunResult>("run", { workspace, yaml: source, inputs: bindings });
+      const result = await request<RunResult>("run", { workspace, yaml: source, inputs: bindings, mocks: mocksPath });
       setRun({ source, result });
       addLog(`Wrote ${result.path}`);
       say(`Run finished. Output written to ${result.path}`);
@@ -431,6 +450,7 @@ export default function App() {
     { group: "Workflow", label: "Save", glyph: "↓", kbd: "⌘S", run: () => void save() },
     { group: "Workflow", label: "Save as…", glyph: "↓", run: () => setSaveAs(workflowPath || `workflows/${slug(pipeline.name)}.yaml`) },
     { group: "Workflow", label: "API endpoint and distribution", glyph: "⇄", run: () => setSelection({ kind: "endpoint" }) },
+    { group: "Workflow", label: "Save this run as a test…", hint: "Keep the sample files and the output as a regression test", glyph: "✓", run: () => (testBlocker ? say(testBlocker) : setTestName("")) },
     { group: "Workflow", label: "Build Linux package…", glyph: "▣", run: () => setPackaging(true) },
     { group: "Workflow", label: "All workflows", glyph: "⌂", run: () => setView("home") },
     { group: "Edit", label: "Undo", glyph: "↶", kbd: "⌘Z", run: undo },
@@ -473,7 +493,7 @@ export default function App() {
           columns={profileRows(head, rows)}
           rows={rows}
           total={total}
-          header={<><b>{name}</b><span className="meta mono">{fileToInspect}{d.sheets.length > 1 || d.sheet !== "Sheet1" ? ` › ${d.sheet}` : ""}</span><span className="meta">{total.toLocaleString()} rows · {head.length} columns</span></>}
+          header={<><b>{name}</b><span className="meta mono">{fileToInspect}{d.sheets.length > 1 || d.sheet !== "Sheet1" ? ` › ${d.sheet}` : ""}</span><span className="meta">{total.toLocaleString()} rows · {head.length} columns</span>{!raw && <button className="btn" title="Keep the sample files and this output as a regression test" onClick={() => (testBlocker ? say(testBlocker) : setTestName(""))}>Save as test…</button>}</>}
         />
       );
     }
@@ -658,6 +678,20 @@ export default function App() {
             <div className="actions">
               <button type="button" className="btn" onClick={() => setSaveAs(null)}>Cancel</button>
               <button className="primary" disabled={!/\.ya?ml$/.test(saveAs)}>Save</button>
+            </div>
+          </form>
+        </div>
+      )}
+      {testName !== null && (
+        <div className="scrim" onMouseDown={(e) => e.target === e.currentTarget && setTestName(null)}>
+          <form className="dialog" role="dialog" aria-label="Save as test" onSubmit={(e) => { e.preventDefault(); void saveTest(testName.trim()); }}>
+            <h2>Save this run as a test</h2>
+            <p>Studio runs the saved workflow on the current sample files and keeps the output as the expected result. Later, <code>migo test tests</code> reports any cell that changes.</p>
+            <input className="ctl" aria-label="Test name" autoFocus placeholder="What this run shows, e.g. Typical order file" value={testName} onChange={(e) => setTestName(e.target.value)} />
+            <div className="hint">Added to <code>tests/{base(workflowPath)}.test.yaml</code>{trace.data?.mocks ? <>, with the answers in <code>{mocksPath}</code></> : null}. Check the expected file before you commit it.</div>
+            <div className="actions">
+              <button type="button" className="btn" onClick={() => setTestName(null)}>Cancel</button>
+              <button className="primary" disabled={!/[A-Za-z0-9]/.test(testName) || !!busy}>Save test</button>
             </div>
           </form>
         </div>
