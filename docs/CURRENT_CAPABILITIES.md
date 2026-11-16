@@ -58,7 +58,9 @@ touch and keep comments and CRLF line endings.
 - A step-by-step preview (offline trace) after each edit, with rows for the
   selected step and profiles for all.
 - **Run** writes `.studio/runs/<run>/output.xlsx` or `output.csv` and shows it.
-- Runs are offline: SQL and REST steps are skipped.
+- Runs are offline: SQL and REST steps are skipped, unless the workflow has a
+  mocks file (`tests/<name>.mocks.yaml`), which then answers them.
+- **Save as test…** keeps a run as a regression test that `migo test` runs.
 
 Preview limits: 25 MiB per file, 64 MiB expanded for XLSX, 200 rows per table
 (profiles cover every row). There is no cancel button; native requests have a

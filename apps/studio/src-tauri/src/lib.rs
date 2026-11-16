@@ -167,7 +167,7 @@ fn authorize(request: &mut Value, root: Option<&Path>) -> Result<(), String> {
         .ok_or("Missing command")?;
     if !matches!(
         command,
-        "capabilities" | "validate" | "inspectWorkbook" | "run" | "trace"
+        "capabilities" | "validate" | "inspectWorkbook" | "run" | "trace" | "saveTest"
     ) {
         return Err("Unsupported runner command".into());
     }
@@ -880,6 +880,11 @@ mod tests {
     fn refuses_unselected_workspaces_and_unknown_commands() {
         assert!(authorize(&mut json!({"version":1,"command":"run","params":{}}), None).is_err());
         assert!(authorize(&mut json!({"version":1,"command":"shell"}), None).is_err());
+        assert!(authorize(
+            &mut json!({"version":1,"command":"saveTest","params":{}}),
+            None
+        )
+        .is_err());
         assert!(authorize(&mut json!({"version":1,"command":"capabilities"}), None).is_ok());
     }
 }

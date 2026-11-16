@@ -40,7 +40,8 @@ export type StepTrace = {
   error?: string;
   ms: number;
 };
-export type Trace = { steps: StepTrace[]; format: string };
+/** `mocks`: sql and rest steps were answered from the workflow's mocks file. */
+export type Trace = { steps: StepTrace[]; format: string; mocks?: boolean };
 
 /**
  * A stand-in for the native host, for browser development and UI tests:

@@ -18,7 +18,9 @@ import (
 
 	"github.com/xuri/excelize/v2"
 	"miservice/internal/deploy"
+	"miservice/internal/mock"
 	"miservice/internal/sheet"
+	"miservice/internal/wftest"
 	"miservice/internal/workflow"
 )
 
@@ -41,8 +43,10 @@ type Params struct {
 	Offset    int               `json:"offset"`
 	Limit     int               `json:"limit"`
 	Inputs    map[string]string `json:"inputs"`
-	Step      *int              `json:"step"` // trace: the step whose rows are returned
-	Skip      []int             `json:"skip"` // trace: steps to leave out
+	Step      *int              `json:"step"`  // trace: the step whose rows are returned
+	Skip      []int             `json:"skip"`  // trace: steps to leave out
+	Mocks     string            `json:"mocks"` // run, trace, saveTest: a mocks file to answer sql and rest steps, used if it exists
+	Name      string            `json:"name"`  // saveTest: the new test's name
 }
 type Failure struct {
 	Code    string `json:"code"`
@@ -141,6 +145,8 @@ func execute(ctx context.Context, req Request) (any, error) {
 		return inspect(path, p)
 	case "run":
 		return run(ctx, p)
+	case "saveTest":
+		return saveTest(ctx, req.Params)
 	case "trace":
 		return trace(ctx, p)
 	case "buildPackage":
@@ -335,6 +341,76 @@ func offline() workflow.Runtime {
 	}}
 }
 
+// runtimeFor is the runtime of a desktop run: the answers in the workspace's
+// mocks file when p.Mocks names one that exists, otherwise offline. It also
+// returns the mocks file's path ("" when there is none).
+func runtimeFor(root string, p Params) (workflow.Runtime, string, error) {
+	if p.Mocks == "" {
+		return offline(), "", nil
+	}
+	path, err := localPath(root, p.Mocks)
+	if errors.Is(err, os.ErrNotExist) {
+		return offline(), "", nil
+	}
+	if err != nil {
+		return workflow.Runtime{}, "", err
+	}
+	set, err := mock.Load(path)
+	if err != nil {
+		return workflow.Runtime{}, "", err
+	}
+	rt, err := set.Runtime(nil)
+	return rt, path, err
+}
+
+// saveTest keeps a run as a workflow test: it runs the saved workflow at
+// p.Path on the bound sample files and adds a case, with the output as its
+// expected file, to tests/<workflow>.test.yaml in the workspace.
+func saveTest(ctx context.Context, p Params) (any, error) {
+	root, err := localPath(p.Workspace, ".")
+	if err != nil {
+		return nil, err
+	}
+	workflowPath, err := localPath(root, p.Path)
+	if err != nil {
+		return nil, err
+	}
+	wf, err := workflow.Load(workflowPath)
+	if err != nil {
+		return nil, err
+	}
+	inputs, err := resolveInputs(wf, root, p.Inputs)
+	if err != nil {
+		return nil, err
+	}
+	_, mocks, err := runtimeFor(root, p)
+	if err != nil {
+		return nil, err
+	}
+	// Refuse a symlinked tests folder, as for run artifacts.
+	dir := filepath.Join(root, "tests")
+	if err := os.Mkdir(dir, 0o755); err != nil && !os.IsExist(err) {
+		return nil, err
+	}
+	if dir, err = localPath(root, dir); err != nil {
+		return nil, err
+	}
+	base := strings.TrimSuffix(strings.TrimSuffix(filepath.Base(workflowPath), ".yaml"), ".yml")
+	file := filepath.Join(dir, base+wftest.Suffix)
+	if info, err := os.Lstat(file); err == nil && !info.Mode().IsRegular() {
+		return nil, errors.New("The test file is not a regular file")
+	}
+	expected, err := wftest.Add(ctx, file, workflowPath, p.Name, inputs, mocks)
+	if err != nil {
+		return nil, err
+	}
+	rel := func(path string) string {
+		r, _ := filepath.Rel(root, path)
+		return filepath.ToSlash(r)
+	}
+	return map[string]any{"file": rel(file), "expected": rel(expected)}, nil
+}
+
 // maxTraceRows bounds the rows a trace returns for its focused step.
 const maxTraceRows = 500
 
@@ -360,7 +436,11 @@ func trace(ctx context.Context, p Params) (any, error) {
 	if opt.Limit <= 0 || opt.Limit > maxTraceRows {
 		opt.Limit = 200
 	}
-	steps, err := wf.Trace(ctx, offline(), inputs, opt)
+	rt, mocks, err := runtimeFor(root, p)
+	if err != nil {
+		return nil, err
+	}
+	steps, err := wf.Trace(ctx, rt, inputs, opt)
 	if err != nil {
 		return nil, err
 	}
@@ -376,7 +456,7 @@ func trace(ctx context.Context, p Params) (any, error) {
 		rows := steps[opt.Focus].Rows
 		steps[opt.Focus].Rows = rows[:len(rows)/2]
 	}
-	return map[string]any{"steps": steps, "format": wf.Format}, nil
+	return map[string]any{"steps": steps, "format": wf.Format, "mocks": mocks != ""}, nil
 }
 
 func runWithInspect(ctx context.Context, p Params, inspectOutput func(string, Params) (Preview, error)) (any, error) {
@@ -416,7 +496,11 @@ func runWithInspect(ctx context.Context, p Params, inspectOutput func(string, Pa
 		}
 	}()
 	output := filepath.Join(dir, "output"+wf.Ext())
-	if err := wf.Run(ctx, offline(), inputs, output); err != nil {
+	rt, _, err := runtimeFor(root, p)
+	if err != nil {
+		return nil, err
+	}
+	if err := wf.Run(ctx, rt, inputs, output); err != nil {
 		return nil, err
 	}
 	f, err := os.Open(output)

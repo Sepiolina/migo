@@ -106,8 +106,25 @@ catalogue), the form clients send, and a `curl` example to copy.
 ## Run and save
 
 **Run** (⌘↵) runs the workflow on the sample files and writes the output under
-`.studio/runs/` in the folder, then shows it. Local runs are offline: SQL and
-REST steps are skipped, and the Problems tab says so.
+`.studio/runs/` in the folder, then shows it. Local runs are offline: Studio
+never calls your database or HTTP services.
+
+**Preview SQL and REST steps with recorded answers.** Without help, SQL and
+REST steps are skipped in previews, and the Problems tab says so. Give the
+workflow a mocks file, `tests/<workflow name>.mocks.yaml` in the project
+folder, and previews and runs answer those steps from it instead, so every
+later step shows realistic data. The Problems tab then says the answers come
+from that file. Write the file by hand, or record it once from the real
+systems with `migo run -record`; the [CLI guide](CLI.md#mocks) shows both.
+
+**Save a run as a test.** When the output is right, open an output and choose
+**Save as test…** (or **Save this run as a test…** in the command menu, ⌘K)
+and name what the run shows. Studio runs the saved workflow on the current
+sample files and adds a test to `tests/<workflow name>.test.yaml`, with the
+output as the expected result. Save the workflow first: a test runs the saved
+file. From then on `migo test tests` reports any cell that changes; see
+[Test a workflow](CLI.md#test-a-workflow). Open the expected file and check
+it before you commit it.
 
 **Save** (⌘S) writes the file. A new workflow asks for a path; files in
 `workflows/` become endpoints. Saves check that the file did not change on disk
@@ -272,7 +289,8 @@ GTK/WebKit libraries or a missing desktop session prevent the Linux native host
 from starting; see the development guide for dependencies.
 
 Cancellation and live desktop connections to SQL and REST services are
-planned.
+planned. Until then, preview those steps from a mocks file (see
+[Run and save](#run-and-save)).
 
 Each package also includes `release.json` with the target and available build
 provenance, and `sbom.cdx.json` with a CycloneDX Go dependency inventory. These
