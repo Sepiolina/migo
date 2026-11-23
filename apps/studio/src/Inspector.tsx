@@ -28,7 +28,12 @@ interface Props {
   onSelect: (s: Selection) => void;
   onClose: () => void;
   trace?: StepTrace[];
+  activeMocksPath?: string;
+  previewPending?: boolean;
+  previewFailed?: boolean;
   columns: string[];
+  jumpColumns: string[];
+  onGoToColumn: (name: string) => void;
   bindings: Record<string, string>;
   onBind: (id: string, path: string) => void;
   /** Opens a file picker and binds the chosen file; absent outside the desktop app. */
@@ -59,8 +64,10 @@ function Head({ op, title, sub, onClose }: { op: string; title: string; sub: str
   );
 }
 
-function Effect({ trace, top }: { trace?: StepTrace[]; top: number }) {
+function Effect({ trace, top, pending, failed }: { trace?: StepTrace[]; top: number; pending?: boolean; failed?: boolean }) {
   const t = trace?.[top];
+  if (pending) return <div className="hint">Updating preview…</div>;
+  if (failed) return <div className="hint err-text">Preview unavailable. See the table for details.</div>;
   if (!trace) return <div className="hint">Add sample files to the sources to see what this step does.</div>;
   if (!t) return <div className="hint">An earlier step failed, so this one did not run.</div>;
   if (t.error) return <div className="hint err-text">{t.error}</div>;
@@ -105,7 +112,7 @@ export function Inspector(p: Props) {
       ["GET", "", "This workflow's description: inputs, sheets, owner field, limits."],
     ];
     return (
-      <aside className="pane insp" aria-label="Inspector">
+      <aside id="studio-inspector" className="pane insp" aria-label="Inspector">
         <Head op="rest" title="API endpoint" sub="How MaiService serves this workflow" onClose={onClose} />
         <div className="scroll">
           <div className="sec">
@@ -183,11 +190,36 @@ export function Inspector(p: Props) {
     if (!input) return null;
     const readers = steps.filter((s) => s.op === "from" && s.summary.startsWith(`Read ${input.id}`));
     return (
-      <aside className="pane insp" aria-label="Inspector">
+      <aside id="studio-inspector" className="pane insp" aria-label="Inspector">
         <Head op="from" title={`Source: ${input.id}`} sub="A file the workflow reads" onClose={onClose} />
         <div className="scroll">
-          <div className="sec">
-            <div className="lbl">Contract</div>
+          <section className="sec" aria-labelledby="sample-file-heading">
+            <h2 id="sample-file-heading" className="lbl">Sample file</h2>
+            <label htmlFor="in-file">Path</label>
+            <div className="sample-file-controls">
+              <Draft id="in-file" value={p.bindings[input.id] ?? ""} placeholder="examples/orders.xlsx" onCommit={(v) => p.onBind(input.id, v.trim())} />
+              {p.onBrowse && <button className="btn" onClick={() => p.onBrowse!(input.id)}>Browse…</button>}
+            </div>
+            <div className="hint">An .xlsx, .xls or .csv file, for previews and local runs. Files from outside the workspace are copied into samples/.</div>
+            {p.inspection && (
+              <div className="hint">
+                {p.inspection.sheets.length} sheet{p.inspection.sheets.length === 1 ? "" : "s"}: {p.inspection.sheets.join(", ")} · {p.inspection.totalRows.toLocaleString()} rows in {p.inspection.sheet}
+              </div>
+            )}
+          </section>
+          <section className="sec" aria-labelledby="source-readers-heading">
+            <h2 id="source-readers-heading" className="lbl">Used by</h2>
+            {readers.length ? readers.map((s) => (
+              <button key={s.id} className="linkish" onClick={() => p.onSelect({ kind: "step", id: s.id })}>Step {s.top + 1}: {s.summary}</button>
+            )) : (
+              <>
+                <div className="hint">No step reads this source yet.</div>
+                <div className="actions-row"><button className="btn" onClick={() => p.onAddRead(input.id)}>Add a Read step</button></div>
+              </>
+            )}
+          </section>
+          <section className="sec" aria-labelledby="source-settings-heading">
+            <h2 id="source-settings-heading" className="lbl">Source settings</h2>
             <div className="prop">
               <span><label htmlFor="in-id">Name</label></span>
               <Draft id="in-id" value={input.id} onCommit={(v) => { try { onChange(renameInput(source, input.id, v.trim()), "Rename source"); p.onSelect({ kind: "source", id: v.trim() }); } catch (e) { onError((e as Error).message); } }} />
@@ -203,43 +235,13 @@ export function Inspector(p: Props) {
                 <span className="hint">A pattern such as <code>(?i)orders</code> lets clients upload files in any order.</span>
               </div>
             </div>
-          </div>
-          <div className="sec">
-            <div className="lbl">Sample file</div>
-            <div className="prop">
-              <span><label htmlFor="in-file">Path</label></span>
-              <div style={{ display: "grid", gap: 3 }}>
-                <div style={{ display: "flex", gap: 6 }}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <Draft id="in-file" value={p.bindings[input.id] ?? ""} placeholder="examples/orders.xlsx" onCommit={(v) => p.onBind(input.id, v.trim())} />
-                  </div>
-                  {p.onBrowse && (
-                    <button className="btn" onClick={() => p.onBrowse!(input.id)}>Browse…</button>
-                  )}
-                </div>
-                <span className="hint">An .xlsx, .xls or .csv file, for previews and local runs. Files from outside the workspace are copied into samples/.</span>
-              </div>
-            </div>
-            {p.inspection && (
-              <div className="hint">
-                {p.inspection.sheets.length} sheet{p.inspection.sheets.length === 1 ? "" : "s"}: {p.inspection.sheets.join(", ")} · {p.inspection.totalRows.toLocaleString()} rows in {p.inspection.sheet}
-              </div>
-            )}
-          </div>
-          <div className="sec">
-            <div className="lbl">Used by</div>
-            {readers.length ? readers.map((s) => (
-              <button key={s.id} className="linkish" onClick={() => p.onSelect({ kind: "step", id: s.id })}>Step {s.top + 1}: {s.summary}</button>
-            )) : (
-              <>
-                <div className="hint">No step reads this source yet.</div>
-                <div className="actions-row"><button className="btn" onClick={() => p.onAddRead(input.id)}>Add a Read step</button></div>
-              </>
-            )}
+          </section>
+          <section className="sec" aria-labelledby="source-actions-heading">
+            <h2 id="source-actions-heading" className="lbl">Source actions</h2>
             <div className="actions-row">
               <button className="btn danger" disabled={pipeline.inputs.length < 2} onClick={() => { onChange(removeInput(source, input.id), "Remove source"); p.onSelect({ kind: "endpoint" }); }}>Remove source</button>
             </div>
-          </div>
+          </section>
         </div>
       </aside>
     );
@@ -250,7 +252,7 @@ export function Inspector(p: Props) {
     if (!o) return null;
     const short = pipeline.sheetsShort;
     return (
-      <aside className="pane insp" aria-label="Inspector">
+      <aside id="studio-inspector" className="pane insp" aria-label="Inspector">
         <Head op="save" title={`Output: ${o.name}`} sub={pipeline.format === "csv" ? "Written as the CSV file" : "A sheet of the output workbook"} onClose={onClose} />
         <div className="scroll">
           <div className="sec">
@@ -290,10 +292,30 @@ export function Inspector(p: Props) {
   const step = steps[index];
   if (!step) return null;
   const siblings = steps.filter((s) => s.listPath.join(".") === step.listPath.join("."));
+  const fillColumns = step.depth === 0 ? [...new Set(step.fillColumns)] : [];
   return (
-    <aside className="pane insp" aria-label="Inspector">
+    <aside id="studio-inspector" className="pane insp" aria-label="Inspector">
       <Head op={step.op} title={step.spec?.title ?? step.op} sub={step.depth ? `In step ${step.top + 1}, ${step.branch === "else" ? "otherwise" : "then"} branch` : `Step ${step.top + 1} of ${siblings.length}`} onClose={onClose} />
       <div className="scroll">
+        {fillColumns.length > 0 && (
+          <section className="sec" aria-labelledby="affected-columns-heading">
+            <h2 id="affected-columns-heading" className="lbl">Affected columns</h2>
+            <div className="chips">
+              {fillColumns.map((name) => (
+                <button
+                  key={name}
+                  className="chip"
+                  aria-label={`Go to column ${name}`}
+                  title={`Go to column ${name}`}
+                  disabled={!p.jumpColumns.includes(name)}
+                  onClick={() => p.onGoToColumn(name)}
+                >
+                  {name}
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
         <div className="sec">
           <div className="lbl">
             Settings
@@ -305,31 +327,44 @@ export function Inspector(p: Props) {
             <div className="hint">Studio has no form for “{step.op}”. Edit it in YAML below the table.</div>
           )}
           {step.spec?.help && <div className="hint">{step.spec.help}</div>}
-          {step.spec?.service && <div className="hint">Runs on the server only. Local previews skip external calls.</div>}
+          {step.spec?.service && <div className="hint">The server makes live calls. Studio previews run offline.</div>}
         </div>
         {step.depth === 0 && (
           <div className="sec">
             <div className="lbl">Effect</div>
-            <Effect trace={p.trace} top={step.top} />
+            <Effect trace={p.trace} top={step.top} pending={p.previewPending} failed={p.previewFailed} />
+            {p.trace && steps.some((s) => s.spec?.service) && (
+              <details>
+                <summary>Preview details</summary>
+                <div className="hint">{p.activeMocksPath ? `SQL and REST steps are answered from ${p.activeMocksPath}.` : "Local previews skip SQL and REST calls and use the fallback values."}</div>
+              </details>
+            )}
           </div>
         )}
         <div className="sec">
-          <div className="lbl">Step</div>
           <div className="prop">
             <span><label htmlFor="step-note">Note</label></span>
             <Draft id="step-note" value={step.note ?? ""} placeholder="Why this step exists" multiline onCommit={(v) => onChange(setNote(source, step.path, v), "Edit note")} />
           </div>
+        </div>
+        <section className="sec" aria-labelledby="step-actions-heading">
+          <h2 id="step-actions-heading" className="lbl">Step actions</h2>
           <div className="actions-row">
             <button className="btn" disabled={step.index === 0} onClick={() => { onChange(moveAt(source, step.path, -1), "Move step up"); p.onSelect({ kind: "step", id: [...step.listPath, step.index - 1].join(".") }); }}>Move up</button>
             <button className="btn" disabled={step.index === siblings.length - 1} onClick={() => { onChange(moveAt(source, step.path, 1), "Move step down"); p.onSelect({ kind: "step", id: [...step.listPath, step.index + 1].join(".") }); }}>Move down</button>
             <button className="btn" onClick={() => { onChange(duplicateAt(source, step.path), "Duplicate step"); p.onSelect({ kind: "step", id: [...step.listPath, step.index + 1].join(".") }); }}>Duplicate</button>
-            <button className="btn danger" onClick={() => { onChange(deleteAt(source, step.path), "Delete step"); const next = siblings[step.index + 1] ?? siblings[step.index - 1]; p.onSelect(next ? { kind: "step", id: [...step.listPath, Math.min(step.index, siblings.length - 2)].join(".") } : { kind: "endpoint" }); }}>Delete</button>
           </div>
-        </div>
+        </section>
         <div className="sec">
           <div className="lbl">YAML</div>
           <pre className="yaml">{yamlOf(source, step.path)}</pre>
         </div>
+        <section className="sec" aria-labelledby="remove-step-heading">
+          <h2 id="remove-step-heading" className="lbl">Remove step</h2>
+          <div className="actions-row">
+            <button className="btn danger" onClick={() => { onChange(deleteAt(source, step.path), "Delete step"); const next = siblings[step.index + 1] ?? siblings[step.index - 1]; p.onSelect(next ? { kind: "step", id: [...step.listPath, Math.min(step.index, siblings.length - 2)].join(".") } : { kind: "endpoint" }); }}>Delete step</button>
+          </div>
+        </section>
       </div>
     </aside>
   );

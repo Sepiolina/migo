@@ -68,10 +68,11 @@ type SQLFunc func(ctx context.Context, connection, query string, args []any) (*T
 
 // State is what steps share during one run.
 type State struct {
-	rt     Runtime
-	Inputs map[string]string // input name -> file path
-	Tables map[string]*Table // saved datasets
-	Cur    *Table            // the table the steps work on
+	comparison *StepComparison
+	rt         Runtime
+	Inputs     map[string]string // input name -> file path
+	Tables     map[string]*Table // saved datasets
+	Cur        *Table            // the table the steps work on
 }
 
 // Runner executes one compiled step.

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import {
   createWorkflowDocument,
   sourceTransaction,
@@ -19,21 +19,12 @@ export function useDocument(initial: string) {
     current.current = next;
     setHistory(next);
   };
-  const dirty = history.present.source !== history.savedSource;
-  useEffect(() => {
-    const beforeUnload = (event: BeforeUnloadEvent) => {
-      if (dirty) {
-        event.preventDefault();
-        event.returnValue = "";
-      }
-    };
-    window.addEventListener("beforeunload", beforeUnload);
-    return () => window.removeEventListener("beforeunload", beforeUnload);
-  }, [dirty]);
   return {
     source: history.present.source,
+    savedSource: history.savedSource,
+    getCurrent: () => current.current,
     snapshot: history.present,
-    dirty,
+    dirty: history.present.source !== history.savedSource,
     canUndo: !!history.past.length,
     canRedo: !!history.future.length,
     setSource: (source: string) => dispatch({ type: "edit-source", source }),

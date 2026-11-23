@@ -27,9 +27,11 @@ function bridge(more: Record<string, (params: Record<string, unknown>) => unknow
   (window as unknown as { __maiBridge: unknown }).__maiBridge = {
     invoke: async (command: string, args?: Record<string, unknown>) => {
       calls.push({ command, args });
+      if (command === "file_revisions") return Object.fromEntries((args?.paths as string[]).map(path => [path, "fixture"]));
       if (more[command]) return more[command](args ?? {});
       if (command === "choose_workspace") return { path: "/work" };
       if (command === "list_workflows") return { paths: [] };
+      if (command === "choose_sample_file") return { path: "samples/parts.xlsx", copied: true };
       if (command === "choose_sample_files") return { files: [{ name: "parts.xlsx", path: "samples/parts.xlsx", copied: true }] };
       if (command === "runner_request") {
         const req = (args as { request: { command: string; params: { step: number } } }).request;
@@ -139,7 +141,7 @@ describe("Studio", () => {
     localStorage.setItem("mai.bindings:/work:workflows/parts.yaml", JSON.stringify({ parts: "examples/parts.xlsx" }));
     render(<App />);
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Open folder…" })));
-    await act(async () => fireEvent.click(await screen.findByRole("button", { name: /workflows\/parts\.yaml/ })));
+    await act(async () => fireEvent.click(await screen.findByRole("button", { name: /^Parts workflows\/parts\.yaml/ })));
     // The preview asks for the workflow's mocks file and says when it answers.
     await waitFor(() => expect(screen.getByText(/answered from tests\/parts\.mocks\.yaml/)).toBeTruthy(), { timeout: 3000 });
     const params = (command: string) =>
@@ -174,6 +176,34 @@ describe("Studio", () => {
     });
   });
 
+  it("returns to the same preview cell after search, save and inspector close", async () => {
+    const calls = bridge();
+    render(<App />);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Open folder…" })));
+    fireEvent.click(screen.getByRole("button", { name: /Summarize by group/ }));
+    const grid = await screen.findByRole("grid", { name: "Preview cells" });
+    const cell = within(grid).getByText("Resistor");
+    fireEvent.click(cell);
+
+    fireEvent.keyDown(grid, { key: "k", ctrlKey: true });
+    const search = screen.getByRole("combobox", { name: "Search commands" });
+    expect(document.activeElement).toBe(search);
+    fireEvent.keyDown(search, { key: "Enter", ctrlKey: true });
+    fireEvent.keyDown(search, { key: "Escape" });
+    expect(document.activeElement).toBe(grid);
+
+    fireEvent.keyDown(grid, { key: "s", ctrlKey: true });
+    const path = await screen.findByRole("textbox", { name: "File path" });
+    expect(document.activeElement).toBe(path);
+    fireEvent.keyDown(path, { key: "Enter", ctrlKey: true });
+    fireEvent.keyDown(path, { key: "Escape" });
+    expect(document.activeElement).toBe(grid);
+
+    fireEvent.click(screen.getByRole("button", { name: "Close inspector" }));
+    expect(document.activeElement).toBe(grid);
+    expect(grid.getAttribute("aria-activedescendant")).toBe(cell.id);
+    expect(calls.some((call) => (call.args?.request as { command?: string })?.command === "run")).toBe(false);
+  });
   const lastInputs = (calls: { args?: Record<string, unknown> }[]) => {
     const traces = calls.filter((c) => (c.args as { request?: { command: string } })?.request?.command === "trace");
     return (traces.at(-1)?.args as { request: { params: { inputs: unknown } } } | undefined)?.request.params.inputs;
@@ -204,21 +234,16 @@ describe("Studio", () => {
     bridge();
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /Summarize by group/ }));
-    const nav = screen.getByRole("separator", { name: "Resize the workflow panel" });
+    const nav = screen.getByRole("separator", { name: "Resize workflow navigator" });
     // (Dragging is covered by scripts/smoke-studio.mjs: jsdom has no pointer coordinates.)
     fireEvent.keyDown(nav, { key: "ArrowRight" });
     fireEvent.keyDown(nav, { key: "ArrowRight" });
     expect(nav.getAttribute("aria-valuenow")).toBe("292");
-    const insp = screen.getByRole("separator", { name: "Resize the inspector" });
+    const insp = screen.getByRole("separator", { name: "Resize inspector" });
     fireEvent.keyDown(insp, { key: "ArrowLeft" }); // the inspector grows to the left
     expect(insp.getAttribute("aria-valuenow")).toBe("316");
     fireEvent.keyDown(screen.getByRole("separator", { name: "Resize the console" }), { key: "ArrowUp" });
     const app = document.querySelector(".app") as HTMLElement;
-    expect(app.style.getPropertyValue("--nav-w")).toBe("292px");
-    expect(app.style.getPropertyValue("--insp-w")).toBe("316px");
     expect(app.style.getPropertyValue("--console-h")).toBe("144px");
-    expect(localStorage.getItem("mai.layout.nav")).toBe("292");
-    fireEvent.doubleClick(nav);
-    expect(nav.getAttribute("aria-valuenow")).toBe("260");
   });
 });

@@ -163,6 +163,11 @@ func compileFilter(arg *yaml.Node, _ *scope) (tableFn, error) {
 			}
 			if ok {
 				keep = append(keep, t.Rows[i])
+				if s.comparison != nil && len(s.comparison.KeptPositions) < s.comparison.limit {
+					s.comparison.KeptPositions = append(s.comparison.KeptPositions, i+1)
+				}
+			} else if s.comparison != nil {
+				s.comparison.addRemoved(i, t.Rows[i])
 			}
 		}
 		t.Rows = keep
@@ -208,17 +213,31 @@ func compileFill(arg *yaml.Node, _ *scope) (tableFn, error) {
 	if err != nil {
 		return nil, err
 	}
-	return func(t *Table, _ *State) (*Table, error) {
+	return func(t *Table, s *State) (*Table, error) {
 		ix, err := t.cols(names)
 		if err != nil {
 			return nil, err
 		}
 		last := make([]any, len(ix))
-		for _, r := range t.Rows {
+		if s.comparison != nil {
+			s.comparison.Changed = make([][]int, len(s.comparison.Before))
+		}
+		for i, r := range t.Rows {
+			changedRow := false
 			for j, n := range ix {
 				if blank(r[n]) {
 					if last[j] != nil {
 						r[n] = last[j]
+						if c := s.comparison; c != nil {
+							if !changedRow {
+								c.ChangedRows++
+								changedRow = true
+							}
+							c.ChangedCells++
+							if i < len(c.Changed) {
+								c.Changed[i] = append(c.Changed[i], n)
+							}
+						}
 					}
 				} else {
 					last[j] = r[n]

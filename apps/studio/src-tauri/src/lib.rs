@@ -6,6 +6,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::{
+    io::Write,
     path::{Path, PathBuf},
     process::Stdio,
     sync::Mutex,
@@ -20,12 +21,14 @@ use tokio::{
 use zeroize::{Zeroize, Zeroizing};
 
 mod runner_process;
+mod test_runs;
 
 struct Workspace {
     root: Mutex<Option<PathBuf>>,
     slots: tokio::sync::Semaphore,
     build_slot: tokio::sync::Semaphore,
     identity_lock: Mutex<()>,
+    test_runs: test_runs::TestRuns,
 }
 impl Default for Workspace {
     fn default() -> Self {
@@ -34,6 +37,7 @@ impl Default for Workspace {
             slots: tokio::sync::Semaphore::new(2),
             build_slot: tokio::sync::Semaphore::new(1),
             identity_lock: Mutex::new(()),
+            test_runs: test_runs::TestRuns::default(),
         }
     }
 }
@@ -62,6 +66,34 @@ async fn choose_workspace(
     Ok(json!({"path": path}))
 }
 
+#[tauri::command]
+async fn save_diagram_svg(app: tauri::AppHandle, svg: String) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(file) = app
+            .dialog()
+            .file()
+            .add_filter("SVG image", &["svg"])
+            .set_file_name("workflow-diagram.svg")
+            .blocking_save_file()
+        else {
+            return Ok(false);
+        };
+        let destination = file.into_path().map_err(|_| "Choose a local file")?;
+        let directory = destination.parent().ok_or("Choose a local destination")?;
+        let mut temporary = tempfile::NamedTempFile::new_in(directory)
+            .map_err(|_| "Cannot create the diagram file")?;
+        temporary
+            .write_all(svg.as_bytes())
+            .map_err(|_| "Cannot write the diagram file")?;
+        temporary
+            .persist(&destination)
+            .map_err(|_| "Cannot save the diagram file")?;
+        Ok(true)
+    })
+    .await
+    .map_err(|_| "Diagram save failed")?
+}
+
 const SAMPLE_EXTENSIONS: [&str; 3] = ["xlsx", "xls", "csv"];
 const SAMPLE_DIR: &str = "samples";
 
@@ -72,6 +104,38 @@ fn workspace_root(workspace: &Workspace) -> Result<PathBuf, String> {
         .map_err(|_| "Workspace lock failed".to_string())?
         .clone()
         .ok_or_else(|| "Choose a workspace first".to_string())
+}
+
+/// Opens a file picker for a sample input, starting in the workspace. The
+/// runner only reads files inside the workspace, so a file picked elsewhere
+/// is copied into <workspace>/samples first. Returns the workspace-relative
+/// path and whether the file was copied, or null when cancelled.
+#[tauri::command]
+async fn choose_sample_file(
+    app: tauri::AppHandle,
+    workspace: State<'_, Workspace>,
+) -> Result<Value, String> {
+    let root = workspace_root(&workspace)?;
+    let start = root.clone();
+    let picked = tauri::async_runtime::spawn_blocking(move || {
+        app.dialog()
+            .file()
+            .add_filter("Spreadsheets", &SAMPLE_EXTENSIONS)
+            .set_directory(start)
+            .blocking_pick_file()
+    })
+    .await
+    .map_err(|_| "File picker failed")?;
+    let Some(picked) = picked else {
+        return Ok(Value::Null);
+    };
+    let file = picked
+        .into_path()
+        .map_err(|_| "Choose a local file")?
+        .canonicalize()
+        .map_err(|_| "Cannot access the selected file")?;
+    let (path, copied) = place_sample(&root, &file)?;
+    Ok(json!({"path": path, "copied": copied}))
 }
 
 /// Makes picked or dropped files usable as samples: each becomes
@@ -217,13 +281,23 @@ fn authorize(request: &mut Value, root: Option<&Path>) -> Result<(), String> {
         .ok_or("Missing command")?;
     if !matches!(
         command,
-        "capabilities" | "validate" | "inspectWorkbook" | "run" | "trace" | "saveTest"
+        "capabilities"
+            | "validate"
+            | "inspectWorkbook"
+            | "inspectWorkbookPage"
+            | "run"
+            | "trace"
+            | "listRuns"
+            | "discoverTests"
+            | "runTests"
+            | "saveTest"
     ) {
         return Err("Unsupported runner command".into());
     }
     if command == "capabilities" {
         return Ok(());
     }
+    let workflow_tests = matches!(command, "discoverTests" | "runTests");
     let root = root.ok_or("Choose a workspace first")?;
     let params = request
         .get_mut("params")
@@ -249,6 +323,13 @@ fn authorize(request: &mut Value, root: Option<&Path>) -> Result<(), String> {
     if let Some(path) = params.get("path") {
         check(path)?
     }
+    if workflow_tests {
+        check(
+            params
+                .get("workflowPath")
+                .ok_or("Choose a saved workflow first")?,
+        )?;
+    }
     if let Some(inputs) = params.get("inputs") {
         for path in inputs
             .as_object()
@@ -259,6 +340,22 @@ fn authorize(request: &mut Value, root: Option<&Path>) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+#[tauri::command]
+async fn file_revisions(
+    paths: Vec<String>,
+    workspace: State<'_, Workspace>,
+) -> Result<std::collections::BTreeMap<String, Option<String>>, String> {
+    let root = workspace
+        .root
+        .lock()
+        .map_err(|_| "Workspace lock failed")?
+        .clone()
+        .ok_or("Choose a workspace first")?;
+    tauri::async_runtime::spawn_blocking(move || workflows::file_revisions(&root, paths))
+        .await
+        .map_err(|_| "Cannot check preview files".into())
 }
 
 #[tauri::command]
@@ -325,10 +422,50 @@ fn runner_path() -> Result<PathBuf, String> {
 }
 
 #[tauri::command]
+fn runner_prepare_tests(id: String, workspace: State<'_, Workspace>) -> Result<(), String> {
+    workspace.test_runs.prepare(id)
+}
+
+#[tauri::command]
+fn runner_cancel_tests(id: String, workspace: State<'_, Workspace>) -> Result<(), String> {
+    workspace.test_runs.cancel(&id)
+}
+
+#[tauri::command]
 async fn runner_request(
     mut request: Value,
+    cancellable: Option<bool>,
     workspace: State<'_, Workspace>,
 ) -> Result<Value, String> {
+    let command = request["command"].as_str();
+    let active_test_id = if cancellable == Some(true) {
+        if command != Some("runTests") {
+            return Err("Cancellation is only available for test runs".into());
+        }
+        Some(
+            request["id"]
+                .as_str()
+                .ok_or("Missing test run ID")?
+                .to_owned(),
+        )
+    } else {
+        None
+    };
+    let (limit, timeout_message) = if matches!(command, Some("discoverTests" | "runTests")) {
+        (
+            Duration::from_secs(35),
+            "Workflow tests exceeded the 35-second desktop limit",
+        )
+    } else {
+        (
+            Duration::from_secs(120),
+            "Run exceeded the 120-second desktop limit",
+        )
+    };
+    let active_test = active_test_id
+        .as_deref()
+        .map(|id| workspace.test_runs.start(id))
+        .transpose()?;
     let _slot = workspace
         .slots
         .try_acquire()
@@ -339,20 +476,7 @@ async fn runner_request(
         .map_err(|_| "Workspace lock failed")?
         .clone();
     authorize(&mut request, root.as_deref())?;
-    invoke_runner(
-        request,
-        Duration::from_secs(120),
-        "Run exceeded the 120-second desktop limit",
-    )
-    .await
-}
-
-async fn invoke_runner(
-    request: Value,
-    limit: Duration,
-    timeout_message: &str,
-) -> Result<Value, String> {
-    invoke_runner_at(runner_path()?, request, limit, timeout_message).await
+    invoke_runner_at(runner_path()?, request, limit, timeout_message, active_test).await
 }
 
 async fn invoke_runner_at(
@@ -360,7 +484,11 @@ async fn invoke_runner_at(
     mut request: Value,
     limit: Duration,
     timeout_message: &str,
+    mut active_test: Option<test_runs::ActiveTestRun<'_>>,
 ) -> Result<Value, String> {
+    if active_test.as_mut().is_some_and(|test| test.is_cancelled()) {
+        return Err(test_runs::CANCELLED.into());
+    }
     let mut bytes = Zeroizing::new(serde_json::to_vec(&request).map_err(|_| "Invalid request")?);
     if let Some(build) = request
         .pointer_mut("/params/build")
@@ -375,6 +503,16 @@ async fn invoke_runner_at(
     }
     bytes.push(b'\n');
     let mut command = Command::new(runner);
+    let test_directory = if request["command"] == "runTests" {
+        // The sidecar cannot clean up its temp files when the host terminates it.
+        let dir = tempfile::tempdir().map_err(|_| "Cannot create test working directory")?;
+        for variable in ["TMPDIR", "TMP", "TEMP"] {
+            command.env(variable, dir.path());
+        }
+        Some(dir)
+    } else {
+        None
+    };
     command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -384,34 +522,46 @@ async fn invoke_runner_at(
     let mut child = command
         .spawn()
         .map_err(|_| "Cannot launch Go sidecar; rebuild it for this host")?;
-    let _process_tree =
+    let process_tree =
         runner_process::guard(&child).map_err(|_| "Cannot configure Go sidecar process cleanup")?;
-    let output = timeout(limit, async {
-        let mut stdin = child.stdin.take().ok_or("Cannot open runner input")?;
-        stdin
-            .write_all(&bytes)
-            .await
-            .map_err(|_| "Cannot send runner request")?;
-        bytes.zeroize();
-        drop(stdin); // One request per process; EOF lets the runner exit cleanly.
-        let stdout = child.stdout.take().ok_or("Cannot open runner output")?;
-        let mut output = Vec::new();
-        stdout
-            .take(1024 * 1024 + 1)
-            .read_to_end(&mut output)
-            .await
-            .map_err(|_| "Cannot read runner output")?;
-        if output.len() > 1024 * 1024 {
-            return Err("Runner response exceeds 1 MiB");
-        }
-        let status = child.wait().await.map_err(|_| "Runner process failed")?;
-        if !status.success() {
-            return Err("Runner exited unsuccessfully");
-        }
-        Ok(output)
-    })
-    .await
-    .map_err(|_| timeout_message)??;
+    let work = async {
+        timeout(limit, async {
+            let mut stdin = child.stdin.take().ok_or("Cannot open runner input")?;
+            stdin
+                .write_all(&bytes)
+                .await
+                .map_err(|_| "Cannot send runner request")?;
+            bytes.zeroize();
+            drop(stdin); // One request per process; EOF lets the runner exit cleanly.
+            let stdout = child.stdout.take().ok_or("Cannot open runner output")?;
+            let mut output = Vec::new();
+            stdout
+                .take(1024 * 1024 + 1)
+                .read_to_end(&mut output)
+                .await
+                .map_err(|_| "Cannot read runner output")?;
+            if output.len() > 1024 * 1024 {
+                return Err("Runner response exceeds 1 MiB".into());
+            }
+            let status = child.wait().await.map_err(|_| "Runner process failed")?;
+            if !status.success() {
+                return Err("Runner exited unsuccessfully".into());
+            }
+            Ok(output)
+        })
+        .await
+        .map_err(|_| timeout_message)?
+    };
+    let result = match active_test.as_mut() {
+        Some(test) => test.run(work).await,
+        None => work.await,
+    };
+    drop(process_tree);
+    if result.is_err() && test_directory.is_some() {
+        // Let the terminated sidecar release its file handles before removing test files.
+        let _ = timeout(Duration::from_secs(1), child.wait()).await;
+    }
+    let output = result?;
     let response: Value = serde_json::from_slice(&output).map_err(|_| "Invalid runner response")?;
     if response.get("version") != request.get("version") || response.get("id") != request.get("id")
     {
@@ -592,10 +742,12 @@ async fn build_linux_package(
     // Move the credential-bearing profile; json!(profile) would clone it and
     // leave another signing-key string outside invoke_runner's cleanup.
     request["params"]["build"] = profile;
-    let response = invoke_runner(
+    let response = invoke_runner_at(
+        runner_path()?,
         request,
         Duration::from_secs(15 * 60),
         "Package build exceeded the 15-minute desktop limit",
+        None,
     )
     .await?;
     // Never relay a credential if the sidecar includes request data in its response.
@@ -628,8 +780,13 @@ pub fn run() {
         .on_window_event(on_drop)
         .invoke_handler(tauri::generate_handler![
             choose_workspace,
+            save_diagram_svg,
+            choose_sample_file,
+            file_revisions,
             choose_sample_files,
             runner_request,
+            runner_prepare_tests,
+            runner_cancel_tests,
             list_workflows,
             read_workflow,
             save_workflow,
@@ -784,6 +941,7 @@ mod tests {
             json!({"version": 1, "id": "test"}),
             Duration::from_millis(200),
             "timed out",
+            None,
         ));
         assert_eq!(result.unwrap_err(), "timed out");
         std::thread::sleep(Duration::from_millis(1200));
@@ -797,31 +955,49 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let runner = dir.path().join("runner");
         let marker = dir.path().join("survived");
+        let ready = dir.path().join("ready");
         std::fs::write(
             &runner,
             format!(
-                "#!/bin/sh\n(sleep 1; touch '{}') &\nwait\n",
+                "#!/bin/sh\n(touch \"$TMPDIR/scratch\"; printf '%s' \"$TMPDIR\" > '{}'; sleep 1; touch '{}') &\nwait\n",
+                ready.display(),
                 marker.display()
             ),
         )
         .unwrap();
         std::fs::set_permissions(&runner, std::fs::Permissions::from_mode(0o700)).unwrap();
         tauri::async_runtime::block_on(async {
+            let runs = std::sync::Arc::new(test_runs::TestRuns::default());
+            runs.prepare("test".into()).unwrap();
+            let task_runs = runs.clone();
             let task = tokio::spawn(async move {
                 invoke_runner_at(
                     runner,
-                    json!({"version": 1, "id": "test"}),
+                    json!({"version": 1, "id": "test", "command": "runTests"}),
                     Duration::from_secs(10),
                     "timed out",
+                    Some(task_runs.start("test").unwrap()),
                 )
                 .await
             });
-            tokio::time::sleep(Duration::from_millis(200)).await;
-            task.abort();
-            let _ = task.await;
+            timeout(Duration::from_secs(3), async {
+                while std::fs::read_to_string(&ready)
+                    .unwrap_or_default()
+                    .is_empty()
+                {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("runner descendant did not start");
+            runs.cancel("test").unwrap();
+            assert_eq!(task.await.unwrap().unwrap_err(), test_runs::CANCELLED);
+            runs.prepare("test".into()).unwrap();
             tokio::time::sleep(Duration::from_millis(1200)).await;
         });
         assert!(!marker.exists(), "runner descendant survived cancellation");
+        let scratch = std::fs::read_to_string(&ready).unwrap();
+        assert!(!Path::new(&scratch).exists(), "cancelled test files remain");
     }
 
     #[cfg(unix)]
@@ -841,6 +1017,7 @@ mod tests {
             request,
             Duration::from_millis(100),
             "timed out",
+            None,
         ));
         assert_eq!(result.unwrap_err(), "timed out");
         assert!(start.elapsed() < Duration::from_secs(3));
@@ -934,7 +1111,42 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
+    fn workbook_pages_use_the_selected_workspace() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        std::fs::write(root.join("output.xlsx"), b"workbook").unwrap();
+        let mut page = json!({"version":1,"command":"inspectWorkbookPage","params":{"workspace":"another-folder","path":"output.xlsx"}});
+        assert!(authorize(&mut page, None).is_err());
+        assert!(authorize(&mut page, Some(&root)).is_ok());
+        assert_eq!(page["params"]["workspace"], json!(root));
+        page["params"]["path"] = json!("../outside.xlsx");
+        assert!(authorize(&mut page, Some(&root)).is_err());
+    }
+    #[test]
+    fn workflow_test_commands_use_the_selected_workspace() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        std::fs::write(root.join("orders.yaml"), b"workflow").unwrap();
+        for command in ["discoverTests", "runTests"] {
+            let mut request = json!({"version":1,"command":command,"params":{
+                "workspace":"another-folder","workflowPath":"orders.yaml"
+            }});
+            assert!(authorize(&mut request, None).is_err());
+            assert!(authorize(&mut request, Some(&root)).is_ok());
+            assert_eq!(request["params"]["workspace"], json!(root));
+            request["params"]["workflowPath"] = json!(root.join("orders.yaml"));
+            assert!(authorize(&mut request, Some(&root)).is_err());
+        }
+    }
+
+    #[test]
     fn refuses_unselected_workspaces_and_unknown_commands() {
+        let mut history =
+            json!({"version":1,"command":"listRuns","params":{"workspace":"another-folder"}});
+        assert!(authorize(&mut history, None).is_err());
+        let root = tempfile::tempdir().unwrap();
+        assert!(authorize(&mut history, Some(root.path())).is_ok());
+        assert_eq!(history["params"]["workspace"], json!(root.path()));
         assert!(authorize(&mut json!({"version":1,"command":"run","params":{}}), None).is_err());
         assert!(authorize(&mut json!({"version":1,"command":"shell"}), None).is_err());
         assert!(authorize(

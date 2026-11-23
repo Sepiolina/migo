@@ -81,6 +81,7 @@ export interface StepItem {
   op: string;
   spec?: StepSpec;
   summary: string;
+  fillColumns?: string[];
   depth: number;
   /** The top-level step this one belongs to (trace results are per top-level step). */
   top: number;
@@ -91,7 +92,13 @@ export interface StepItem {
   /** The YAML comment above the step, used as its note. */
   note?: string;
 }
-export interface InputItem { id: string; label: string; match: string }
+export interface InputItem {
+  id: string;
+  label: string;
+  match: string;
+  /** Each unconditional read needs one of its listed names or 1-based indices. */
+  sheetRequirements: (string | number)[][];
+}
 export interface OutputItem { index: number; name: string; from: string; detailed: boolean }
 export interface Pipeline {
   name: string;
@@ -113,6 +120,38 @@ function stepOf(node: unknown): { op: string; arg: unknown } | null {
   return { op: str(node.items[0].key)!, arg: node.items[0].value ?? undefined };
 }
 
+function readSheetRequirement(arg: unknown): { input: string; choices: (string | number)[] } | undefined {
+  if (isScalar(arg)) {
+    const value = arg.source ?? String(arg.value);
+    const bracket = value.indexOf("[");
+    if (bracket <= 0 || value.length < bracket + 3 || !value.endsWith("]")) return;
+    return { input: value.slice(0, bracket), choices: [value.slice(bracket + 1, -1)] };
+  }
+  if (!isMap(arg)) return;
+  const input = arg.get("input", true);
+  if (!isScalar(input) || input.value == null) return;
+  const sheet = arg.get("sheet", true);
+  const nodes = isSeq(sheet) ? sheet.items : [sheet];
+  const choices: (string | number)[] = [];
+  for (const node of nodes) {
+    if (!isScalar(node)) return;
+    const value = node.source ?? String(node.value ?? "");
+    if (!value.trim()) return;
+    // The runner treats decimal text as an index only when its YAML tag is int.
+    // Plain leading zeroes use YAML v3's octal tag resolution, then decimal Atoi.
+    const numeric = node.tag === "tag:yaml.org,2002:int" && /^[+-]?\d+$/.test(value)
+      || !node.tag && node.type === Scalar.PLAIN && /^[+-]?(?:0[0-7]*|[1-9]\d*)$/.test(value);
+    if (numeric) {
+      const index = Number(value);
+      if (!Number.isSafeInteger(index) || index < 1) return;
+      choices.push(index);
+    } else {
+      choices.push(value);
+    }
+  }
+  if (choices.length) return { input: input.source ?? String(input.value), choices };
+}
+
 export function readPipeline(source: string): Pipeline {
   const doc = open(source);
   const root = doc.contents;
@@ -121,11 +160,12 @@ export function readPipeline(source: string): Pipeline {
   const inputs: InputItem[] = isMap(input)
     ? input.items.map((p) => {
         const v = js(p.value) as Record<string, unknown> | undefined;
-        return { id: String(js(p.key)), label: String(v?.label ?? js(p.key)), match: String(v?.match ?? "") };
+        return { id: String(js(p.key)), label: String(v?.label ?? js(p.key)), match: String(v?.match ?? ""), sheetRequirements: [] };
       })
     : [];
   const steps: StepItem[] = [];
   const datasets: string[] = [];
+  const inputsById = new Map(inputs.map((entry) => [entry.id, entry]));
   const walk = (seq: unknown, listPath: Path, depth: number, top: number | null, branch?: string) => {
     if (!isSeq(seq)) return;
     seq.items.forEach((node, index) => {
@@ -135,6 +175,17 @@ export function readPipeline(source: string): Pipeline {
       const t = top ?? index;
       const argPath = op === "if" ? path : [...path, op];
       const arg = s ? js(s.arg) : undefined;
+      if (depth === 0 && op === "from") {
+        const requirement = readSheetRequirement(s?.arg);
+        if (requirement) inputsById.get(requirement.input)?.sheetRequirements.push(requirement.choices);
+      }
+      const fillColumns = op === "fill" && isSeq(s?.arg)
+        ? s.arg.items.flatMap((name) => {
+            if (!isScalar(name) || name.value == null) return [];
+            if (name.value instanceof Uint8Array) return [new TextDecoder().decode(name.value)];
+            return [name.source ?? String(name.value)];
+          })
+        : undefined;
       if (op === "save" && typeof arg === "string") datasets.push(arg);
       if ((op === "sql" || op === "rest") && arg && typeof arg === "object") {
         const save = (arg as Record<string, unknown>).save;
@@ -149,6 +200,7 @@ export function readPipeline(source: string): Pipeline {
         op,
         spec: stepByOp.get(op),
         summary: summarize(op, arg),
+        fillColumns,
         depth,
         top: t,
         branch,

@@ -1,6 +1,7 @@
 import { workflowTemplates, type Template } from "./workflowTemplates";
 
 export type WorkflowEntry = { path: string; name: string; route: string };
+type RecoveryEntry = { id: string; label: string; updatedAt: string | number };
 
 /** The start screen: the workspace, its workflows and templates. */
 export function Home({
@@ -9,16 +10,22 @@ export function Home({
   workflows,
   onOpenWorkspace,
   onOpen,
+  onSetup,
   onTemplate,
   onBack,
+  recoveryDrafts,
+  onOpenRecoveryDraft,
 }: {
   workspace: string;
   desktop: boolean;
   workflows: WorkflowEntry[];
   onOpenWorkspace: () => void;
   onOpen: (path: string) => void;
+  onSetup: (path: string) => void;
   onTemplate: (t: Template) => void;
   onBack?: () => void;
+  recoveryDrafts?: RecoveryEntry[];
+  onOpenRecoveryDraft?: (id: string) => void;
 }) {
   return (
     <main className="home" aria-label="Workflows">
@@ -33,10 +40,28 @@ export function Home({
           <div className="hero">
             <div>
               <b>{workspace ? workspace : "Open a project folder"}</b>
-              <p>{workspace ? "Workflows live in its workflows/ folder; sample files can be anywhere inside it." : "Choose the folder that holds your workflows/ directory and sample files, for example a clone of the migo repository."}</p>
+              <p>{workspace ? "Open a project workflow or an example. Sample files can be anywhere in this folder." : "Choose the folder that holds your workflows/ directory and sample files, for example a clone of the migo repository."}</p>
             </div>
             <button className={workspace ? "btn" : "primary"} onClick={onOpenWorkspace}>{workspace ? "Change folder…" : "Open folder…"}</button>
           </div>
+        )}
+        {!!recoveryDrafts?.length && onOpenRecoveryDraft && (
+          <section aria-labelledby="recovery-drafts">
+            <h2 id="recovery-drafts">Recovery drafts</h2>
+            <div className="list">
+              {recoveryDrafts.map(({ id, label, updatedAt }) => {
+                const date = new Date(updatedAt);
+                return (
+                  <button className="wf recovery-entry" key={id} onClick={() => onOpenRecoveryDraft(id)}>
+                    <span className="n">{label}</span>
+                    {Number.isFinite(date.getTime()) && (
+                      <time dateTime={date.toISOString()}>{date.toLocaleString()}</time>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
         )}
         {workspace && (
           <section>
@@ -44,17 +69,20 @@ export function Home({
             <div className="list">
               {workflows.length ? (
                 workflows.map((w) => (
-                  <button key={w.path} className="wf" onClick={() => onOpen(w.path)}>
-                    <span>
-                      <div className="n">{w.name || w.path}</div>
-                      <div className="p">{w.path}</div>
-                    </span>
-                    <span className="route">/api/{w.route}</span>
-                  </button>
+                  <div className="project-workflow" key={w.path}>
+                    <button className="wf" onClick={() => onOpen(w.path)}>
+                      <span>
+                        <div className="n">{w.name || w.path}</div>
+                        <div className="p">{w.path}</div>
+                      </span>
+                      <span className="route">/api/{w.route}</span>
+                    </button>
+                    <button className="btn" aria-label={`Set up samples for ${w.path}`} onClick={() => onSetup(w.path)}>Set up samples</button>
+                  </div>
                 ))
               ) : (
                 <div className="wf" style={{ cursor: "default" }}>
-                  <span className="hint">No workflows in workflows/ yet. Start from a template below.</span>
+                  <span className="hint">No project workflows or examples found. Start from a template below.</span>
                 </div>
               )}
             </div>

@@ -12,16 +12,17 @@ import (
 // StepTrace is the current table after one top-level step, as an editor
 // shows it: a column profile for every column, rows only for the step asked.
 type StepTrace struct {
-	Step     int             `json:"step"` // 0-based top-level step index
-	Name     string          `json:"name"` // the step's name, e.g. "filter"
-	Line     int             `json:"line"`
-	Skipped  bool            `json:"skipped,omitempty"`
-	Columns  []ColumnProfile `json:"columns"`
-	Total    int             `json:"total"`          // rows in the current table
-	Rows     [][]string      `json:"rows,omitempty"` // the first rows, for the focused step
-	Log      []string        `json:"log,omitempty"`  // lines this step logged
-	Error    string          `json:"error,omitempty"`
-	Duration float64         `json:"ms"`
+	Comparison *StepComparison `json:"comparison,omitempty"`
+	Step       int             `json:"step"` // 0-based top-level step index
+	Name       string          `json:"name"` // the step's name, e.g. "filter"
+	Line       int             `json:"line"`
+	Skipped    bool            `json:"skipped,omitempty"`
+	Columns    []ColumnProfile `json:"columns"`
+	Total      int             `json:"total"`          // rows in the current table
+	Rows       [][]string      `json:"rows,omitempty"` // the first rows, for the focused step
+	Log        []string        `json:"log,omitempty"`  // lines this step logged
+	Error      string          `json:"error,omitempty"`
+	Duration   float64         `json:"ms"`
 }
 
 // ColumnProfile summarizes one column of the current table.
@@ -37,9 +38,10 @@ type ColumnProfile struct {
 
 // TraceOptions choose what Trace returns.
 type TraceOptions struct {
-	Focus int   // the step whose rows are returned (-1: none)
-	Limit int   // rows returned for the focused step
-	Skip  []int // top-level steps to leave out, to preview the workflow without them
+	Compare bool  // collect a bounded before/after sample for a focused fill or filter
+	Focus   int   // the step whose rows are returned (-1: none)
+	Limit   int   // rows returned for the focused step
+	Skip    []int // top-level steps to leave out, to preview the workflow without them
 }
 
 const maxDistinct = 1000
@@ -75,10 +77,20 @@ func (wf *Workflow) Trace(ctx context.Context, rt Runtime, inputs map[string]str
 		tr := StepTrace{Step: i, Name: st.name, Line: st.line, Columns: []ColumnProfile{}}
 		lines = lines[:0]
 		start := time.Now()
+		before := s.Cur
+		if opt.Compare && i == opt.Focus && !skip[i] && before != nil && (st.name == "fill" || st.name == "filter") {
+			s.comparison = newComparison(before, opt.Limit)
+		}
 		if skip[i] {
 			tr.Skipped = true
 		} else if err := st.run(ctx, s); err != nil {
 			tr.Error = err.Error()
+		}
+		if c := s.comparison; c != nil {
+			if tr.Error == "" {
+				tr.Comparison = c
+			}
+			s.comparison = nil
 		}
 		tr.Duration = float64(time.Since(start).Microseconds()) / 1000
 		tr.Log = append([]string(nil), lines...)

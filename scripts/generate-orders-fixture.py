@@ -6,6 +6,7 @@ The fixed ZIP metadata makes repeated generation byte-for-byte reproducible.
 """
 
 import argparse
+from itertools import chain, cycle, islice
 from pathlib import Path
 from xml.sax.saxutils import escape
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
@@ -21,9 +22,12 @@ ROWS = (
 )
 
 
-def generate(destination):
+def generate(destination, data_rows=len(ROWS) - 1):
+    if not 0 <= data_rows <= 1_048_575:
+        raise ValueError("Data row count must be between 0 and 1,048,575.")
     rows = []
-    for index, values in enumerate(ROWS, 1):
+    fixture = chain(ROWS[:1], islice(cycle(ROWS[1:]), data_rows))
+    for index, values in enumerate(fixture, 1):
         cells = []
         for column, value in zip("ABC", values):
             address = f"{column}{index}"
@@ -37,7 +41,7 @@ def generate(destination):
         "_rels/.rels": '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>',
         "xl/workbook.xml": '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Orders" sheetId="1" r:id="rId1"/></sheets></workbook>',
         "xl/_rels/workbook.xml.rels": '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>',
-        "xl/worksheets/sheet1.xml": '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="A1:C6"/><sheetData>' + "".join(rows) + '</sheetData></worksheet>',
+        "xl/worksheets/sheet1.xml": f'<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="A1:C{data_rows + 1}"/><sheetData>' + "".join(rows) + '</sheetData></worksheet>',
     }
     with ZipFile(destination, "w") as archive:
         for name, value in files.items():
@@ -52,4 +56,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("destination", nargs="?", type=Path,
                         default=Path(__file__).resolve().parents[1] / "examples/orders.xlsx")
-    generate(parser.parse_args().destination)
+    parser.add_argument("--rows", type=int, default=len(ROWS) - 1, help="Number of data rows (excluding the header)")
+    args = parser.parse_args()
+    generate(args.destination, args.rows)

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useDialogFocus } from "./useDialogFocus";
 
 export type Command = {
   group: string;
@@ -13,7 +14,10 @@ export type Command = {
 export function CommandMenu({ commands, placeholder, onClose }: { commands: Command[]; placeholder: string; onClose: () => void }) {
   const [query, setQuery] = useState("");
   const [hl, setHl] = useState(0);
+  const menu = useRef<HTMLDivElement>(null);
+  const search = useRef<HTMLInputElement>(null);
   const list = useRef<HTMLDivElement>(null);
+  useDialogFocus(menu, search);
   const shown = useMemo(() => {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
     return commands.filter((c) => {
@@ -32,10 +36,14 @@ export function CommandMenu({ commands, placeholder, onClose }: { commands: Comm
   };
   let last = "";
   return (
-    <div className="scrim" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="palette" role="dialog" aria-label="Command menu">
+    <div className="scrim" onMouseDown={(e) => {
+      if (e.target !== e.currentTarget) return;
+      e.preventDefault();
+      onClose();
+    }}>
+      <div ref={menu} className="palette" role="dialog" aria-modal="true" aria-label="Command menu">
         <input
-          autoFocus
+          ref={search}
           aria-label="Search commands"
           role="combobox"
           aria-expanded="true"
@@ -45,10 +53,14 @@ export function CommandMenu({ commands, placeholder, onClose }: { commands: Comm
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === "ArrowDown") { e.preventDefault(); setHl(Math.min(hl + 1, shown.length - 1)); }
+            if (e.key === "Tab") e.preventDefault();
+            if (e.key === "ArrowDown") { e.preventDefault(); setHl(Math.max(0, Math.min(hl + 1, shown.length - 1))); }
             if (e.key === "ArrowUp") { e.preventDefault(); setHl(Math.max(hl - 1, 0)); }
-            if (e.key === "Enter") { e.preventDefault(); go(hl); }
-            if (e.key === "Escape") { e.preventDefault(); onClose(); }
+            if (e.key === "Enter") {
+              e.preventDefault();
+              if (!e.ctrlKey && !e.metaKey) go(hl);
+            }
+            if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); onClose(); }
           }}
         />
         <div className="list" id="command-list" role="listbox" ref={list}>
@@ -57,7 +69,7 @@ export function CommandMenu({ commands, placeholder, onClose }: { commands: Comm
             last = c.group;
             return [
               head,
-              <button key={`${c.group}-${c.label}-${i}`} id={`cmd-${i}`} role="option" aria-selected={i === hl} className={`mi ${i === hl ? "hl" : ""}`} onMouseMove={() => setHl(i)} onClick={() => go(i)}>
+              <button key={`${c.group}-${c.label}-${i}`} id={`cmd-${i}`} tabIndex={-1} role="option" aria-selected={i === hl} className={`mi ${i === hl ? "hl" : ""}`} onMouseDown={(e) => e.preventDefault()} onMouseMove={() => setHl(i)} onClick={() => go(i)}>
                 <span className="gi" aria-hidden="true">{c.glyph ?? "•"}</span>
                 <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {c.label}

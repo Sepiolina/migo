@@ -8,6 +8,35 @@ export type Inspection = {
   totalRows: number;
   truncated: boolean;
 };
+export type WorkbookBorder = { style: number; color?: string };
+export type WorkbookCellStyle = {
+  bold?: boolean;
+  italic?: boolean;
+  underline?: boolean;
+  fontColor?: string;
+  fillColor?: string;
+  fontSize?: number;
+  fontFamily?: string;
+  horizontal?: string;
+  vertical?: string;
+  wrap?: boolean;
+  borders?: Partial<Record<"left" | "right" | "top" | "bottom", WorkbookBorder>>;
+};
+export type WorkbookPage = {
+  sheets: string[];
+  sheet: string;
+  offset: number;
+  columnOffset: number;
+  totalRows: number;
+  totalColumns: number;
+  rows: string[][];
+  styleIds: number[][];
+  styles: Record<number, WorkbookCellStyle>;
+  widths: number[];
+  rowHeights?: number[];
+  generalAlignment?: string[];
+  unsupported: string[];
+};
 export type Validation = {
   name: string;
   inputs: { name: string; label: string }[];
@@ -19,6 +48,25 @@ export type RunResult = {
   preview?: Inspection;
   previewWarning?: string;
 };
+export type RunManifest = {
+  version: 1;
+  completedAt: string;
+  workflowPath: string;
+  workflowName: string;
+  yamlSha256: string;
+  inputs?: { name: string; path: string; sha256?: string | null; changed?: boolean }[];
+  outputPath: string;
+  outputSha256: string;
+  uncertain?: boolean;
+};
+export type RunHistoryEntry = {
+  id: string;
+  outputPath: string;
+  available: boolean;
+  completedAt: string;
+  manifest?: RunManifest;
+};
+export type RunHistoryPage = { runs: RunHistoryEntry[]; nextOffset?: number | null };
 export type ColumnProfile = {
   name: string;
   kind: "number" | "text" | "bool" | "empty" | "mixed";
@@ -28,7 +76,19 @@ export type ColumnProfile = {
   max?: number;
   bins?: number[];
 };
+export type StepComparison = {
+  input: number;
+  before: string[][] | null;
+  changedRows: number;
+  changedCells: number;
+  changed?: (number[] | null)[];
+  removed?: string[][];
+  removedPositions?: number[];
+  keptPositions?: number[];
+};
+
 export type StepTrace = {
+  comparison?: StepComparison;
   step: number;
   name: string;
   line: number;
@@ -42,6 +102,16 @@ export type StepTrace = {
 };
 /** `mocks`: sql and rest steps were answered from the workflow's mocks file. */
 export type Trace = { steps: StepTrace[]; format: string; mocks?: boolean };
+
+export class RunnerError extends Error {
+  readonly code?: string;
+
+  constructor(message: string, code?: string) {
+    super(message);
+    this.name = "RunnerError";
+    this.code = code;
+  }
+}
 
 /**
  * A stand-in for the native host, for browser development and UI tests:
@@ -63,6 +133,38 @@ export function native<T>(command: string, args?: Record<string, unknown>): Prom
   if (b) return b.invoke(command, args) as Promise<T>;
   return invoke<T>(command, args);
 }
+type RunnerReply<T> = { ok: boolean; result?: T; error?: { message: string; code?: string } };
+
+function cancelled() {
+  return new DOMException("Test run cancelled.", "AbortError");
+}
+
+async function runCancellableTests<T>(payload: Record<string, unknown>, id: string, signal: AbortSignal) {
+  if (signal.aborted) throw cancelled();
+  // Reserve the ID first so cancel can arrive before the run command without being lost.
+  await native("runner_prepare_tests", { id });
+  const cancel = () => native("runner_cancel_tests", { id }).catch(() => undefined);
+  if (signal.aborted) {
+    void cancel();
+    throw cancelled();
+  }
+  let rejectInterruption!: (error: DOMException) => void;
+  const interruption = new Promise<never>((_, reject) => { rejectInterruption = reject; });
+  const abort = () => {
+    void cancel();
+    rejectInterruption(cancelled());
+  };
+  try {
+    signal.addEventListener("abort", abort, { once: true });
+    return await Promise.race([
+      interruption,
+      native<RunnerReply<T>>("runner_request", { request: payload, cancellable: true }),
+    ]);
+  } finally {
+    signal.removeEventListener("abort", abort);
+  }
+}
+
 /** Subscribe to an event the native host emits; resolves to an unsubscribe function. */
 export async function listenNative<T>(event: string, handler: (payload: T) => void): Promise<() => void> {
   const b = bridge();
@@ -71,13 +173,16 @@ export async function listenNative<T>(event: string, handler: (payload: T) => vo
   const { listen } = await import("@tauri-apps/api/event");
   return listen<T>(event, (e) => handler(e.payload));
 }
+
 /** Send a request to the Go runner through the native host. */
-export async function request<T>(command: string, params: Record<string, unknown>): Promise<T> {
+export async function request<T>(command: string, params: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
   if (!isDesktop())
-    throw new Error("Open the Mai Studio desktop app to read files and run workflows. The browser preview edits YAML only.");
-  const reply = await native<{ ok: boolean; result?: T; error?: { message: string } }>("runner_request", {
-    request: { version: 1, id: crypto.randomUUID(), command, params },
-  });
-  if (!reply.ok) throw new Error(reply.error?.message ?? "Runner request failed.");
+    throw new Error("Open the Mai Studio desktop app to read files and run workflows.");
+  const id = crypto.randomUUID();
+  const payload = { version: 1, id, command, params };
+  const reply = command === "runTests" && signal
+    ? await runCancellableTests<T>(payload, id, signal)
+    : await native<RunnerReply<T>>("runner_request", { request: payload });
+  if (!reply.ok) throw new RunnerError(reply.error?.message ?? "Runner request failed.", reply.error?.code);
   return reply.result as T;
 }

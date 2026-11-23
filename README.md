@@ -27,10 +27,10 @@ validation coverage, and features still planned.
 
 Desktop installation currently requires building from source. Studio can build
 Linux `mai.zip` service packages with signing and configuration encryption, or
-explicit trusted-local plaintext mode. Signed desktop installer distribution,
-live desktop connection profiles, and full Excel style preview remain planned. The
-current preview shows workbook cell values; the generated `.xlsx` is the actual
-output of the Go engine.
+explicit trusted-local plaintext mode. Signed desktop installer distribution
+and live desktop connection profiles remain planned. After a run, Studio opens
+the generated `.xlsx` with sheet tabs, cell address navigation, and supported
+workbook formatting. [Workbook preview guide](docs/MAI_STUDIO_USER_GUIDE.md#inspect-the-saved-workbook)
 
 ## Get the source
 

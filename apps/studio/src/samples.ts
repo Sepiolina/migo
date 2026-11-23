@@ -27,7 +27,7 @@ export function matcher(pattern: string): RegExp | null {
  * source are returned as `unassigned`.
  */
 export function assignSamples(
-  inputs: InputItem[],
+  inputs: Pick<InputItem, "id" | "match">[],
   bindings: Record<string, string>,
   files: ImportedFile[],
   preferred?: string,

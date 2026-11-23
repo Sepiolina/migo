@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 
-export type Problem = { level: "error" | "warning" | "info"; text: string; step?: string };
+export type Problem = {
+  level: "error" | "warning" | "info";
+  text: string;
+  step?: string;
+  code?: string;
+  retry?: () => void;
+  retryLabel?: string;
+};
 export type LogLine = { time: string; text: string; warn?: boolean };
 type Tab = "problems" | "log" | "yaml";
 
@@ -9,6 +16,7 @@ export function Console({
   problems,
   log,
   source,
+  onSourceDraft,
   onSource,
   onGoTo,
   open,
@@ -18,6 +26,7 @@ export function Console({
   problems: Problem[];
   log: LogLine[];
   source: string;
+  onSourceDraft?: (source: string) => void;
   onSource: (source: string) => void;
   onGoTo: (step: string) => void;
   open: Tab | null;
@@ -25,9 +34,13 @@ export function Console({
   /** A drag handle on the console's top edge. */
   resizer?: React.ReactNode;
 }) {
-  const [draft, setDraft] = useState(source);
-  useEffect(() => setDraft(source), [source]);
-  const errors = problems.filter((p) => p.level === "error").length;
+  const [localDraft, setLocalDraft] = useState(source);
+  useEffect(() => {
+    if (!onSourceDraft) setLocalDraft(source);
+  }, [source, onSourceDraft]);
+  const draft = onSourceDraft ? source : localDraft;
+  const actionable = problems.filter((p) => p.level !== "info");
+  const hasErrors = actionable.some((p) => p.level === "error");
   const tab = (t: Tab, label: React.ReactNode) => (
     <button className="tb" role="tab" aria-selected={open === t} aria-pressed={open === t} onClick={() => onOpen(open === t ? null : t)}>
       {label}
@@ -37,20 +50,34 @@ export function Console({
     <section className="console" aria-label="Console">
       {resizer}
       <div className="ctabs" role="tablist">
-        {tab("problems", <>Problems {problems.length > 0 && <span className={`count ${errors ? "bad" : ""}`}>{problems.length}</span>}</>)}
+        {tab("problems", <>Problems {actionable.length > 0 && <span className={`count ${hasErrors ? "bad" : ""}`}>{actionable.length}</span>}</>)}
         {tab("log", "Run log")}
         {tab("yaml", "YAML")}
         <span className="spacer" />
         {open && <button className="tb" aria-label="Close console" onClick={() => onOpen(null)}>⌄</button>}
       </div>
       <div className={`cbody ${open === "problems" ? "" : "closed"}`}>
-        {problems.length ? (
-          problems.map((p, i) => (
-            <button key={i} className={`problem ${p.level === "error" ? "bad" : ""}`} disabled={!p.step} onClick={() => p.step && onGoTo(p.step)}>
-              <b>{p.level === "error" ? "✕" : p.level === "warning" ? "⚠" : "ⓘ"}</b>
-              <span>{p.text}</span>
-            </button>
-          ))
+        {actionable.length ? (
+          actionable.map((p, i) => {
+            const className = `problem ${p.level === "error" ? "bad" : ""}`;
+            const content = (
+              <>
+                <b aria-label={p.level}>{p.level === "error" ? "✕" : "⚠"}</b>
+                <span>{p.text}</span>
+              </>
+            );
+            const step = p.step;
+            return (
+              <div className="problem-row" key={i}>
+                {step ? (
+                  <button className={className} title={p.code} onClick={() => onGoTo(step)}>{content}</button>
+                ) : (
+                  <div className={className} title={p.code}>{content}</div>
+                )}
+                {p.retry && <button className="tb problem-retry" aria-label={p.retryLabel} onClick={p.retry}>Retry</button>}
+              </div>
+            );
+          })
         ) : (
           <span className="hint">No problems.</span>
         )}
@@ -65,10 +92,10 @@ export function Console({
           aria-label="Workflow YAML"
           spellCheck={false}
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={() => draft !== source && onSource(draft)}
+          onChange={(e) => (onSourceDraft ?? setLocalDraft)(e.target.value)}
+          onBlur={() => (onSourceDraft || draft !== source) && onSource(draft)}
           onKeyDown={(e) => {
-            if (e.key === "s" && (e.metaKey || e.ctrlKey) && draft !== source) onSource(draft);
+            if (e.key.toLowerCase() === "s" && (e.metaKey || e.ctrlKey) && (onSourceDraft || draft !== source)) onSource(draft);
           }}
         />
       </div>

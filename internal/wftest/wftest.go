@@ -11,10 +11,9 @@
 //	    in: {parts: empty.xlsx}
 //	    error: is empty                 # the run must fail with this text
 //
-// Optional per test: config (config.json keys), mocks (a mocks file, or the
-// same content inline: the answers for sql and rest steps, see package mock)
-// and sql_stub (a JSON table every sql step returns). A test never reaches
-// the network: a sql or rest step with no mock fails.
+// Optional per test: config (config.json keys), mocks (a file or inline SQL
+// and REST answers, see package mock), sql_stub (a JSON table), and rest_stub
+// (a JSON response body). Tests cannot reach the network.
 package wftest
 
 import (
@@ -23,12 +22,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
-	"github.com/xuri/excelize/v2"
 	"gopkg.in/yaml.v3"
 
 	"miservice/internal/mock"
@@ -47,27 +47,40 @@ type File struct {
 
 // Case is one run of the workflow and what it must produce.
 type Case struct {
-	Name    string            `yaml:"name"`
-	In      map[string]string `yaml:"in"`
-	Config  map[string]any    `yaml:"config"`
-	Mocks   yaml.Node         `yaml:"mocks"`
-	SQLStub string            `yaml:"sql_stub"`
-	Expect  string            `yaml:"expect"`
-	Error   string            `yaml:"error"`
+	Name     string            `yaml:"name"`
+	In       map[string]string `yaml:"in"`
+	Config   map[string]any    `yaml:"config"`
+	Mocks    yaml.Node         `yaml:"mocks"`
+	SQLStub  string            `yaml:"sql_stub"`
+	RESTStub string            `yaml:"rest_stub"`
+	Expect   string            `yaml:"expect"`
+	Error    string            `yaml:"error"`
 }
 
 // Result is the outcome of one case.
 type Result struct {
-	Name    string
-	Err     error // nil: passed
-	Updated bool  // the expected file was (re)written
+	Name          string
+	Err           error // nil: passed
+	Updated       bool  // the expected file was (re)written
+	Duration      time.Duration
+	Difference    *Difference
+	ExpectedError string
+	ActualError   string
 }
 
 // Find returns the test files at the paths: a path is a test file or a
 // directory searched for *.test.yaml (hidden folders and node_modules skipped).
 func Find(paths []string) ([]string, error) {
+	return FindContext(context.Background(), paths)
+}
+
+// FindContext discovers test files and stops walking when ctx is canceled.
+func FindContext(ctx context.Context, paths []string) ([]string, error) {
 	var out []string
 	for _, p := range paths {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		info, err := os.Stat(p)
 		if err != nil {
 			return nil, err
@@ -78,6 +91,9 @@ func Find(paths []string) ([]string, error) {
 		}
 		err = filepath.WalkDir(p, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
+				return err
+			}
+			if err := ctx.Err(); err != nil {
 				return err
 			}
 			name := d.Name()
@@ -102,6 +118,10 @@ func Load(path string) (*File, error) {
 	if err != nil {
 		return nil, err
 	}
+	return parse(path, data)
+}
+
+func parse(path string, data []byte) (*File, error) {
 	f := &File{Path: path}
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
@@ -127,101 +147,183 @@ func Load(path string) (*File, error) {
 // Run runs every case of the file. With update, a case whose output differs
 // from its expected file (or has none yet) rewrites that file instead of failing.
 func (f *File) Run(ctx context.Context, update bool) []Result {
-	rel := func(p string) string {
-		if p == "" || filepath.IsAbs(p) {
-			return p
+	resolve := func(path string) (string, error) {
+		if filepath.IsAbs(path) {
+			return path, nil
 		}
-		return filepath.Join(filepath.Dir(f.Path), filepath.FromSlash(p))
+		return filepath.Join(filepath.Dir(f.Path), filepath.FromSlash(path)), nil
 	}
-	wf, loadErr := workflow.Load(rel(f.Workflow))
+	return f.runFile(ctx, resolve, update)
+}
+
+// RunWorkspace runs a suite without updating its expected files.
+func (f *File) RunWorkspace(ctx context.Context, root string) []Result {
+	return f.runFile(ctx, f.workspaceResolver(root), false)
+}
+
+// RunWorkflow runs a suite against an already parsed workflow revision, as
+// when the caller needs to identify exactly which saved version was tested.
+func (f *File) RunWorkflow(ctx context.Context, root string, wf *workflow.Workflow) []Result {
+	resolve := f.workspaceResolver(root)
+	_, err := resolve(f.Workflow)
+	return f.run(ctx, wf, err, resolve, false)
+}
+
+type resolver func(string) (string, error)
+
+func (f *File) runFile(ctx context.Context, resolve resolver, update bool) []Result {
+	wfPath, err := resolve(f.Workflow)
+	var wf *workflow.Workflow
+	if err == nil {
+		err = ctx.Err()
+	}
+	if err == nil {
+		wf, err = workflow.Load(wfPath)
+	}
+	return f.run(ctx, wf, err, resolve, update)
+}
+
+func (f *File) run(ctx context.Context, wf *workflow.Workflow, loadErr error, resolve resolver, update bool) []Result {
 	results := make([]Result, len(f.Tests))
 	for i, c := range f.Tests {
-		results[i].Name = c.Name
-		if loadErr != nil {
-			results[i].Err = loadErr
-			continue
+		start := time.Now()
+		r := &results[i]
+		r.Name, r.ExpectedError = c.Name, c.Error
+		r.Err = ctx.Err()
+		if r.Err == nil {
+			r.Err = loadErr
 		}
-		results[i].Updated, results[i].Err = runCase(ctx, wf, c, rel, update)
+		if r.Err == nil {
+			r.Err = runCase(ctx, wf, c, resolve, update, r)
+		}
+		r.Duration = time.Since(start)
 	}
 	return results
 }
 
-func runCase(ctx context.Context, wf *workflow.Workflow, c Case, rel func(string) string, update bool) (bool, error) {
+func runCase(ctx context.Context, wf *workflow.Workflow, c Case, resolve resolver, update bool, result *Result) error {
 	inputs := map[string]string{}
 	for _, in := range wf.Inputs {
 		if c.In[in.Name] == "" {
-			return false, fmt.Errorf("in: has no file for input %q", in.Name)
+			return fmt.Errorf("in: has no file for input %q", in.Name)
 		}
-		inputs[in.Name] = rel(c.In[in.Name])
+		path, err := resolve(c.In[in.Name])
+		if err != nil {
+			return err
+		}
+		inputs[in.Name] = path
 	}
 	if len(c.In) != len(wf.Inputs) {
-		return false, fmt.Errorf("in: names %d file(s), the workflow has %d input(s)", len(c.In), len(wf.Inputs))
+		return fmt.Errorf("in: names %d file(s), the workflow has %d input(s)", len(c.In), len(wf.Inputs))
 	}
-	rt, err := runtime(c, rel)
+	rt, err := runtime(c, resolve)
 	if err != nil {
-		return false, err
+		return err
+	}
+	var want string
+	if c.Expect != "" {
+		want, err = resolve(c.Expect)
+		if err != nil {
+			return err
+		}
 	}
 	dir, err := os.MkdirTemp("", "migo-test-")
 	if err != nil {
-		return false, err
+		return err
 	}
 	defer os.RemoveAll(dir)
 	got := filepath.Join(dir, "output"+wf.Ext())
 	runErr := wf.Run(ctx, rt, inputs, got)
+	if runErr != nil {
+		result.ActualError = runErr.Error()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if c.Error != "" {
 		switch {
 		case runErr == nil:
-			return false, fmt.Errorf("the run succeeded; expected an error containing %q", c.Error)
+			return fmt.Errorf("the run succeeded; expected an error containing %q", c.Error)
 		case !strings.Contains(runErr.Error(), c.Error):
-			return false, fmt.Errorf("the error is %q; expected it to contain %q", runErr, c.Error)
+			return fmt.Errorf("the error is %q; expected it to contain %q", runErr, c.Error)
 		}
-		return false, nil
+		return nil
 	}
 	if runErr != nil {
-		return false, runErr
+		return runErr
 	}
-	want := rel(c.Expect)
-	if !strings.EqualFold(filepath.Ext(want), wf.Ext()) {
-		return false, fmt.Errorf("expect: %s must be a %s file, like the workflow's output", c.Expect, wf.Ext())
+	if !strings.EqualFold(filepath.Ext(c.Expect), wf.Ext()) {
+		return fmt.Errorf("expect: %s must be a %s file, like the workflow's output", c.Expect, wf.Ext())
 	}
-	diff := compare(got, want)
-	if diff == nil || !update {
-		if errors.Is(diff, os.ErrNotExist) {
-			return false, fmt.Errorf("%s does not exist yet: run with -update to create it, then check it", c.Expect)
+	diff, err := compare(ctx, got, want)
+	result.Difference = diff
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if diff != nil {
+		err = diff
+	}
+	if err == nil || !update {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("%s does not exist yet: run with -update to create it, then check it", c.Expect)
 		}
-		return false, diff
+		return err
 	}
 	data, err := os.ReadFile(got)
 	if err != nil {
-		return false, err
+		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(want), 0o755); err != nil {
-		return false, err
+		return err
 	}
-	return true, os.WriteFile(want, data, 0o644)
+	if err := os.WriteFile(want, data, 0o644); err != nil {
+		return err
+	}
+	result.Updated = true
+	return nil
 }
 
-// runtime is a test's runtime: the case's mocks and config, no network.
-func runtime(c Case, rel func(string) string) (workflow.Runtime, error) {
+type noRESTMock struct {
+	http.RoundTripper
+}
+
+func (t noRESTMock) RoundTrip(r *http.Request) (*http.Response, error) {
+	if err := r.Context().Err(); err != nil {
+		return nil, err
+	}
+	_, err := t.RoundTripper.RoundTrip(r)
+	return nil, fmt.Errorf("rest steps have no network in tests: %w", err)
+}
+
+// runtime uses the case's configuration and offline responses.
+func runtime(c Case, resolve resolver) (workflow.Runtime, error) {
 	set := &mock.Set{}
 	var err error
 	switch c.Mocks.Kind {
 	case 0:
 	case yaml.ScalarNode:
-		if set, err = mock.Load(rel(c.Mocks.Value)); err != nil {
+		path, err := resolve(c.Mocks.Value)
+		if err != nil {
+			return workflow.Runtime{}, err
+		}
+		if set, err = mock.Load(path); err != nil {
 			return workflow.Runtime{}, err
 		}
 	default:
-		data, merr := yaml.Marshal(&c.Mocks)
-		if merr != nil {
-			return workflow.Runtime{}, merr
+		data, err := yaml.Marshal(&c.Mocks)
+		if err != nil {
+			return workflow.Runtime{}, err
 		}
 		if set, err = mock.Parse(data); err != nil {
 			return workflow.Runtime{}, fmt.Errorf("mocks: %w", err)
 		}
 	}
 	if c.SQLStub != "" {
-		b, err := os.ReadFile(rel(c.SQLStub))
+		path, err := resolve(c.SQLStub)
+		if err != nil {
+			return workflow.Runtime{}, err
+		}
+		b, err := os.ReadFile(path)
 		if err != nil {
 			return workflow.Runtime{}, err
 		}
@@ -231,79 +333,28 @@ func runtime(c Case, rel func(string) string) (workflow.Runtime, error) {
 		}
 		set.SQL = append(set.SQL, mock.SQL{Columns: t.Columns, Rows: t.Rows})
 	}
-	return set.Runtime(c.Config)
-}
-
-// compare reports the first difference between two outputs: for workbooks
-// the sheet names and every cell's value (not styles), for CSV the text.
-func compare(got, want string) error {
-	if !strings.EqualFold(filepath.Ext(want), ".xlsx") {
-		g, err := os.ReadFile(got)
+	if c.RESTStub != "" {
+		path, err := resolve(c.RESTStub)
 		if err != nil {
-			return err
+			return workflow.Runtime{}, err
 		}
-		w, err := os.ReadFile(want)
+		data, err := os.ReadFile(path)
 		if err != nil {
-			return err
+			return workflow.Runtime{}, err
 		}
-		gl, wl := lines(g), lines(w)
-		for i := 0; i < len(gl) || i < len(wl); i++ {
-			if a, b := at(gl, i), at(wl, i); a != b {
-				return fmt.Errorf("line %d: got %q, expected %q", i+1, a, b)
-			}
+		if !json.Valid(data) {
+			return workflow.Runtime{}, fmt.Errorf("%s: rest_stub must contain a JSON response body", c.RESTStub)
 		}
-		return nil
+		set.REST = append(set.REST, mock.REST{Body: string(data)})
 	}
-	w, err := excelize.OpenFile(want)
+	rt, err := set.Runtime(c.Config)
 	if err != nil {
-		return err
+		return workflow.Runtime{}, err
 	}
-	defer w.Close()
-	g, err := excelize.OpenFile(got)
-	if err != nil {
-		return err
+	if len(set.REST) == 0 {
+		rt.HTTP.Transport = noRESTMock{rt.HTTP.Transport}
 	}
-	defer g.Close()
-	if a, b := g.GetSheetList(), w.GetSheetList(); strings.Join(a, "\x00") != strings.Join(b, "\x00") {
-		return fmt.Errorf("sheets: got %q, expected %q", a, b)
-	}
-	for _, sheet := range w.GetSheetList() {
-		gr, err := g.GetRows(sheet)
-		if err != nil {
-			return err
-		}
-		wr, err := w.GetRows(sheet)
-		if err != nil {
-			return err
-		}
-		for r := 0; r < len(gr) || r < len(wr); r++ {
-			var grow, wrow []string
-			if r < len(gr) {
-				grow = gr[r]
-			}
-			if r < len(wr) {
-				wrow = wr[r]
-			}
-			for c := 0; c < len(grow) || c < len(wrow); c++ {
-				if a, b := at(grow, c), at(wrow, c); a != b {
-					cell, _ := excelize.CoordinatesToCellName(c+1, r+1)
-					return fmt.Errorf("sheet %q cell %s: got %q, expected %q", sheet, cell, a, b)
-				}
-			}
-		}
-	}
-	return nil
-}
-
-func lines(b []byte) []string {
-	return strings.Split(strings.TrimRight(strings.ReplaceAll(string(b), "\r\n", "\n"), "\n"), "\n")
-}
-
-func at(list []string, i int) string {
-	if i < len(list) {
-		return list[i]
-	}
-	return ""
+	return rt, nil
 }
 
 var slugRun = regexp.MustCompile(`[^a-z0-9]+`)
@@ -389,13 +440,10 @@ func Add(ctx context.Context, path, workflowPath, name string, inputs map[string
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
-	here := func(p string) string {
-		if p == "" || filepath.IsAbs(p) {
-			return p
-		}
-		return filepath.Join(dir, filepath.FromSlash(p))
+	here := func(p string) (string, error) {
+		return absolutePath(dir, p)
 	}
-	if _, err := runCase(ctx, wf, c, here, true); err != nil {
+	if err := runCase(ctx, wf, c, here, true, &Result{}); err != nil {
 		return "", err
 	}
 	entry := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
@@ -427,5 +475,5 @@ func Add(ctx context.Context, path, workflowPath, name string, inputs map[string
 	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
 		return "", err
 	}
-	return here(c.Expect), nil
+	return here(c.Expect)
 }
