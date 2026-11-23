@@ -12,7 +12,8 @@
 //	    error: is empty                 # the run must fail with this text
 //
 // Optional per test: config (config.json keys) and sql_stub (a JSON table
-// every sql step returns). rest steps cannot reach the network in a test.
+// every sql step returns), and rest_stub (a JSON response body every rest
+// request returns). Tests cannot reach the network.
 package wftest
 
 import (
@@ -21,12 +22,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
-	"github.com/xuri/excelize/v2"
 	"gopkg.in/yaml.v3"
 
 	"miservice/internal/config"
@@ -45,26 +47,39 @@ type File struct {
 
 // Case is one run of the workflow and what it must produce.
 type Case struct {
-	Name    string            `yaml:"name"`
-	In      map[string]string `yaml:"in"`
-	Config  map[string]any    `yaml:"config"`
-	SQLStub string            `yaml:"sql_stub"`
-	Expect  string            `yaml:"expect"`
-	Error   string            `yaml:"error"`
+	Name     string            `yaml:"name"`
+	In       map[string]string `yaml:"in"`
+	Config   map[string]any    `yaml:"config"`
+	SQLStub  string            `yaml:"sql_stub"`
+	RESTStub string            `yaml:"rest_stub"`
+	Expect   string            `yaml:"expect"`
+	Error    string            `yaml:"error"`
 }
 
 // Result is the outcome of one case.
 type Result struct {
-	Name    string
-	Err     error // nil: passed
-	Updated bool  // the expected file was (re)written
+	Name          string
+	Err           error // nil: passed
+	Updated       bool  // the expected file was (re)written
+	Duration      time.Duration
+	Difference    *Difference
+	ExpectedError string
+	ActualError   string
 }
 
 // Find returns the test files at the paths: a path is a test file or a
 // directory searched for *.test.yaml (hidden folders and node_modules skipped).
 func Find(paths []string) ([]string, error) {
+	return FindContext(context.Background(), paths)
+}
+
+// FindContext discovers test files and stops walking when ctx is canceled.
+func FindContext(ctx context.Context, paths []string) ([]string, error) {
 	var out []string
 	for _, p := range paths {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		info, err := os.Stat(p)
 		if err != nil {
 			return nil, err
@@ -75,6 +90,9 @@ func Find(paths []string) ([]string, error) {
 		}
 		err = filepath.WalkDir(p, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
+				return err
+			}
+			if err := ctx.Err(); err != nil {
 				return err
 			}
 			name := d.Name()
@@ -99,6 +117,10 @@ func Load(path string) (*File, error) {
 	if err != nil {
 		return nil, err
 	}
+	return parse(path, data)
+}
+
+func parse(path string, data []byte) (*File, error) {
 	f := &File{Path: path}
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
@@ -124,89 +146,175 @@ func Load(path string) (*File, error) {
 // Run runs every case of the file. With update, a case whose output differs
 // from its expected file (or has none yet) rewrites that file instead of failing.
 func (f *File) Run(ctx context.Context, update bool) []Result {
-	rel := func(p string) string {
-		if p == "" || filepath.IsAbs(p) {
-			return p
+	resolve := func(path string) (string, error) {
+		if filepath.IsAbs(path) {
+			return path, nil
 		}
-		return filepath.Join(filepath.Dir(f.Path), filepath.FromSlash(p))
+		return filepath.Join(filepath.Dir(f.Path), filepath.FromSlash(path)), nil
 	}
-	wf, loadErr := workflow.Load(rel(f.Workflow))
+	return f.runFile(ctx, resolve, update)
+}
+
+// RunWorkspace runs a suite without updating its expected files.
+func (f *File) RunWorkspace(ctx context.Context, root string) []Result {
+	return f.runFile(ctx, f.workspaceResolver(root), false)
+}
+
+// RunWorkflow runs a suite against an already parsed workflow revision, as
+// when the caller needs to identify exactly which saved version was tested.
+func (f *File) RunWorkflow(ctx context.Context, root string, wf *workflow.Workflow) []Result {
+	resolve := f.workspaceResolver(root)
+	_, err := resolve(f.Workflow)
+	return f.run(ctx, wf, err, resolve, false)
+}
+
+type resolver func(string) (string, error)
+
+func (f *File) runFile(ctx context.Context, resolve resolver, update bool) []Result {
+	wfPath, err := resolve(f.Workflow)
+	var wf *workflow.Workflow
+	if err == nil {
+		err = ctx.Err()
+	}
+	if err == nil {
+		wf, err = workflow.Load(wfPath)
+	}
+	return f.run(ctx, wf, err, resolve, update)
+}
+
+func (f *File) run(ctx context.Context, wf *workflow.Workflow, loadErr error, resolve resolver, update bool) []Result {
 	results := make([]Result, len(f.Tests))
 	for i, c := range f.Tests {
-		results[i].Name = c.Name
-		if loadErr != nil {
-			results[i].Err = loadErr
-			continue
+		start := time.Now()
+		r := &results[i]
+		r.Name, r.ExpectedError = c.Name, c.Error
+		r.Err = ctx.Err()
+		if r.Err == nil {
+			r.Err = loadErr
 		}
-		results[i].Updated, results[i].Err = runCase(ctx, wf, c, rel, update)
+		if r.Err == nil {
+			r.Err = runCase(ctx, wf, c, resolve, update, r)
+		}
+		r.Duration = time.Since(start)
 	}
 	return results
 }
 
-func runCase(ctx context.Context, wf *workflow.Workflow, c Case, rel func(string) string, update bool) (bool, error) {
+func runCase(ctx context.Context, wf *workflow.Workflow, c Case, resolve resolver, update bool, result *Result) error {
 	inputs := map[string]string{}
 	for _, in := range wf.Inputs {
 		if c.In[in.Name] == "" {
-			return false, fmt.Errorf("in: has no file for input %q", in.Name)
+			return fmt.Errorf("in: has no file for input %q", in.Name)
 		}
-		inputs[in.Name] = rel(c.In[in.Name])
+		path, err := resolve(c.In[in.Name])
+		if err != nil {
+			return err
+		}
+		inputs[in.Name] = path
 	}
 	if len(c.In) != len(wf.Inputs) {
-		return false, fmt.Errorf("in: names %d file(s), the workflow has %d input(s)", len(c.In), len(wf.Inputs))
+		return fmt.Errorf("in: names %d file(s), the workflow has %d input(s)", len(c.In), len(wf.Inputs))
 	}
-	rt, err := runtime(c, rel)
+	rt, err := runtime(c, resolve)
 	if err != nil {
-		return false, err
+		return err
+	}
+	var want string
+	if c.Expect != "" {
+		want, err = resolve(c.Expect)
+		if err != nil {
+			return err
+		}
 	}
 	dir, err := os.MkdirTemp("", "migo-test-")
 	if err != nil {
-		return false, err
+		return err
 	}
 	defer os.RemoveAll(dir)
 	got := filepath.Join(dir, "output"+wf.Ext())
 	runErr := wf.Run(ctx, rt, inputs, got)
+	if runErr != nil {
+		result.ActualError = runErr.Error()
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if c.Error != "" {
 		switch {
 		case runErr == nil:
-			return false, fmt.Errorf("the run succeeded; expected an error containing %q", c.Error)
+			return fmt.Errorf("the run succeeded; expected an error containing %q", c.Error)
 		case !strings.Contains(runErr.Error(), c.Error):
-			return false, fmt.Errorf("the error is %q; expected it to contain %q", runErr, c.Error)
+			return fmt.Errorf("the error is %q; expected it to contain %q", runErr, c.Error)
 		}
-		return false, nil
+		return nil
 	}
 	if runErr != nil {
-		return false, runErr
+		return runErr
 	}
-	want := rel(c.Expect)
-	if !strings.EqualFold(filepath.Ext(want), wf.Ext()) {
-		return false, fmt.Errorf("expect: %s must be a %s file, like the workflow's output", c.Expect, wf.Ext())
+	if !strings.EqualFold(filepath.Ext(c.Expect), wf.Ext()) {
+		return fmt.Errorf("expect: %s must be a %s file, like the workflow's output", c.Expect, wf.Ext())
 	}
-	diff := compare(got, want)
-	if diff == nil || !update {
-		if errors.Is(diff, os.ErrNotExist) {
-			return false, fmt.Errorf("%s does not exist yet: run with -update to create it, then check it", c.Expect)
+	diff, err := compare(ctx, got, want)
+	result.Difference = diff
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if diff != nil {
+		err = diff
+	}
+	if err == nil || !update {
+		if errors.Is(err, os.ErrNotExist) {
+			return fmt.Errorf("%s does not exist yet: run with -update to create it, then check it", c.Expect)
 		}
-		return false, diff
+		return err
 	}
 	data, err := os.ReadFile(got)
 	if err != nil {
-		return false, err
+		return err
 	}
 	if err := os.MkdirAll(filepath.Dir(want), 0o755); err != nil {
-		return false, err
+		return err
 	}
-	return true, os.WriteFile(want, data, 0o644)
+	if err := os.WriteFile(want, data, 0o644); err != nil {
+		return err
+	}
+	result.Updated = true
+	return nil
 }
 
-type blocked struct{}
+type testTransport struct {
+	body []byte
+}
 
-func (blocked) RoundTrip(r *http.Request) (*http.Response, error) {
-	return nil, fmt.Errorf("a test cannot call %s: rest steps have no network in tests", r.URL.Host)
+func (t testTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if err := r.Context().Err(); err != nil {
+		return nil, err
+	}
+	if t.body == nil {
+		return nil, fmt.Errorf("a test cannot call %s: rest steps have no network in tests", r.URL.Host)
+	}
+	return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(t.body))}, nil
 }
 
 // runtime is a test's runtime: the case's config, its SQL stub, no network.
-func runtime(c Case, rel func(string) string) (workflow.Runtime, error) {
-	rt := workflow.Runtime{HTTP: &http.Client{Transport: blocked{}}}
+func runtime(c Case, resolve resolver) (workflow.Runtime, error) {
+	transport := testTransport{}
+	rt := workflow.Runtime{}
+	if c.RESTStub != "" {
+		path, err := resolve(c.RESTStub)
+		if err != nil {
+			return rt, err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return rt, err
+		}
+		if !json.Valid(data) {
+			return rt, fmt.Errorf("%s: rest_stub must contain a JSON response body", c.RESTStub)
+		}
+		transport.body = data
+	}
+	rt.HTTP = &http.Client{Transport: transport}
 	cfg := c.Config
 	if cfg == nil {
 		cfg = map[string]any{}
@@ -231,7 +339,11 @@ func runtime(c Case, rel func(string) string) (workflow.Runtime, error) {
 		return nil, errors.New("a sql step ran but the test has no sql_stub")
 	}
 	if c.SQLStub != "" {
-		b, err := os.ReadFile(rel(c.SQLStub))
+		path, err := resolve(c.SQLStub)
+		if err != nil {
+			return rt, err
+		}
+		b, err := os.ReadFile(path)
 		if err != nil {
 			return rt, err
 		}
@@ -242,76 +354,4 @@ func runtime(c Case, rel func(string) string) (workflow.Runtime, error) {
 		rt.SQL = func(context.Context, string, string, []any) (*workflow.Table, error) { return &t, nil }
 	}
 	return rt, nil
-}
-
-// compare reports the first difference between two outputs: for workbooks
-// the sheet names and every cell's value (not styles), for CSV the text.
-func compare(got, want string) error {
-	if !strings.EqualFold(filepath.Ext(want), ".xlsx") {
-		g, err := os.ReadFile(got)
-		if err != nil {
-			return err
-		}
-		w, err := os.ReadFile(want)
-		if err != nil {
-			return err
-		}
-		gl, wl := lines(g), lines(w)
-		for i := 0; i < len(gl) || i < len(wl); i++ {
-			if a, b := at(gl, i), at(wl, i); a != b {
-				return fmt.Errorf("line %d: got %q, expected %q", i+1, a, b)
-			}
-		}
-		return nil
-	}
-	w, err := excelize.OpenFile(want)
-	if err != nil {
-		return err
-	}
-	defer w.Close()
-	g, err := excelize.OpenFile(got)
-	if err != nil {
-		return err
-	}
-	defer g.Close()
-	if a, b := g.GetSheetList(), w.GetSheetList(); strings.Join(a, "\x00") != strings.Join(b, "\x00") {
-		return fmt.Errorf("sheets: got %q, expected %q", a, b)
-	}
-	for _, sheet := range w.GetSheetList() {
-		gr, err := g.GetRows(sheet)
-		if err != nil {
-			return err
-		}
-		wr, err := w.GetRows(sheet)
-		if err != nil {
-			return err
-		}
-		for r := 0; r < len(gr) || r < len(wr); r++ {
-			var grow, wrow []string
-			if r < len(gr) {
-				grow = gr[r]
-			}
-			if r < len(wr) {
-				wrow = wr[r]
-			}
-			for c := 0; c < len(grow) || c < len(wrow); c++ {
-				if a, b := at(grow, c), at(wrow, c); a != b {
-					cell, _ := excelize.CoordinatesToCellName(c+1, r+1)
-					return fmt.Errorf("sheet %q cell %s: got %q, expected %q", sheet, cell, a, b)
-				}
-			}
-		}
-	}
-	return nil
-}
-
-func lines(b []byte) []string {
-	return strings.Split(strings.TrimRight(strings.ReplaceAll(string(b), "\r\n", "\n"), "\n"), "\n")
-}
-
-func at(list []string, i int) string {
-	if i < len(list) {
-		return list[i]
-	}
-	return ""
 }

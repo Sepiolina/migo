@@ -1,24 +1,38 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { SampleSetupDialog } from "./SampleSetupDialog";
+import { WorkbookPreview } from "./WorkbookPreview";
+import { StepPreview } from "./StepPreview";
+import { shortcut } from "./shortcut";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./studio.css";
-import { isDesktop, native, request, type Inspection, type RunResult, type Trace, type Validation } from "./api";
+import { isDesktop, native, request, type Inspection, type RunnerError, type RunResult, type Trace, type Validation } from "./api";
+import { asRunnerError, useCurrentRequest } from "./useCurrentRequest";
+import { RequestCache } from "./RequestCache";
+import { useFileRevisions } from "./useFileRevisions";
 import { useDocument } from "./useDocument";
 import { readPipeline, insertStep, addInput, expandSheets, addItem, keepLineEndings, type Pipeline } from "./pipeline";
 import { Navigator, type Selection } from "./Navigator";
 import { Inspector } from "./Inspector";
+import { PaneSplitter, paneSizes, splitterWidth, type PanePreferences, type SidePane } from "./PaneSplitter";
 import { DataGrid, profileRows, type ColumnAction } from "./DataGrid";
 import { Console, type LogLine, type Problem } from "./Console";
 import { CommandMenu, type Command } from "./CommandMenu";
 import { Home, type WorkflowEntry } from "./Home";
 import { PackageBuilder } from "./PackageBuilder";
 import { DiscardChangesDialog } from "./DiscardChangesDialog";
+import { SaveWorkflowDialog } from "./SaveWorkflowDialog";
 import { steps as stepSpecs } from "./stepRegistry";
 import { workflowTemplates, type Template } from "./workflowTemplates";
 import { parse } from "yaml";
 
+const WorkflowTests = lazy(() => import("./WorkflowTests").then(({ WorkflowTests }) => ({ default: WorkflowTests })));
+const RunsPanel = lazy(() => import("./RunsPanel").then(({ RunsPanel }) => ({ default: RunsPanel })));
+const WorkflowDiagram = lazy(() => import("./WorkflowDiagram").then(({ WorkflowDiagram }) => ({ default: WorkflowDiagram })));
+
 type Theme = "system" | "light" | "dark";
 type Toast = { text: string; undo?: boolean } | null;
 type Panel = "steps" | "table" | "insp";
+type RunIdentity = { key: string };
 
 const letters = (i: number): string => (i >= 26 ? letters(Math.floor(i / 26) - 1) : "") + String.fromCharCode(65 + (i % 26));
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "workflow";
@@ -54,6 +68,10 @@ export default function App() {
   const { source } = doc;
   const desktop = isDesktop();
   const [view, setView] = useState<"home" | "editor">("home");
+  const [workspacePanel, setWorkspacePanel] = useState<"runs" | "tests" | null>(null);
+  const panelOpen = workspacePanel !== null;
+  const testsButton = useRef<HTMLButtonElement>(null);
+  const runsButton = useRef<HTMLButtonElement>(null);
   const [workspace, setWorkspace] = useState("");
   const [entries, setEntries] = useState<WorkflowEntry[]>([]);
   const [workflowPath, setWorkflowPath] = useState("");
@@ -61,19 +79,52 @@ export default function App() {
   const [selection, setSelection] = useState<Selection>({ kind: "step", id: "steps.0" });
   const [showNav, setShowNav] = useState(true);
   const [showInsp, setShowInsp] = useState(true);
+  const [panePreferences, setPanePreferences] = useState<PanePreferences>(() => ({
+    navigator: 260,
+    inspector: 300,
+    priority: "navigator",
+    ...store.get<Partial<PanePreferences>>("mai.paneWidths", {}),
+  }));
+  const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const [panel, setPanel] = useState<Panel>("table");
+  const [diagram, setDiagram] = useState<"unopened" | "open" | "closed">("unopened");
+  const showDiagram = () => { setDiagram("open"); setPanel("table"); };
+  const showTable = () => {
+    setDiagram((previous) => previous === "open" ? "closed" : previous);
+    setPanel("table");
+  };
+  const appRef = useRef<HTMLDivElement>(null);
+  const panelFocus = useRef<"table" | "insp" | null>(null);
+  useLayoutEffect(() => {
+    const target = panelFocus.current;
+    if (!target) return;
+    panelFocus.current = null;
+    const app = appRef.current;
+    const visibleStage = app?.querySelector<HTMLElement>(".editor-stage-body:not([hidden])");
+    const element = target === "insp" ? app?.querySelector<HTMLElement>('.insp button[aria-label="Close inspector"]') :
+      visibleStage?.querySelector<HTMLElement>("[role=grid], [tabindex='0']") ?? visibleStage?.querySelector<HTMLElement>(".stage");
+    element?.focus({ preventScroll: true });
+  }, [panel, showInsp]);
   const [consoleTab, setConsoleTab] = useState<"problems" | "log" | "yaml" | null>("problems");
-  const [bindings, setBindings] = useState<Record<string, string>>({});
+  const [bindingState, setBindingState] = useState<{ key: string; values: Record<string, string> }>();
+  const [documentEpoch, setDocumentEpoch] = useState(0);
+  const [sampleSetup, setSampleSetup] = useState(false);
+  const [worksheetPosition, setWorksheetPosition] = useState<{ key: string; offset: number }>();
+  const [bindingEpoch, setBindingEpoch] = useState(0);
   const [skipped, setSkipped] = useState<Set<number>>(new Set());
-  const [trace, setTrace] = useState<{ key: string; data?: Trace; error?: string; busy: boolean }>({ key: "", busy: false });
-  const [inspection, setInspection] = useState<{ key: string; data?: Inspection; error?: string }>({ key: "" });
-  const [validation, setValidation] = useState<{ source: string; error?: string }>({ source: "" });
-  const [run, setRun] = useState<{ source: string; result: RunResult } | null>(null);
+  const [columnJump, setColumnJump] = useState<{ name: string; request: number; stepId: string; trace: Trace }>();
+  const jumpRequest = useRef(0);
+  const [run, setRun] = useState<{ key: string; workspace: string; result: RunResult; completedAt: number }>();
+  const artifact = run?.workspace === workspace ? run : undefined;
+  const workbookOutput = !!artifact && /\.xlsx$/i.test(artifact.result.path);
+  const [running, setRunning] = useState<RunIdentity>();
+  const [runFailure, setRunFailure] = useState<{ identity: RunIdentity; error: RunnerError }>();
   const [log, setLog] = useState<LogLine[]>([]);
-  const [busy, setBusy] = useState("");
+  const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<Toast>(null);
   const [palette, setPalette] = useState<null | "all" | "add">(null);
   const [saveAs, setSaveAs] = useState<string | null>(null);
+  const saveOpener = useRef<HTMLElement | null>(null);
   const [packaging, setPackaging] = useState(false);
   const [packagePending, setPackagePending] = useState(false);
   const [pendingDiscard, setPendingDiscard] = useState<(() => void) | null>(null);
@@ -84,6 +135,24 @@ export default function App() {
     else document.documentElement.dataset.theme = theme;
     store.set("mai.theme", theme);
   }, [theme]);
+  useEffect(() => {
+    const resize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener("resize", resize);
+    return () => window.removeEventListener("resize", resize);
+  }, []);
+  useEffect(() => store.set("mai.paneWidths", panePreferences), [panePreferences]);
+
+  const paneWidths = paneSizes(viewportWidth, showNav, showInsp, panePreferences);
+  const resizePane = (pane: SidePane, width: number) => {
+    setPanePreferences((previous) => previous[pane] === width && previous.priority === pane
+      ? previous
+      : { ...previous, [pane]: width, priority: pane });
+  };
+  const paneStyle = {
+    "--navigator-width": `${paneWidths.navigator.width}px`,
+    "--inspector-width": `${paneWidths.inspector.width}px`,
+    "--splitter-width": `${splitterWidth}px`,
+  } as React.CSSProperties;
 
   // ---- the model ------------------------------------------------------------------
   const parsed = useMemo(() => {
@@ -98,8 +167,9 @@ export default function App() {
   const pipeline = parsed.pipeline ?? lastGood.current ?? readPipeline(workflowTemplates[1].source);
   const route = String(pipeline.service.route ?? "") || (workflowPath ? base(workflowPath) : slug(pipeline.name));
   const selectedStep = selection.kind === "step" ? pipeline.steps.find((s) => s.id === selection.id) : undefined;
-  const bound = pipeline.inputs.every((i) => bindings[i.id]);
   const bindingKey = `mai.bindings:${workspace}:${workflowPath || pipeline.name}`;
+  const bindings = bindingState?.key === bindingKey ? bindingState.values : store.get<Record<string, string>>(bindingKey, {});
+  const bound = pipeline.inputs.every((i) => bindings[i.id]);
 
   const say = useCallback((text: string, undo = false) => {
     setToast({ text, undo });
@@ -150,16 +220,20 @@ export default function App() {
     if (selection.kind === "step" && !pipeline.steps.some((s) => s.id === selection.id))
       setSelection(pipeline.steps.length ? { kind: "step", id: pipeline.steps[Math.min(pipeline.steps.length - 1, Number(selection.id.split(".")[1]) || 0)].id } : { kind: "endpoint" });
     if (selection.kind === "source" && !pipeline.inputs.some((i) => i.id === selection.id)) setSelection({ kind: "endpoint" });
-    if (selection.kind === "output" && !pipeline.outputs[selection.index]) setSelection({ kind: "endpoint" });
-  }, [pipeline, selection]);
+    if (selection.kind === "output" && !pipeline.outputs[selection.index] && !workbookOutput) setSelection({ kind: "endpoint" });
+  }, [pipeline, selection, workbookOutput]);
 
   // ---- bindings ---------------------------------------------------------------------
-  useEffect(() => setBindings(store.get(bindingKey, {})), [bindingKey]);
+  const applyBindings = (next: Record<string, string>) => {
+    setBindingState({ key: bindingKey, values: next });
+    setBindingEpoch((value) => value + 1);
+    store.set(bindingKey, next);
+  };
   const bind = (id: string, path: string) => {
     const next = { ...bindings, [id]: path };
     if (!path) delete next[id];
-    setBindings(next);
-    store.set(bindingKey, next);
+    applyBindings(next);
+    if (path === bindings[id]) fileRevisions.refresh();
   };
 
   async function browseSample(id: string) {
@@ -175,70 +249,133 @@ export default function App() {
 
   // ---- live preview: trace the workflow on the sample files ----------------------------
   const focus = selectedStep?.top ?? -1;
-  const traceKey = JSON.stringify({ source, bindings, focus, skip: [...skipped].sort(), workspace });
-  const canPreview = desktop && !!workspace && bound && !parsed.error && view === "editor";
+  const skip = [...skipped].sort((a, b) => a - b);
+  const editorOpen = desktop && !!workspace && view === "editor" && !sampleSetup;
+  const documentKey = JSON.stringify([workspace, workflowPath, documentEpoch]);
+  const samplePaths = pipeline.inputs.map((input) => bindings[input.id]).filter(Boolean);
+  const fileRevisions = useFileRevisions(editorOpen ? workspace : "", [...samplePaths, ...(artifact ? [artifact.result.path] : [])]);
+  const openRuns = () => {
+    fileRevisions.refresh();
+    setWorkspacePanel("runs");
+  };
+  const hasRevision = (path: string) => Object.hasOwn(fileRevisions.revisions ?? {}, path);
+  const filesReady = samplePaths.every(hasRevision) && !fileRevisions.error;
+  const samples = pipeline.inputs.map(({ id }) => [id, bindings[id], fileRevisions.revisions?.[bindings[id]]]);
+  const runKey = JSON.stringify([workspace, documentEpoch, source, samples]);
+  const runIdentity = useMemo(() => ({ key: runKey }), [runKey, bindingEpoch, view, workflowPath]);
+  const navigation = useMemo(() => ({ selection, panel, diagram }), [selection, panel, diagram]);
+  const runContext = useRef<{ identity: RunIdentity; navigation: typeof navigation; panelOpen: boolean } | undefined>(undefined);
+  useLayoutEffect(() => {
+    runContext.current = { identity: runIdentity, navigation, panelOpen };
+    return () => { runContext.current = undefined; };
+  }, [runIdentity, navigation, panelOpen]);
+  const runRequest = useRef(0);
+  const canPreview = editorOpen && bound && !parsed.error;
+  const canRun = canPreview && filesReady;
+  const previousRun = !!artifact && artifact.key !== runKey;
+  const currentRunFailure = runFailure?.identity === runIdentity ? runFailure.error : undefined;
+  const busy = saving ? "Saving" : running === runIdentity ? "Running" : "";
+  const previewLimit = 200;
+  const traceScope = JSON.stringify([documentKey, selectedStep?.id, selectedStep?.op]);
+  const compare = selectedStep?.depth === 0 && (selectedStep.op === "fill" || selectedStep.op === "filter");
+  // Source, bindings, and file revisions belong to the run identity. A new
+  // identity or skip set discards both completed and in-flight trace entries.
+  const traceCache = useMemo(() => new RequestCache<Trace>(
+    4 * 1024 * 1024, (data) => !data.steps.some((step) => step.error),
+  ), [runIdentity, skipped]);
+  const trace = useCurrentRequest(
+    canRun ? JSON.stringify([focus, compare, previewLimit]) : null,
+    traceScope,
+    () => request<Trace>("trace", { workspace, yaml: source, inputs: bindings, step: focus, skip, compare, limit: previewLimit }),
+    280,
+    (data) => {
+      const lines = data.steps.flatMap((s) => (s.log ?? []).map((l) => `${s.step + 1}. ${l}`));
+      if (lines.length) setLog((l) => [...l.slice(-300), ...lines.map((text) => ({ time: now(), text }))]);
+    },
+    traceCache,
+  );
+  const currentTrace = trace.data;
+  const traceUpdating = canPreview && !fileRevisions.error && (!filesReady || trace.pending);
+  const selectedStepId = selectedStep?.id;
+  // The grid handles each request in a layout effect before this cleanup.
   useEffect(() => {
-    if (!canPreview || trace.key === traceKey) return;
-    let live = true;
-    setTrace((t) => ({ ...t, busy: true }));
-    const timer = setTimeout(() => {
-      request<Trace>("trace", { workspace, yaml: source, inputs: bindings, step: focus, skip: [...skipped], limit: 200 })
-        .then((data) => {
-          if (!live) return;
-          setTrace({ key: traceKey, data, busy: false });
-          const lines = data.steps.flatMap((s) => (s.log ?? []).map((l) => `${s.step + 1}. ${l}`));
-          if (lines.length) setLog((l) => [...l.slice(-300), ...lines.map((text) => ({ time: now(), text }))]);
-        })
-        .catch((e) => live && setTrace({ key: traceKey, error: (e as Error).message, busy: false }));
-    }, 280);
-    return () => {
-      live = false;
-      clearTimeout(timer);
-    };
-  }, [canPreview, traceKey]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (columnJump) setColumnJump(undefined);
+  }, [columnJump]);
 
+  const stepPreview = selectedStep ? currentTrace?.steps[selectedStep.top] : undefined;
+  const jumpColumns = stepPreview?.rows?.length && !stepPreview.error && !stepPreview.skipped
+    ? stepPreview.columns.map((c) => c.name)
+    : [];
+  const goToColumn = (name: string) => {
+    if (!currentTrace || !selectedStepId || !jumpColumns.includes(name)) return;
+    showTable();
+    setColumnJump({ name, request: ++jumpRequest.current, stepId: selectedStepId, trace: currentTrace });
+  };
   // Source and output previews read files directly.
   const fileToInspect =
     selection.kind === "source" ? bindings[selection.id]
-    : selection.kind === "output" && run?.source === source ? run.result.path
+    : selection.kind === "output" && !workbookOutput ? artifact?.result.path
     : undefined;
-  const sheetToInspect = selection.kind === "output" ? (pipeline.format === "csv" ? undefined : pipeline.outputs[selection.index]?.name) : undefined;
-  const inspectKey = JSON.stringify({ fileToInspect, sheetToInspect, workspace });
-  useEffect(() => {
-    if (!desktop || !workspace || !fileToInspect || inspection.key === inspectKey) return;
-    let live = true;
-    request<Inspection>("inspectWorkbook", { workspace, path: fileToInspect, sheet: sheetToInspect, limit: 200 })
-      .then((data) => live && setInspection({ key: inspectKey, data }))
-      .catch((e) => live && setInspection({ key: inspectKey, error: (e as Error).message }));
-    return () => {
-      live = false;
-    };
-  }, [inspectKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const inspectedRevision = fileToInspect ? fileRevisions.revisions?.[fileToInspect] : undefined;
+  const worksheetKey = selection.kind === "source" && fileToInspect
+    ? JSON.stringify([documentKey, selection.id, fileToInspect, inspectedRevision, bindingEpoch])
+    : undefined;
+  const inspectScope = worksheetKey ?? JSON.stringify([documentKey, fileToInspect]);
+  const inspectOffset = worksheetPosition?.key === worksheetKey ? worksheetPosition?.offset ?? 0 : 0;
+  useLayoutEffect(() => {
+    setWorksheetPosition((position) => position?.key === worksheetKey ? position : undefined);
+  }, [worksheetKey]);
+  const inspection = useCurrentRequest(
+    editorOpen && fileToInspect && hasRevision(fileToInspect) && !fileRevisions.error
+      ? JSON.stringify([inspectScope, inspectedRevision, bindingEpoch, inspectOffset, previewLimit])
+      : null,
+    inspectScope,
+    () => request<Inspection>("inspectWorkbook", { workspace, path: fileToInspect, offset: inspectOffset, limit: previewLimit }),
+  );
 
   // Validate with the production parser shortly after each edit.
-  useEffect(() => {
-    if (!desktop || !workspace || parsed.error || validation.source === source) return;
-    const t = setTimeout(() => {
-      request<Validation>("validate", { workspace, yaml: source })
-        .then(() => setValidation({ source }))
-        .catch((e) => setValidation({ source, error: (e as Error).message }));
-    }, 450);
-    return () => clearTimeout(t);
-  }, [source, workspace]); // eslint-disable-line react-hooks/exhaustive-deps
+  const validation = useCurrentRequest(
+    editorOpen && !parsed.error ? JSON.stringify([documentKey, source]) : null,
+    documentKey,
+    () => request<Validation>("validate", { workspace, yaml: source }),
+    450,
+  );
+  const retryTrace = () => { fileRevisions.refresh(); trace.retry(); };
+  const retryInspection = () => { fileRevisions.refresh(); inspection.retry(); };
 
   // ---- problems -------------------------------------------------------------------------------
   const problems: Problem[] = [];
+  let validationProblem: Problem | undefined;
   if (parsed.error) problems.push({ level: "error", text: parsed.error });
-  if (validation.source === source && validation.error) {
-    const m = validation.error.match(/^step (\d+)/);
-    problems.push({ level: "error", text: validation.error, step: m ? `steps.${Number(m[1]) - 1}` : undefined });
+  if (validation.error) {
+    const m = validation.error.message.match(/^step (\d+)/i);
+    validationProblem = {
+      level: "error",
+      text: validation.error.message,
+      code: validation.error.code,
+      step: m ? `steps.${Number(m[1]) - 1}` : undefined,
+      retry: validation.retry,
+      retryLabel: "Retry validation",
+    };
+    problems.push(validationProblem);
   }
-  trace.data?.steps.forEach((s) => s.error && problems.push({ level: "error", text: `Step ${s.step + 1}: ${s.error}`, step: `steps.${s.step}` }));
-  if (trace.error) problems.push({ level: "error", text: trace.error });
+  // Validation and preview can report the same parser failure.
+  const addTraceProblem = (text: string, code?: string, step?: string) => {
+    const message = (value: string) => value.replace(/^step \d+:\s*/i, "");
+    if (validationProblem && message(validationProblem.text) === message(text)
+        && (!validationProblem.step || !step || validationProblem.step === step)) {
+      validationProblem.step ??= step;
+      validationProblem.code ??= code;
+      return;
+    }
+    problems.push({ level: "error", text, code, step, retry: retryTrace, retryLabel: "Retry preview" });
+  };
+  currentTrace?.steps.forEach((s) => s.error && addTraceProblem(`Step ${s.step + 1}: ${s.error}`, undefined, `steps.${s.step}`));
+  if (trace.error) addTraceProblem(trace.error.message, trace.error.code);
+  if (inspection.error) problems.push({ level: "error", text: inspection.error.message, code: inspection.error.code, retry: retryInspection, retryLabel: "Retry file preview" });
+  if (fileRevisions.error) problems.push({ level: "error", text: fileRevisions.error, retry: fileRevisions.refresh, retryLabel: "Retry checking files" });
+  if (currentRunFailure) problems.push({ level: "error", text: currentRunFailure.message, code: currentRunFailure.code, retry: () => void runWorkflow(), retryLabel: "Retry run" });
   pipeline.inputs.forEach((i) => !bindings[i.id] && problems.push({ level: "warning", text: `Source “${i.id}” has no sample file, so the table cannot be previewed.` }));
-  // The parser and the trace can report the same error.
-  for (let i = problems.length - 1; i > 0; i--) if (problems.slice(0, i).some((p) => p.text.endsWith(problems[i].text.replace(/^Step \d+: /, "")) || problems[i].text.endsWith(p.text))) problems.splice(i, 1);
-  if (pipeline.steps.some((s) => s.spec?.service)) problems.push({ level: "info", text: "SQL and REST steps run on the server only. Local previews skip them and use the fallback values." });
 
   // ---- actions -------------------------------------------------------------------------------
   const insertAfter = (step: Record<string, unknown>, label: string) => {
@@ -282,21 +419,27 @@ export default function App() {
   const guard = (action: () => void) => (doc.dirty ? setPendingDiscard(() => action) : action());
   const resetEditor = () => {
     selections.current = { undo: [], redo: [] };
+    setDocumentEpoch((value) => value + 1);
     setSkipped(new Set());
-    setTrace({ key: "", busy: false });
-    setRun(null);
-    setValidation({ source: "" });
+    setRun(undefined);
+    setRunFailure(undefined);
     setSelection({ kind: "step", id: "steps.0" });
     setView("editor");
+    setDiagram("unopened");
     setPanel("table");
   };
-  async function openWorkflow(path: string) {
+  async function openWorkflow(path: string, setup = false) {
+    if (runContext.current) runContext.current.navigation = { ...navigation };
     try {
       const file = await native<{ path: string; source: string; revision: string }>("read_workflow", { path });
       doc.load(file.source);
       setWorkflowPath(file.path);
       setRevision(file.revision);
       resetEditor();
+      if (setup) {
+        readPipeline(file.source);
+        setSampleSetup(true);
+      }
       addLog(`Opened ${file.path}`);
     } catch (e) {
       fail(e);
@@ -310,14 +453,18 @@ export default function App() {
     resetEditor();
     const key = `mai.bindings:${workspace}:${readPipeline(t.source).name}`;
     if (!Object.keys(store.get(key, {})).length && Object.keys(t.samples).length) store.set(key, t.samples);
-    setBindings(store.get(key, t.samples));
+    setBindingState({ key, values: store.get(key, t.samples) });
     say(`New workflow from “${t.title}”. Save it to serve it as /api/${slug(readPipeline(t.source).name)}.`);
   }
-  async function save(path = workflowPath) {
-    if (!desktop || !workspace) return say("Open a project folder to save workflows.");
-    if (!path) return setSaveAs(`workflows/${slug(pipeline.name)}.yaml`);
+  async function save(path = workflowPath, opener: HTMLElement | null = null) {
+    if (!desktop || !workspace) { say("Open a project folder to save workflows."); return null; }
+    if (!path) {
+      saveOpener.current = opener;
+      setSaveAs(`workflows/${slug(pipeline.name)}.yaml`);
+      return null;
+    }
     try {
-      setBusy("Saving");
+      setSaving(true);
       const saved = await native<{ path: string; source: string; revision: string }>("save_workflow", {
         path,
         source,
@@ -332,27 +479,39 @@ export default function App() {
       say(`Saved ${saved.path}`);
       addLog(`Saved ${saved.path}`);
       loadEntries().catch(() => undefined);
+      return saved.revision;
     } catch (e) {
       fail(e);
+      return null;
     } finally {
-      setBusy("");
+      setSaving(false);
     }
   }
   async function runWorkflow() {
     if (!canPreview) return say(!desktop ? "Running needs the desktop app." : !workspace ? "Open a project folder first." : !bound ? "Give every source a sample file first." : "Fix the YAML first.");
+    if (!filesReady) return say(fileRevisions.error ?? "Checking sample files…");
+    const id = ++runRequest.current;
+    const isCurrent = () => runRequest.current === id && runContext.current?.identity === runIdentity;
     try {
-      setBusy("Running");
+      setRunning(runIdentity);
+      setRunFailure(undefined);
       addLog(`Run started: ${pipeline.inputs.map((i) => bindings[i.id]).join(", ")}`);
-      const result = await request<RunResult>("run", { workspace, yaml: source, inputs: bindings });
-      setRun({ source, result });
+      const result = await request<RunResult>("run", { workspace, workflowPath, yaml: source, inputs: bindings, omitPreview: true });
+      if (!isCurrent()) return;
+      setRun({ key: runKey, workspace, completedAt: Date.now(), result });
       addLog(`Wrote ${result.path}`);
       say(`Run finished. Output written to ${result.path}`);
-      setSelection({ kind: "output", index: 0 });
+      if (pipeline.outputs.length && !runContext.current?.panelOpen && runContext.current?.navigation === navigation) {
+        setSelection({ kind: "output", index: 0 });
+        showTable();
+      }
     } catch (e) {
+      if (!isCurrent()) return;
+      setRunFailure({ identity: runIdentity, error: asRunnerError(e) });
       fail(e);
       setConsoleTab("problems");
     } finally {
-      setBusy("");
+      if (runRequest.current === id) setRunning(undefined);
     }
   }
   const toggleSkip = (top: number) => {
@@ -377,18 +536,45 @@ export default function App() {
     return () => stop?.();
   }, []);
   const keys = useRef<(e: KeyboardEvent) => void>(() => undefined);
+  const saveCurrent = useRef(save);
+  saveCurrent.current = save;
+  const compactLayout = () => window.matchMedia?.("(max-width: 720px)").matches;
+  const closeInspector = () => {
+    panelFocus.current = "table";
+    if (!compactLayout()) setShowInsp(false);
+    if (panel !== "table") setPanel("table");
+  };
+  const toggleInspector = () => {
+    const compact = compactLayout();
+    if (showInsp && (!compact || panel === "insp")) {
+      closeInspector();
+    } else {
+      setShowInsp(true);
+      if (compact) {
+        panelFocus.current = "insp";
+        setPanel("insp");
+      }
+    }
+  };
   keys.current = (e: KeyboardEvent) => {
+    if (panelOpen || palette || saveAs !== null || packaging || pendingDiscard || sampleSetup) return;
     const mod = e.metaKey || e.ctrlKey;
-    const typing = /INPUT|TEXTAREA|SELECT/.test((document.activeElement as HTMLElement)?.tagName ?? "");
+    const active = document.activeElement;
+    const typing = active instanceof HTMLElement && /INPUT|TEXTAREA|SELECT/.test(active.tagName);
     const k = e.key.toLowerCase();
     if (mod && k === "k") { e.preventDefault(); setPalette("all"); return; }
-    if (mod && k === "s") { e.preventDefault(); (document.activeElement as HTMLElement)?.blur?.(); setTimeout(() => void save(), 0); return; }
+    if (mod && k === "s") {
+      e.preventDefault();
+      if (typing) active.blur();
+      setTimeout(() => void saveCurrent.current(undefined, active instanceof HTMLElement ? active : null), 0);
+      return;
+    }
     if (view !== "editor") return;
     if (mod && e.key === "Enter") { e.preventDefault(); void runWorkflow(); return; }
     if (mod && e.shiftKey && k === "a") { e.preventDefault(); setPalette("add"); return; }
     if (mod && k === "1") { e.preventDefault(); setShowNav((v) => !v); return; }
-    if (mod && k === "2") { e.preventDefault(); setShowInsp((v) => !v); return; }
-    if (typing || palette) return;
+    if (mod && k === "2") { e.preventDefault(); toggleInspector(); return; }
+    if (typing) return;
     if (mod && k === "z") { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
     if (mod && k === "y") { e.preventDefault(); redo(); return; }
     if (mod && k === "/" && selectedStep) { e.preventDefault(); toggleSkip(selectedStep.top); return; }
@@ -411,7 +597,7 @@ export default function App() {
 
   // ---- commands -------------------------------------------------------------------------------
   const cols = (() => {
-    const steps = trace.data?.steps;
+    const steps = currentTrace?.steps;
     if (!steps || !selectedStep) return [] as string[];
     const t = steps[selectedStep.top - 1] ?? steps[selectedStep.top];
     return t?.columns.map((c) => c.name) ?? [];
@@ -427,39 +613,73 @@ export default function App() {
     },
   }));
   const commands: Command[] = palette === "add" ? addCommands : [
-    { group: "Workflow", label: "Run with sample files", glyph: "▶", kbd: "⌘↵", run: () => void runWorkflow() },
-    { group: "Workflow", label: "Save", glyph: "↓", kbd: "⌘S", run: () => void save() },
-    { group: "Workflow", label: "Save as…", glyph: "↓", run: () => setSaveAs(workflowPath || `workflows/${slug(pipeline.name)}.yaml`) },
+    ...(editorOpen && workflowPath ? [{ group: "View", label: "Workflow tests", glyph: "✓", run: () => setWorkspacePanel("tests") }] : []),
+    ...(desktop && workspace ? [{ group: "View", label: "Runs", glyph: "▤", run: openRuns }] : []),
+    ...(editorOpen && workbookOutput ? [{ group: "View", label: "Open workbook preview", glyph: "▤", run: () => {
+      setSelection({ kind: "output", index: 0 });
+      showTable();
+    } }] : []),
+    ...(editorOpen && !parsed.error ? [{group: "Workflow", label: "Set up samples", glyph: "↳", run: () => setSampleSetup(true)}] : []),
+    { group: "Workflow", label: "Run with sample files", glyph: "▶", kbd: shortcut("Enter"), run: () => void runWorkflow() },
+    { group: "Workflow", label: "Save", glyph: "↓", kbd: shortcut("S"), run: () => void save() },
+    { group: "Workflow", label: "Save as…", glyph: "↓", run: () => {
+      saveOpener.current = null;
+      setSaveAs(workflowPath || `workflows/${slug(pipeline.name)}.yaml`);
+    } },
     { group: "Workflow", label: "API endpoint and distribution", glyph: "⇄", run: () => setSelection({ kind: "endpoint" }) },
     { group: "Workflow", label: "Build Linux package…", glyph: "▣", run: () => setPackaging(true) },
     { group: "Workflow", label: "All workflows", glyph: "⌂", run: () => setView("home") },
-    { group: "Edit", label: "Undo", glyph: "↶", kbd: "⌘Z", run: undo },
-    { group: "Edit", label: "Redo", glyph: "↷", kbd: "⇧⌘Z", run: redo },
+    { group: "Edit", label: "Undo", glyph: "↶", kbd: shortcut("Z"), run: undo },
+    { group: "Edit", label: "Redo", glyph: "↷", kbd: shortcut("Z", true), run: redo },
     ...addCommands,
     ...pipeline.steps.map((s) => ({ group: "Go to", label: `${s.depth ? "  " : `${s.top + 1}. `}${s.summary}`, glyph: s.spec?.icon, run: () => setSelection({ kind: "step", id: s.id }) })),
     ...pipeline.inputs.map((i) => ({ group: "Go to", label: `Source ${i.id}`, glyph: "↳", run: () => setSelection({ kind: "source", id: i.id }) })),
     ...entries.filter((w) => w.path !== workflowPath).map((w) => ({ group: "Open workflow", label: w.name || w.path, hint: w.path, glyph: "▤", run: () => guard(() => void openWorkflow(w.path)) })),
     ...workflowTemplates.map((t) => ({ group: "New from template", label: t.title, hint: t.description, glyph: "+", run: () => guard(() => startTemplate(t)) })),
-    { group: "View", label: "Toggle steps panel", glyph: "◧", kbd: "⌘1", run: () => setShowNav((v) => !v) },
-    { group: "View", label: "Toggle inspector", glyph: "◨", kbd: "⌘2", run: () => setShowInsp((v) => !v) },
+    { group: "View", label: "Toggle steps panel", glyph: "◧", kbd: shortcut("1"), run: () => setShowNav((v) => !v) },
+    { group: "View", label: "Toggle inspector", glyph: "◨", kbd: shortcut("2"), run: toggleInspector },
+    ...(view === "editor" ? [{ group: "View", label: "Show workflow diagram", glyph: "◇", run: showDiagram }] : []),
     { group: "View", label: "Show YAML", glyph: "{}", run: () => setConsoleTab("yaml") },
     { group: "View", label: "Switch appearance", glyph: "◐", run: () => setTheme(theme === "system" ? "light" : theme === "light" ? "dark" : "system") },
   ];
 
   // ---- the stage: what the table shows ---------------------------------------------------------
+  const stepTitle = selectedStep && `${selectedStep.depth ? `In step ${selectedStep.top + 1}` : `${selectedStep.top + 1}.`} ${selectedStep.summary}`;
+  const setupButton = workspace && !parsed.error && <button className="btn" onClick={() => setSampleSetup(true)}>Set up samples</button>;
   const stage = (() => {
     const notReady = (title: string, body: React.ReactNode, action?: React.ReactNode) => (
-      <DataGrid columns={[]} rows={[]} total={0} header={<b>{title}</b>} empty={<div className="empty"><b>{title}</b><span>{body}</span>{action}</div>} />
+      <DataGrid columns={[]} rows={[]} total={0} header={<b>{stepTitle ?? title}</b>} empty={<div className="empty">{title !== stepTitle && <b>{title}</b>}<span>{body}</span>{action}</div>} />
     );
     if (selection.kind === "endpoint")
       return notReady("API endpoint", <>MaiService serves this workflow at <code>/api/{route}</code>. Its settings and request format are in the inspector.</>);
     if (selection.kind === "source" || selection.kind === "output") {
+      if (selection.kind === "output" && workbookOutput && artifact) {
+        return <WorkbookPreview
+          key={JSON.stringify([workspace, artifact.result.path])}
+          workspace={workspace}
+          path={artifact.result.path}
+          revision={fileRevisions.revisions?.[artifact.result.path]}
+          revisionError={fileRevisions.error}
+          onRetryRevision={fileRevisions.refresh}
+          initialSheet={pipeline.outputs[selection.index]?.name}
+          completedAt={artifact.completedAt}
+          stale={previousRun}
+          canRefresh={canRun && running !== runIdentity}
+          onRefresh={() => void runWorkflow()}
+          onSheetChange={(sheet) => {
+            const output = pipeline.outputs.find((item) => item.name === sheet);
+            if (output) setSelection({ kind: "output", index: output.index });
+          }}
+        />;
+      }
       const name = selection.kind === "source" ? `Source ${selection.id}` : `Output ${pipeline.outputs[selection.index]?.name}`;
       if (!desktop) return notReady(name, "Open the desktop app to read files.");
-      if (!fileToInspect) return notReady(name, selection.kind === "source" ? "Set a sample file in the inspector to see its contents." : "Run the workflow (⌘↵) to write this output and see it here.", selection.kind === "output" ? <button className="primary" onClick={() => void runWorkflow()}>▶ Run</button> : undefined);
-      if (inspection.key !== inspectKey) return notReady(name, "Reading…");
-      if (inspection.error) return notReady(name, <span className="err">{inspection.error}</span>);
-      const d = inspection.data!;
+      if (!workspace) return notReady(name, "Open a project folder to read its files.", <button className="primary" onClick={() => void chooseWorkspace()}>Open folder…</button>);
+      if (!fileToInspect) return notReady(name, selection.kind === "source" ? "Choose a sample file to preview this source." : `Run the workflow (${shortcut("Enter")}) to write this output and see it here.`, selection.kind === "output" ? <button className="primary" onClick={() => void runWorkflow()}>▶ Run</button> : setupButton);
+      if (fileRevisions.error) return notReady(name, <span className="err">{fileRevisions.error}</span>, <button className="btn" onClick={fileRevisions.refresh}>Retry checking files</button>);
+      if (inspection.error) return notReady(name, <span className="err">{inspection.error.message}</span>, <div className="actions-row"><button className="btn" onClick={retryInspection}>Retry file preview</button>{selection.kind === "source" && setupButton}</div>);
+      const d = inspection.data ?? inspection.previous;
+      if (!d) return notReady(name, "Reading…");
       const all = (d.rows ?? []).map((r) => r ?? []);
       // Sources show the raw sheet with column letters, so header rows and
       // fixed positions can be read off directly; outputs show their header.
@@ -473,66 +693,95 @@ export default function App() {
           columns={profileRows(head, rows)}
           rows={rows}
           total={total}
-          header={<><b>{name}</b><span className="meta mono">{fileToInspect}{d.sheets.length > 1 || d.sheet !== "Sheet1" ? ` › ${d.sheet}` : ""}</span><span className="meta">{total.toLocaleString()} rows · {head.length} columns</span></>}
+          rowOffset={raw ? d.offset : undefined}
+          hideProfiles={raw}
+          header={<><b>{name}</b><span className="meta mono">{fileToInspect}{d.sheets.length > 1 || d.sheet !== "Sheet1" ? ` › ${d.sheet}` : ""}</span><span className="meta">{total.toLocaleString()} rows · {head.length} columns</span>{!inspection.data && <span className="meta">Updating…</span>}{!raw && previousRun && <><span className="tag warn">Previous run</span><button className="btn" disabled={!canRun || running === runIdentity} onClick={() => void runWorkflow()}>Run to refresh</button></>}</>}
+          controls={worksheetKey && total > 0 && (
+            <form className="worksheet-row-controls" key={worksheetKey} onSubmit={(event) => {
+              event.preventDefault();
+              const row = Number(new FormData(event.currentTarget).get("row"));
+              if (Number.isSafeInteger(row) && row >= 1 && row <= total) {
+                setWorksheetPosition({ key: worksheetKey, offset: row - 1 });
+              }
+            }}>
+              <label htmlFor="worksheet-row">Worksheet row</label>
+              <input id="worksheet-row" name="row" className="ctl" type="number" min={1} max={total} required defaultValue={1} />
+              <button className="btn" type="submit">Go to row</button>
+              <button className="btn" type="button" onClick={(event) => {
+                event.currentTarget.form?.reset();
+                setWorksheetPosition({ key: worksheetKey, offset: 0 });
+              }}>First row</button>
+            </form>
+          )}
         />
       );
     }
     const s = selectedStep;
     if (!s) return notReady("No step selected", "Choose a step on the left.");
-    if (!desktop) return notReady(`${s.top + 1}. ${s.summary}`, "The browser preview edits YAML only. Open the desktop app to see the table after each step.");
+    const title = stepTitle ?? s.summary;
+    if (!desktop) return notReady(title, "Open the desktop app to see the table after each step.");
     if (!workspace) return notReady("Open a project folder", "Studio reads sample files from a folder on this computer.", <button className="primary" onClick={() => void chooseWorkspace()}>Open folder…</button>);
-    if (!bound) {
+    if (!bound && !parsed.error) {
       const missing = pipeline.inputs.find((i) => !bindings[i.id])!;
-      return notReady("Add a sample file", <>Choose a sample file for source <b>{missing.id}</b> to see the data at every step.</>, <button className="primary" onClick={() => setSelection({ kind: "source", id: missing.id })}>Choose sample file</button>);
+      return notReady("Add a sample file", <>Choose a sample file for source <b>{missing.id}</b> to see the data at every step.</>, <button className="primary" onClick={() => setSampleSetup(true)}>Set up samples</button>);
     }
     if (parsed.error) return notReady("The YAML has an error", <span className="err">{parsed.error}</span>);
-    const steps = trace.data?.steps;
-    if (!steps) return notReady(`${s.top + 1}. ${s.summary}`, trace.error ? <span className="err">{trace.error}</span> : "Running the steps on the sample files…");
-    const t = steps[s.top];
+    const retryPreview = <button className="btn" onClick={retryTrace}>Retry preview</button>;
+    if (fileRevisions.error) return notReady(title, <span className="err">{fileRevisions.error}</span>, <button className="btn" onClick={fileRevisions.refresh}>Retry checking files</button>);
+    if (trace.error) return notReady(title, <span className="err">{trace.error.message}</span>, <div className="actions-row">{retryPreview}{setupButton}</div>);
+    const steps = currentTrace?.steps ?? (traceUpdating ? trace.previous?.steps : undefined);
+    const t = steps?.[s.top];
+    if (!currentTrace && (!t || t.error || !t.columns.length)) return notReady(title, "Running the steps on the sample files…");
     if (!t) {
-      const failed = steps.at(-1)!;
-      return notReady(`${s.top + 1}. ${s.summary}`, <>Step {failed.step + 1} failed, so this step did not run.<span className="err">{failed.error}</span></>, <button className="btn" onClick={() => setSelection({ kind: "step", id: `steps.${failed.step}` })}>Go to step {failed.step + 1}</button>);
+      const failed = steps?.at(-1);
+      if (!failed?.error) return notReady(title, "There is no preview for this step.", retryPreview);
+      return notReady(title, <>Step {failed.step + 1} failed, so this step did not run.<span className="err">{failed.error}</span></>, <div className="actions-row"><button className="btn" onClick={() => setSelection({ kind: "step", id: `steps.${failed.step}` })}>Go to step {failed.step + 1}</button>{retryPreview}</div>);
     }
-    const prev = s.top > 0 ? steps[s.top - 1] : undefined;
+    const prev = s.top > 0 ? steps?.[s.top - 1] : undefined;
     const added = new Set(t.columns.filter((c) => prev && !prev.columns.some((p) => p.name === c.name)).map((c) => c.name));
     const delta = prev ? t.total - prev.total : 0;
     const header = (
       <>
-        <b>{s.depth ? `In step ${s.top + 1}` : `${s.top + 1}.`} {s.summary}</b>
+        <b>{title}</b>
         <span className="meta">{t.total.toLocaleString()} rows · {t.columns.length} columns</span>
         {delta !== 0 && <span className={`tag ${delta < 0 ? "minus" : "plus"}`}>{delta > 0 ? "+" : "−"}{Math.abs(delta).toLocaleString()} rows</span>}
         {added.size > 0 && <span className="tag plus">+{[...added].join(", ")}</span>}
-        {t.skipped && <span className="tag mod">left out of preview</span>}
+        {currentTrace && t.skipped && <span className="tag mod">left out of preview</span>}
         {s.depth > 0 && <span className="tag">shows the table after step {s.top + 1}</span>}
         <span className="spacer" />
-        {trace.busy && <span className="meta">Updating…</span>}
+        {traceUpdating && <span className="meta">Updating…</span>}
       </>
     );
-    if (t.error) return notReady(`${s.top + 1}. ${s.summary}`, <span className="err">{t.error}</span>);
-    if (!t.columns.length) return notReady(`${s.top + 1}. ${s.summary}`, "There is no table yet at this step. Start with a Read step.");
-    return <DataGrid columns={t.columns} rows={t.rows ?? []} total={t.total} added={added} header={header} onAction={onColumnAction} />;
+    if (t.error) return notReady(title, <span className="err">{t.error}</span>, retryPreview);
+    if (!t.columns.length) return notReady(title, "There is no table yet at this step. Start with a Read step.");
+    const focusColumn = columnJump?.stepId === s.id && columnJump.trace === currentTrace ? columnJump : undefined;
+    return <StepPreview key={traceScope} title={title} trace={t} comparison={currentTrace && compare ? t.comparison : undefined}
+      fillColumns={s.fillColumns} added={added} header={header} onAction={currentTrace ? onColumnAction : undefined} focusColumn={focusColumn} />;
   })();
 
   // ---- render -------------------------------------------------------------------------------------
   const status = busy
     ? { cls: "busy", text: `${busy}…` }
-    : parsed.error || (validation.source === source && validation.error) || trace.data?.steps.some((s) => s.error)
+    : problems.some((problem) => problem.level === "error")
       ? { cls: "bad", text: "Has errors" }
       : !desktop ? { cls: "", text: "Browser preview" }
       : !workspace ? { cls: "", text: "No folder open" }
       : !bound ? { cls: "warn", text: "Needs sample files" }
-      : trace.busy ? { cls: "busy", text: "Previewing…" }
-      : trace.data ? { cls: "ok", text: `Valid · ${trace.data.steps.at(-1)?.total.toLocaleString() ?? 0} rows out` }
+      : traceUpdating ? { cls: "busy", text: "Previewing…" }
+      : validation.pending ? { cls: "busy", text: "Validating…" }
+      : currentTrace ? { cls: "ok", text: `Valid · ${currentTrace.steps.at(-1)?.total.toLocaleString() ?? 0} rows out` }
       : { cls: "", text: "Ready" };
   const panes = `panes${showNav ? "" : " no-nav"}${showInsp ? "" : " no-insp"}`;
+  const editorToolbar = view === "editor" && !panelOpen;
   return (
-    <div className="app" data-m={panel}>
+    <div ref={appRef} className="app" data-m={panelOpen ? "table" : panel}>
       <header className="toolbar">
         <div className="tl">
-          {view === "editor" && <button className="tb hide-sm" aria-label="Steps panel" aria-pressed={showNav} title="Steps panel (⌘1)" onClick={() => setShowNav(!showNav)}>{icons.nav}</button>}
+          {editorToolbar && <button className="tb hide-sm" aria-label="Steps panel" aria-pressed={showNav} title={`Steps panel (${shortcut("1")})`} onClick={() => setShowNav(!showNav)}>{icons.nav}</button>}
           <div className="title">
-            <button onClick={() => guard(() => setView("home"))} title="All workflows">Workflows</button>
-            {view === "editor" && (
+            {panelOpen ? <b>{workspace.split(/[\\/]/).filter(Boolean).at(-1) || workspace}</b> :
+              <button onClick={() => guard(() => setView("home"))} title="All workflows">Workflows</button>}
+            {editorToolbar && (
               <>
                 <span className="kbd">/</span>
                 <b title={workflowPath || "Not saved yet"}>{pipeline.name || "Untitled"}</b>
@@ -541,26 +790,55 @@ export default function App() {
             )}
           </div>
         </div>
-        <div className="center">{view === "editor" && <span className={`pill ${status.cls}`} role="status"><i />{status.text}</span>}</div>
+        <div className="center">{editorToolbar && <span className={`pill ${status.cls}`} role="status"><i />{status.text}</span>}</div>
         <div className="tr">
-          <button className="tb hide-sm" onClick={() => setPalette("all")} title="Command menu">Search <span className="kbd">⌘K</span></button>
-          {view === "editor" && (
+          {editorToolbar && desktop && workspace && workflowPath && <button ref={testsButton} className="tb" onClick={() => setWorkspacePanel("tests")}>Tests</button>}
+          {desktop && workspace && !panelOpen && <button ref={runsButton} className="tb" onClick={openRuns}>Runs</button>}
+          {!panelOpen && <button className="tb hide-sm" onClick={() => setPalette("all")} title="Command menu">Search <span className="kbd">{shortcut("K")}</span></button>}
+          {editorToolbar && (
             <>
-              <button className="tb" aria-label="Undo" title="Undo (⌘Z)" disabled={!doc.canUndo} onClick={undo}>{icons.undo}</button>
-              <button className="tb hide-sm" aria-label="Redo" title="Redo (⇧⌘Z)" disabled={!doc.canRedo} onClick={redo}>{icons.redo}</button>
+              <button className="tb" aria-label="Undo" title={`Undo (${shortcut("Z")})`} disabled={!doc.canUndo} onClick={undo}>{icons.undo}</button>
+              <button className="tb hide-sm" aria-label="Redo" title={`Redo (${shortcut("Z", true)})`} disabled={!doc.canRedo} onClick={redo}>{icons.redo}</button>
             </>
           )}
           <button className="tb" aria-label={`Appearance: ${theme}`} title={`Appearance: ${theme}`} onClick={() => setTheme(theme === "system" ? "light" : theme === "light" ? "dark" : "system")}>{icons.theme}</button>
-          {view === "editor" && (
+          {editorToolbar && (
             <>
-              <button className="tb hide-sm" aria-label="Inspector" aria-pressed={showInsp} title="Inspector (⌘2)" onClick={() => setShowInsp(!showInsp)}>{icons.insp}</button>
-              <button className="tb hide-sm" onClick={() => void save()} disabled={!!busy} title="Save (⌘S)">Save</button>
-              <button className="primary" onClick={() => void runWorkflow()} disabled={!!busy} title="Run with sample files (⌘↵)">▶ Run <span className="kbd hide-sm">⌘↵</span></button>
+              <button className="tb hide-sm" aria-label="Inspector" aria-pressed={showInsp} title={`Inspector (${shortcut("2")})`} onClick={toggleInspector}>{icons.insp}</button>
+              <button className="tb hide-sm" onClick={() => void save()} disabled={!!busy} title={`Save (${shortcut("S")})`}>Save</button>
+              <button className="primary" onClick={() => void runWorkflow()} disabled={!!busy} title={`Run with sample files (${shortcut("Enter")})`}>▶ Run <span className="kbd hide-sm">{shortcut("Enter")}</span></button>
             </>
           )}
         </div>
       </header>
 
+      {workspacePanel === "runs" && <Suspense fallback={<div className="empty" role="status">Loading runs…</div>}><RunsPanel
+        key={workspace}
+        workspace={workspace}
+        refreshToken={artifact?.result.path}
+        onRefreshCurrent={view === "editor" ? fileRevisions.refresh : undefined}
+        onBack={() => {
+          setWorkspacePanel(null);
+          requestAnimationFrame(() => runsButton.current?.focus());
+        }}
+        current={view === "editor" ? {
+          workflowPath, source,
+          inputs: pipeline.inputs.map(({ id }) => ({ name: id, path: bindings[id], sha256: fileRevisions.revisions?.[bindings[id]] })),
+        } : undefined}
+        canRunCurrent={canRun && !busy}
+        onRunCurrent={view === "editor" ? () => {
+          setWorkspacePanel(null);
+          void runWorkflow();
+        } : undefined}
+      /></Suspense>}
+      {workspacePanel === "tests" && <Suspense fallback={<div className="empty" role="status">Loading workflow tests…</div>}>
+        <WorkflowTests workspace={workspace} workflowPath={workflowPath} dirty={doc.dirty} busy={!!busy}
+          onSave={() => save()} onBack={() => {
+            setWorkspacePanel(null);
+            requestAnimationFrame(() => testsButton.current?.focus());
+          }} />
+      </Suspense>}
+      <div className="workspace-views" hidden={panelOpen}>
       {view === "home" ? (
         <Home
           workspace={workspace}
@@ -568,20 +846,22 @@ export default function App() {
           workflows={entries}
           onOpenWorkspace={() => guard(() => void chooseWorkspace())}
           onOpen={(p) => guard(() => void openWorkflow(p))}
+          onSetup={(path) => guard(() => void openWorkflow(path, true))}
           onTemplate={(t) => guard(() => startTemplate(t))}
           onBack={doc.dirty || workflowPath ? () => setView("editor") : undefined}
         />
       ) : (
-        <div className={panes}>
+        <div className={panes} style={paneStyle} data-step={selectedStep ? true : undefined} data-diagram={diagram === "open" || undefined}>
           <Navigator
-            hidden={!showNav}
+            hidden={!showNav && !(compactLayout() && panel === "steps")}
             pipeline={pipeline}
             selection={selection}
             onSelect={(s) => { setSelection(s); if (panel === "steps") setPanel("table"); }}
-            trace={trace.data?.steps}
+            trace={currentTrace?.steps}
             skipped={skipped}
             onToggleSkip={toggleSkip}
             onAdd={() => setPalette("add")}
+            onSetupSamples={desktop && workspace && !parsed.error ? () => setSampleSetup(true) : undefined}
             onAddInput={() => {
               const id = ["data", "lookup", "extra", "more"].find((n) => !pipeline.inputs.some((i) => i.id === n)) ?? `input${pipeline.inputs.length + 1}`;
               try {
@@ -598,31 +878,54 @@ export default function App() {
             route={route}
             bindings={bindings}
           />
-          {stage}
+          {showNav && (
+            <PaneSplitter label="Resize workflow navigator" controls="studio-navigator" side="left" {...paneWidths.navigator} onResize={(width) => resizePane("navigator", width)} />
+          )}
+          <div className="editor-stage">
+            <div className="stage-switch" role="group" aria-label="Workflow view">
+              <button type="button" aria-pressed={diagram !== "open"} onClick={showTable}>Table</button>
+              <button type="button" aria-pressed={diagram === "open"} onClick={showDiagram}>Diagram</button>
+            </div>
+            <div className="editor-stage-body" hidden={diagram === "open"}>{stage}</div>
+            {diagram !== "unopened" && <div className="editor-stage-body" hidden={diagram !== "open"}>
+              {parsed.error ? <main className="stage empty" role="alert"><b>Fix the YAML to display the diagram</b><span>{parsed.error}</span></main> :
+                <Suspense fallback={<div className="empty" role="status">Loading diagram…</div>}>
+                  <WorkflowDiagram key={documentKey} active={diagram === "open" && !panelOpen} source={source}
+                    pipeline={pipeline} selection={selection} onSelect={setSelection} trace={currentTrace} />
+                </Suspense>}
+            </div>}
+          </div>
           {showInsp && (
-            <Inspector
-              source={source}
-              pipeline={pipeline}
-              selection={selection}
-              onChange={change}
-              onError={fail}
-              onSelect={setSelection}
-              onClose={() => (panel === "insp" ? setPanel("table") : setShowInsp(false))}
-              trace={trace.data?.steps}
-              columns={cols}
-              bindings={bindings}
-              onBind={bind}
-              onBrowse={desktop && workspace ? (id) => void browseSample(id) : undefined}
-              inspection={selection.kind === "source" && inspection.key === inspectKey ? inspection.data : undefined}
-              route={route}
-              workflowPath={workflowPath}
-              canPackage={desktop && !!workspace && !!workflowPath && !doc.dirty}
-              onPackage={() => setPackaging(true)}
-              onAddRead={(input) => {
-                change(insertStep(source, ["steps"], 0, { from: input }), `Read ${input}`);
-                setSelection({ kind: "step", id: "steps.0" });
-              }}
-            />
+            <>
+              <PaneSplitter label="Resize inspector" controls="studio-inspector" side="right" {...paneWidths.inspector} onResize={(width) => resizePane("inspector", width)} />
+              <Inspector
+                source={source}
+                pipeline={pipeline}
+                selection={selection}
+                onChange={change}
+                onError={fail}
+                onSelect={setSelection}
+                onClose={closeInspector}
+                trace={currentTrace?.steps}
+                previewPending={traceUpdating}
+                previewFailed={!!(trace.error || (canPreview && fileRevisions.error))}
+                columns={cols}
+                jumpColumns={jumpColumns}
+                onGoToColumn={goToColumn}
+                bindings={bindings}
+                onBind={bind}
+                onBrowse={desktop && workspace ? (id) => void browseSample(id) : undefined}
+                inspection={selection.kind === "source" ? inspection.data : undefined}
+                route={route}
+                workflowPath={workflowPath}
+                canPackage={desktop && !!workspace && !!workflowPath && !doc.dirty}
+                onPackage={() => setPackaging(true)}
+                onAddRead={(input) => {
+                  change(insertStep(source, ["steps"], 0, { from: input }), `Read ${input}`);
+                  setSelection({ kind: "step", id: "steps.0" });
+                }}
+              />
+            </>
           )}
         </div>
       )}
@@ -639,33 +942,45 @@ export default function App() {
       )}
       {view === "editor" && (
         <nav className="mtabs" aria-label="Panels">
-          {(["steps", "table", "insp"] as Panel[]).map((p) => (
-            <button key={p} aria-pressed={panel === p} onClick={() => { setPanel(p); if (p === "insp") setShowInsp(true); }}>
-              {p === "steps" ? "Steps" : p === "table" ? "Table" : "Settings"}
+          {(["steps", "table", "diagram", "insp"] as const).map((p) => (
+            <button key={p} aria-pressed={p === "diagram" ? panel === "table" && diagram === "open" : panel === p && (p !== "table" || diagram !== "open")} onClick={() => {
+              if (p === "diagram") { showDiagram(); return; }
+              if (p === "table" && panel === "insp") panelFocus.current = "table";
+              if (p === "table") { showTable(); return; }
+              if (p === "insp") {
+                if (panel !== "insp") panelFocus.current = "insp";
+                setShowInsp(true);
+              }
+              setPanel(p);
+            }}>
+              {p === "steps" ? "Steps" : p === "table" ? "Table" : p === "diagram" ? "Diagram" : "Settings"}
             </button>
           ))}
         </nav>
       )}
 
+      </div>
+      {sampleSetup && <SampleSetupDialog workspace={workspace} inputs={pipeline.inputs} bindings={bindings}
+        onClose={() => setSampleSetup(false)} onApply={(next) => {
+          applyBindings(next);
+          setSampleSetup(false);
+          setPanel("table");
+        }} />}
       {palette && <CommandMenu commands={commands} placeholder={palette === "add" ? "Add a step after the selected one…" : "Search commands, steps and workflows…"} onClose={() => setPalette(null)} />}
       {saveAs !== null && (
-        <div className="scrim" onMouseDown={(e) => e.target === e.currentTarget && setSaveAs(null)}>
-          <form className="dialog" role="dialog" aria-label="Save workflow" onSubmit={(e) => { e.preventDefault(); void save(saveAs); }}>
-            <h2>Save workflow</h2>
-            <p>Files in <code>workflows/</code> become API endpoints. The file name is the route unless the service settings name another.</p>
-            <input className="ctl" aria-label="File path" autoFocus value={saveAs} onChange={(e) => setSaveAs(e.target.value)} />
-            <div className="hint">Serves <code>/api/{String(pipeline.service.route ?? "") || base(saveAs)}</code></div>
-            <div className="actions">
-              <button type="button" className="btn" onClick={() => setSaveAs(null)}>Cancel</button>
-              <button className="primary" disabled={!/\.ya?ml$/.test(saveAs)}>Save</button>
-            </div>
-          </form>
-        </div>
+        <SaveWorkflowDialog
+          path={saveAs}
+          route={String(pipeline.service.route ?? "") || base(saveAs)}
+          returnFocusTo={saveOpener.current}
+          onChange={setSaveAs}
+          onClose={() => setSaveAs(null)}
+          onSave={() => void save(saveAs)}
+        />
       )}
       {packaging && (
         <PackageBuilder
           workspace={workspace}
-          workflows={entries.map((e) => e.path)}
+          workflows={entries.map((e) => e.path).filter((path) => path.startsWith("workflows/"))}
           blocked={doc.dirty}
           onPending={setPackagePending}
           onClose={() => !packagePending && setPackaging(false)}

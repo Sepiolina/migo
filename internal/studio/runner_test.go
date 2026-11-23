@@ -77,6 +77,23 @@ func TestRunUsesEngineAndProducesArtifact(t *testing.T) {
 	if preview.TotalRows < 2 {
 		t.Fatal("empty generated workbook")
 	}
+	t.Run("defer preview until the workbook is opened", func(t *testing.T) {
+		params := Params{Workspace: workspace, YAML: string(yaml), Inputs: map[string]string{"parts": "parts.xlsx"}, OmitPreview: true}
+		saved, err := runWithInspect(context.Background(), params, func(string, Params) (Preview, error) {
+			t.Fatal("unexpected inline preview")
+			return Preview{}, nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		artifact := saved.(map[string]any)
+		if artifact["preview"] != nil || artifact["sha256"] == nil {
+			t.Fatalf("unexpected deferred run result: %+v", artifact)
+		}
+		if _, err := os.Stat(filepath.Join(workspace, artifact["path"].(string))); err != nil {
+			t.Fatal(err)
+		}
+	})
 }
 func TestRunPreservesArtifactWhenPreviewExceedsLimit(t *testing.T) {
 	root := fixtureRoot(t)

@@ -5,8 +5,6 @@ import (
 	"archive/zip"
 	"bufio"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,6 +23,7 @@ import (
 const Version = 1
 const MaxFrameBytes = 1 << 20
 const maxWorkbookBytes = 25 << 20
+const maxWorkbookExpandedBytes = 64 << 20
 
 type Request struct {
 	Version int    `json:"version"`
@@ -33,16 +32,22 @@ type Request struct {
 	Params  Params `json:"params"`
 }
 type Params struct {
-	Build     deploy.Options    `json:"build"`
-	Workspace string            `json:"workspace"`
-	YAML      string            `json:"yaml"`
-	Path      string            `json:"path"`
-	Sheet     string            `json:"sheet"`
-	Offset    int               `json:"offset"`
-	Limit     int               `json:"limit"`
-	Inputs    map[string]string `json:"inputs"`
-	Step      *int              `json:"step"` // trace: the step whose rows are returned
-	Skip      []int             `json:"skip"` // trace: steps to leave out
+	OmitPreview  bool              `json:"omitPreview,omitempty"`
+	Compare      bool              `json:"compare,omitempty"`
+	Build        deploy.Options    `json:"build"`
+	Workspace    string            `json:"workspace"`
+	YAML         string            `json:"yaml"`
+	WorkflowPath string            `json:"workflowPath,omitempty"`
+	Revision     string            `json:"revision,omitempty"`
+	Path         string            `json:"path"`
+	Sheet        string            `json:"sheet"`
+	Offset       int               `json:"offset"`
+	Limit        int               `json:"limit"`
+	ColumnOffset int               `json:"columnOffset"`
+	ColumnLimit  int               `json:"columnLimit"`
+	Inputs       map[string]string `json:"inputs"`
+	Step         *int              `json:"step"` // trace: the step whose rows are returned
+	Skip         []int             `json:"skip"` // trace: steps to leave out
 }
 type Failure struct {
 	Code    string `json:"code"`
@@ -108,7 +113,11 @@ func Handle(ctx context.Context, req Request) Response {
 	}
 	result, err := execute(ctx, req)
 	if err != nil {
-		resp.Error = &Failure{Code: "operation_failed", Message: err.Error()}
+		code := "operation_failed"
+		if errors.Is(err, errWorkbookPageTooLarge) || errors.Is(err, errRunPageTooLarge) || errors.Is(err, errWorkflowTestsTooLarge) {
+			code = "response_too_large"
+		}
+		resp.Error = &Failure{Code: code, Message: err.Error()}
 		return resp
 	}
 	resp.OK = true
@@ -119,7 +128,7 @@ func execute(ctx context.Context, req Request) (any, error) {
 	p := req.Params
 	switch req.Command {
 	case "capabilities":
-		return map[string]any{"version": Version, "commands": []string{"capabilities", "validate", "inspectWorkbook", "run", "trace", "buildPackage"}, "offlineOnly": true, "maxFrameBytes": MaxFrameBytes}, nil
+		return map[string]any{"version": Version, "commands": []string{"capabilities", "validate", "inspectWorkbook", "inspectWorkbookPage", "run", "listRuns", "trace", "buildPackage", "discoverTests", "runTests"}, "offlineOnly": true, "maxFrameBytes": MaxFrameBytes}, nil
 	case "validate":
 		wf, err := workflow.Parse([]byte(p.YAML))
 		if err != nil {
@@ -139,12 +148,22 @@ func execute(ctx context.Context, req Request) (any, error) {
 			return nil, err
 		}
 		return inspect(path, p)
+	case "inspectWorkbookPage":
+		path, err := localPath(p.Workspace, p.Path)
+		if err != nil {
+			return nil, err
+		}
+		return inspectWorkbookPage(ctx, path, req)
 	case "run":
 		return run(ctx, p)
+	case "listRuns":
+		return listRuns(ctx, req)
 	case "trace":
 		return trace(ctx, p)
 	case "buildPackage":
 		return deploy.Build(ctx, p.Workspace, p.Build)
+	case "discoverTests", "runTests":
+		return workflowTests(ctx, p, req.Command == "runTests")
 	default:
 		return nil, fmt.Errorf("Unknown command %q", req.Command)
 	}
@@ -182,41 +201,56 @@ func checkWorkbook(path string) error {
 	return checkWorkbookWithLimit(path, maxWorkbookBytes)
 }
 func checkWorkbookWithLimit(path string, maxBytes int64) error {
+	f, err := openWorkbookFile(path, maxBytes)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, _, err = workbookArchive(f, maxBytes)
+	return err
+}
+
+var errWorkbookFileSize = errors.New("Workbook must be a regular file of at most 25 MiB")
+
+func openWorkbookFile(path string, maxBytes int64) (*os.File, error) {
 	st, err := os.Stat(path)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !st.Mode().IsRegular() || st.Size() > maxBytes {
-		return errors.New("Workbook must be a regular file of at most 25 MiB")
+		return nil, errWorkbookFileSize
 	}
-	f, err := os.Open(path)
+	return os.Open(path)
+}
+
+func workbookArchive(f *os.File, maxBytes int64) (*zip.Reader, int64, error) {
+	st, err := f.Stat()
 	if err != nil {
-		return err
+		return nil, 0, err
+	}
+	if !st.Mode().IsRegular() || st.Size() > maxBytes {
+		return nil, 0, errWorkbookFileSize
 	}
 	var magic [2]byte
-	_, err = io.ReadFull(f, magic[:])
-	f.Close()
+	_, err = f.ReadAt(magic[:], 0)
 	if err != nil {
-		return err
+		return nil, 0, err
 	}
-	if string(magic[:]) == "PK" {
-		z, err := zip.OpenReader(path)
-		if err != nil {
-			return err
-		}
-		defer z.Close()
-		var size uint64
-		for _, entry := range z.File {
-			if entry.UncompressedSize64 > 64<<20 {
-				return errors.New("Workbook exceeds 64 MiB expanded limit")
-			}
-			size += entry.UncompressedSize64
-			if size > 64<<20 {
-				return errors.New("Workbook exceeds 64 MiB expanded limit")
-			}
-		}
+	if string(magic[:]) != "PK" {
+		return nil, st.Size(), nil
 	}
-	return nil
+	z, err := zip.NewReader(f, st.Size())
+	if err != nil {
+		return nil, 0, err
+	}
+	var size uint64
+	for _, entry := range z.File {
+		if entry.UncompressedSize64 > maxWorkbookExpandedBytes-size {
+			return nil, 0, errors.New("Workbook exceeds 64 MiB expanded limit")
+		}
+		size += entry.UncompressedSize64
+	}
+	return z, st.Size(), nil
 }
 func inspect(path string, p Params) (Preview, error) {
 	return inspectWithLimit(path, p, maxWorkbookBytes)
@@ -251,16 +285,21 @@ func inspectWithLimit(path string, p Params, maxBytes int64) (Preview, error) {
 	if !found {
 		return preview, fmt.Errorf("Unknown sheet %q", preview.Sheet)
 	}
-	rows, err := book.Rows(preview.Sheet)
-	if err != nil {
-		return preview, err
-	}
-	preview.TotalRows = len(rows)
 	preview.Offset = p.Offset
 	limit := p.Limit
 	if limit == 0 {
 		limit = 100
 	}
+	if xlsx, ok := book.(previewXLSX); ok {
+		preview.Rows, preview.TotalRows, err = xlsx.window(preview.Sheet, p.Offset, limit)
+		preview.Truncated = len(preview.Rows) > 0 && preview.TotalRows-p.Offset > len(preview.Rows)
+		return preview, err
+	}
+	rows, err := book.Rows(preview.Sheet)
+	if err != nil {
+		return preview, err
+	}
+	preview.TotalRows = len(rows)
 	if p.Offset < len(rows) {
 		end := p.Offset + limit
 		if end > len(rows) {
@@ -272,13 +311,6 @@ func inspectWithLimit(path string, p Params, maxBytes int64) (Preview, error) {
 	return preview, nil
 }
 
-// The production input reader intentionally honors declared sheet ranges. The
-// desktop XLSX viewer reads actual cells, including writer output beyond a stale
-// dimension tag; it must not silently hide cells present in the exported file.
-type previewXLSX struct{ *excelize.File }
-
-func (b previewXLSX) SheetNames() []string                 { return b.GetSheetList() }
-func (b previewXLSX) Rows(name string) ([][]string, error) { return b.GetRows(name) }
 func openPreview(path string) (sheet.Workbook, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -353,7 +385,7 @@ func trace(ctx context.Context, p Params) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	opt := workflow.TraceOptions{Focus: -1, Limit: p.Limit, Skip: p.Skip}
+	opt := workflow.TraceOptions{Compare: p.Compare, Focus: -1, Limit: p.Limit, Skip: p.Skip}
 	if p.Step != nil {
 		opt.Focus = *p.Step
 	}
@@ -370,10 +402,23 @@ func trace(ctx context.Context, p Params) (any, error) {
 		if err != nil {
 			return nil, err
 		}
-		if len(encoded) < MaxFrameBytes-4096 || opt.Focus < 0 || opt.Focus >= len(steps) || len(steps[opt.Focus].Rows) == 0 {
+		if len(encoded) < MaxFrameBytes-4096 || opt.Focus < 0 || opt.Focus >= len(steps) {
 			break
 		}
-		rows := steps[opt.Focus].Rows
+		focused := &steps[opt.Focus]
+		if c := focused.Comparison; c != nil && (len(c.Before) > 0 || len(c.Removed) > 0) {
+			c.Before = c.Before[:len(c.Before)/2]
+			c.Removed = c.Removed[:len(c.Removed)/2]
+			c.RemovedPositions = c.RemovedPositions[:len(c.Removed)]
+			if len(c.Changed) > len(c.Before) {
+				c.Changed = c.Changed[:len(c.Before)]
+			}
+			continue
+		}
+		if len(focused.Rows) == 0 {
+			break
+		}
+		rows := focused.Rows
 		steps[opt.Focus].Rows = rows[:len(rows)/2]
 	}
 	return map[string]any{"steps": steps, "format": wf.Format}, nil
@@ -392,48 +437,17 @@ func runWithInspect(ctx context.Context, p Params, inspectOutput func(string, Pa
 	if err != nil {
 		return nil, err
 	}
-	// Refuse symlinked artifact parents; MkdirAll does not establish containment.
-	// Create each directory only after verifying its existing parent is local.
-	checked := root
-	for _, name := range []string{".studio", "runs"} {
-		next := filepath.Join(checked, name)
-		if err := os.Mkdir(next, 0700); err != nil && !os.IsExist(err) {
-			return nil, err
-		}
-		checked, err = localPath(root, next)
-		if err != nil {
-			return nil, err
-		}
-	}
-	dir, err := os.MkdirTemp(checked, "run-")
+	runID, manifest, err := persistRun(ctx, root, wf, p, inputs, func(output string) error {
+		return wf.Run(ctx, offline(), inputs, output)
+	})
 	if err != nil {
 		return nil, err
 	}
-	success := false
-	defer func() {
-		if !success {
-			os.RemoveAll(dir)
-		}
-	}()
-	output := filepath.Join(dir, "output"+wf.Ext())
-	if err := wf.Run(ctx, offline(), inputs, output); err != nil {
-		return nil, err
+	result := map[string]any{"path": manifest.OutputPath, "sha256": manifest.OutputSHA256, "runId": runID}
+	if p.OmitPreview {
+		return result, nil
 	}
-	f, err := os.Open(output)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return nil, err
-	}
-	rel, err := filepath.Rel(root, output)
-	if err != nil {
-		return nil, err
-	}
-	result := map[string]any{"path": filepath.ToSlash(rel), "sha256": hex.EncodeToString(h.Sum(nil))}
-	preview, err := inspectOutput(output, Params{Limit: 100})
+	preview, err := inspectOutput(filepath.Join(root, filepath.FromSlash(manifest.OutputPath)), Params{Limit: 100})
 	if err != nil {
 		result["previewWarning"] = err.Error()
 	} else if encoded, err := json.Marshal(preview); err != nil || len(encoded) > MaxFrameBytes/2 {
@@ -441,6 +455,5 @@ func runWithInspect(ctx context.Context, p Params, inspectOutput func(string, Pa
 	} else {
 		result["preview"] = preview
 	}
-	success = true
 	return result, nil
 }

@@ -25,6 +25,7 @@ function bridge() {
   (window as unknown as { __maiBridge: unknown }).__maiBridge = {
     invoke: async (command: string, args?: Record<string, unknown>) => {
       calls.push({ command, args });
+      if (command === "file_revisions") return Object.fromEntries((args?.paths as string[]).map(path => [path, "fixture"]));
       if (command === "choose_workspace") return { path: "/work" };
       if (command === "list_workflows") return { paths: [] };
       if (command === "choose_sample_file") return { path: "samples/parts.xlsx", copied: true };
@@ -133,5 +134,34 @@ describe("Studio", () => {
       const traces = calls.filter((c) => (c.args as { request?: { command: string } })?.request?.command === "trace");
       expect((traces.at(-1)!.args as { request: { params: { inputs: unknown } } }).request.params.inputs).toEqual({ parts: "samples/parts.xlsx" });
     });
+  });
+
+  it("returns to the same preview cell after search, save and inspector close", async () => {
+    const calls = bridge();
+    render(<App />);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Open folder…" })));
+    fireEvent.click(screen.getByRole("button", { name: /Summarize by group/ }));
+    const grid = await screen.findByRole("grid", { name: "Preview cells" });
+    const cell = within(grid).getByText("Resistor");
+    fireEvent.click(cell);
+
+    fireEvent.keyDown(grid, { key: "k", ctrlKey: true });
+    const search = screen.getByRole("combobox", { name: "Search commands" });
+    expect(document.activeElement).toBe(search);
+    fireEvent.keyDown(search, { key: "Enter", ctrlKey: true });
+    fireEvent.keyDown(search, { key: "Escape" });
+    expect(document.activeElement).toBe(grid);
+
+    fireEvent.keyDown(grid, { key: "s", ctrlKey: true });
+    const path = await screen.findByRole("textbox", { name: "File path" });
+    expect(document.activeElement).toBe(path);
+    fireEvent.keyDown(path, { key: "Enter", ctrlKey: true });
+    fireEvent.keyDown(path, { key: "Escape" });
+    expect(document.activeElement).toBe(grid);
+
+    fireEvent.click(screen.getByRole("button", { name: "Close inspector" }));
+    expect(document.activeElement).toBe(grid);
+    expect(grid.getAttribute("aria-activedescendant")).toBe(cell.id);
+    expect(calls.some((call) => (call.args?.request as { command?: string })?.command === "run")).toBe(false);
   });
 });

@@ -9,6 +9,7 @@ export function Home({
   workflows,
   onOpenWorkspace,
   onOpen,
+  onSetup,
   onTemplate,
   onBack,
 }: {
@@ -17,6 +18,7 @@ export function Home({
   workflows: WorkflowEntry[];
   onOpenWorkspace: () => void;
   onOpen: (path: string) => void;
+  onSetup: (path: string) => void;
   onTemplate: (t: Template) => void;
   onBack?: () => void;
 }) {
@@ -33,7 +35,7 @@ export function Home({
           <div className="hero">
             <div>
               <b>{workspace ? workspace : "Open a project folder"}</b>
-              <p>{workspace ? "Workflows live in its workflows/ folder; sample files can be anywhere inside it." : "Choose the folder that holds your workflows/ directory and sample files, for example a clone of the migo repository."}</p>
+              <p>{workspace ? "Open a project workflow or an example. Sample files can be anywhere in this folder." : "Choose the folder that holds your workflows/ directory and sample files, for example a clone of the migo repository."}</p>
             </div>
             <button className={workspace ? "btn" : "primary"} onClick={onOpenWorkspace}>{workspace ? "Change folder…" : "Open folder…"}</button>
           </div>
@@ -44,17 +46,20 @@ export function Home({
             <div className="list">
               {workflows.length ? (
                 workflows.map((w) => (
-                  <button key={w.path} className="wf" onClick={() => onOpen(w.path)}>
-                    <span>
-                      <div className="n">{w.name || w.path}</div>
-                      <div className="p">{w.path}</div>
-                    </span>
-                    <span className="route">/api/{w.route}</span>
-                  </button>
+                  <div className="project-workflow" key={w.path}>
+                    <button className="wf" onClick={() => onOpen(w.path)}>
+                      <span>
+                        <div className="n">{w.name || w.path}</div>
+                        <div className="p">{w.path}</div>
+                      </span>
+                      <span className="route">/api/{w.route}</span>
+                    </button>
+                    <button className="btn" aria-label={`Set up samples for ${w.path}`} onClick={() => onSetup(w.path)}>Set up samples</button>
+                  </div>
                 ))
               ) : (
                 <div className="wf" style={{ cursor: "default" }}>
-                  <span className="hint">No workflows in workflows/ yet. Start from a template below.</span>
+                  <span className="hint">No project workflows or examples found. Start from a template below.</span>
                 </div>
               )}
             </div>

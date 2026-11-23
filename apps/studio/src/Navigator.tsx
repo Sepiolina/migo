@@ -1,3 +1,4 @@
+import { shortcut } from "./shortcut";
 import type { StepTrace } from "./api";
 import type { Pipeline } from "./pipeline";
 import { categoryColours, stepByOp } from "./stepRegistry";
@@ -32,6 +33,7 @@ export function Navigator({
   onToggleSkip,
   onAdd,
   onAddInput,
+  onSetupSamples,
   onAddOutput,
   route,
   bindings,
@@ -45,6 +47,7 @@ export function Navigator({
   onToggleSkip: (top: number) => void;
   onAdd: () => void;
   onAddInput: () => void;
+  onSetupSamples?: () => void;
   onAddOutput: () => void;
   route: string;
   bindings: Record<string, string>;
@@ -67,7 +70,7 @@ export function Navigator({
   };
   let lastNote: string | undefined;
   return (
-    <aside className="pane nav" aria-label="Workflow" hidden={hidden}>
+    <aside id="studio-navigator" className="pane nav" aria-label="Workflow" hidden={hidden}>
       <div className="ph">Workflow</div>
       <div className="scroll">
         <div className="group">
@@ -82,6 +85,7 @@ export function Navigator({
         <div className="group">
           <div className="glabel">
             Sources
+            {onSetupSamples && <button className="tb" onClick={onSetupSamples}>Set up samples</button>}
             <button className="tb" aria-label="Add source" title="Add source" onClick={onAddInput}>+</button>
           </div>
           {pipeline.inputs.map((i) => {
@@ -100,7 +104,7 @@ export function Navigator({
         <div className="group">
           <div className="glabel">
             Steps
-            <button className="tb" aria-label="Add step" title="Add step (⌘⇧A)" onClick={onAdd}>+</button>
+            <button className="tb" aria-label="Add step" title={`Add step (${shortcut("A", true)})`} onClick={onAdd}>+</button>
           </div>
           {pipeline.steps.map((s) => {
             const off = skipped.has(s.top);
@@ -149,7 +153,7 @@ export function Navigator({
             );
           })}
           <button className="insert" onClick={onAdd}>
-            + Add step <span className="kbd" style={{ marginLeft: "auto" }}>⌘⇧A</span>
+            + Add step <span className="kbd" style={{ marginLeft: "auto" }}>{shortcut("A", true)}</span>
           </button>
         </div>
         <div className="group">

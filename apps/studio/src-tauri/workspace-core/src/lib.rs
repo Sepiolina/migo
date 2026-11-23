@@ -1,6 +1,7 @@
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{
+    collections::BTreeMap,
     fs,
     io::{Read, Write},
     path::{Component, Path, PathBuf},
@@ -74,6 +75,31 @@ fn resolve(root: &Path, relative: &Path, allow_missing_file: bool) -> Result<Pat
         return Err("Workflow must be inside the workspace".into());
     }
     Ok(current)
+}
+
+/// Identify the bytes a workspace preview depends on, including same-path replacements.
+pub fn file_revisions(root: &Path, paths: Vec<String>) -> BTreeMap<String, Option<String>> {
+    fn digest(root: &Path, relative: &Path) -> Option<String> {
+        if relative.is_absolute() {
+            return None;
+        }
+        let file = root.join(relative).canonicalize().ok()?;
+        if !file.starts_with(root) || !file.is_file() {
+            return None;
+        }
+        let mut input = fs::File::open(file).ok()?;
+        let mut hash = Sha256::new();
+        std::io::copy(&mut input, &mut hash).ok()?;
+        Some(format!("{:x}", hash.finalize()))
+    }
+
+    paths
+        .into_iter()
+        .map(|path| {
+            let revision = digest(root, Path::new(&path));
+            (path, revision)
+        })
+        .collect()
 }
 
 fn read_at(path: &Path, relative: &str) -> Result<Workflow, String> {
@@ -183,7 +209,7 @@ fn list_with_limits(
         dir: &Path,
         paths: &mut Vec<String>,
         depth: usize,
-        max_depth: usize,
+        max_depth: Option<usize>,
         remaining: &mut usize,
     ) -> Result<(), String> {
         for entry in fs::read_dir(dir).map_err(|_| "Cannot list workflows")? {
@@ -198,16 +224,26 @@ fn list_with_limits(
             }
             let path = entry.path();
             if ty.is_dir() {
-                if depth >= max_depth {
-                    return Err("Workflow discovery exceeds the directory depth limit".into());
+                if let Some(limit) = max_depth {
+                    if depth >= limit {
+                        return Err("Workflow discovery exceeds the directory depth limit".into());
+                    }
+                    visit(root, &path, paths, depth + 1, max_depth, remaining)?;
                 }
-                visit(root, &path, paths, depth + 1, max_depth, remaining)?;
             } else if ty.is_file()
                 && matches!(
                     path.extension().and_then(|s| s.to_str()),
                     Some("yaml" | "yml")
                 )
             {
+                if max_depth.is_none()
+                    && path
+                        .file_stem()
+                        .and_then(|s| s.to_str())
+                        .is_some_and(|stem| stem.ends_with(".test"))
+                {
+                    continue;
+                }
                 if let Some(path) = path.strip_prefix(root).ok().and_then(|p| p.to_str()) {
                     paths.push(path.replace('\\', "/"));
                 }
@@ -220,9 +256,16 @@ fn list_with_limits(
     let dir = root.join("workflows");
     match fs::symlink_metadata(&dir) {
         Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() => {
-            visit(root, &dir, &mut paths, 0, max_depth, &mut remaining)?
+            visit(root, &dir, &mut paths, 0, Some(max_depth), &mut remaining)?
         }
         Ok(_) => return Err("Workflows directory must be a directory inside the workspace".into()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
+        Err(_) => return Err("Cannot list workflows".into()),
+    }
+    let examples = root.join("examples");
+    match fs::symlink_metadata(&examples) {
+        Ok(meta) if meta.is_dir() => visit(root, &examples, &mut paths, 0, None, &mut remaining)?,
+        Ok(_) => (),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
         Err(_) => return Err("Cannot list workflows".into()),
     }
@@ -233,6 +276,31 @@ fn list_with_limits(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preview_revisions_follow_file_contents_inside_the_workspace() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("project");
+        fs::create_dir(&root).unwrap();
+        let root = root.canonicalize().unwrap();
+        fs::write(tmp.path().join("outside.csv"), "outside").unwrap();
+        let sample = root.join("parts.csv");
+        fs::write(&sample, "111").unwrap();
+        let paths = vec![
+            "parts.csv".into(),
+            "missing".into(),
+            "../outside.csv".into(),
+        ];
+        let first = file_revisions(&root, paths.clone());
+        assert!(first["parts.csv"].is_some());
+        assert!(first["missing"].is_none());
+        assert!(first["../outside.csv"].is_none());
+        fs::write(sample, "222").unwrap();
+        assert_ne!(
+            first["parts.csv"],
+            file_revisions(&root, paths)["parts.csv"]
+        );
+    }
 
     #[test]
     fn discovery_reports_depth_and_entry_limits() {
@@ -252,6 +320,31 @@ mod tests {
             list_with_limits(root.path(), 2, 3).unwrap().paths,
             vec!["workflows/a/b/test.yaml"]
         );
+    }
+
+    #[test]
+    fn discovery_includes_top_level_example_workflows_only() {
+        let root = tempfile::tempdir().unwrap();
+        let examples = root.path().join("examples");
+        fs::create_dir_all(examples.join("tests")).unwrap();
+        for file in [
+            "orders.yaml",
+            "parts.yml",
+            "orders.test.yaml",
+            "parts.test.yml",
+            "orders.xlsx",
+            "tests/nested.yaml",
+        ] {
+            fs::write(examples.join(file), "").unwrap();
+        }
+        assert_eq!(
+            list_with_limits(root.path(), 0, 6).unwrap().paths,
+            vec!["examples/orders.yaml", "examples/parts.yml"]
+        );
+        assert!(list_with_limits(root.path(), 0, 5)
+            .err()
+            .unwrap()
+            .contains("entry"));
     }
 
     #[test]
@@ -336,6 +429,16 @@ mod tests {
         .unwrap();
         assert!(read(root.path(), "workflows/link.yaml").is_err());
         assert!(save(root.path(), "workflows/linked/new.yaml", "bad", None).is_err());
+        let examples = root.path().join("examples");
+        symlink(outside.path(), &examples).unwrap();
+        assert!(list(root.path()).unwrap().paths.is_empty());
+        fs::remove_file(&examples).unwrap();
+        fs::create_dir(&examples).unwrap();
+        symlink(
+            outside.path().join("other.yaml"),
+            examples.join("link.yaml"),
+        )
+        .unwrap();
         assert!(list(root.path()).unwrap().paths.is_empty());
         assert_eq!(
             fs::read_to_string(outside.path().join("other.yaml")).unwrap(),

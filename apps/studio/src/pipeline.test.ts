@@ -39,6 +39,42 @@ describe("pipeline model", () => {
     expect(p.datasets).toContain("priorities");
     for (const s of p.steps) expect(() => readForm(bom, s.argPath, stepForm(s.spec!))).not.toThrow();
   });
+  it("reads sheet requirements from unconditional workbook reads and preserves alternatives", () => {
+    const p = readPipeline(`name: x
+input: {parts: {}, lookup: {}, untouched: {}}
+steps:
+  - from: parts[2]
+  - from: {input: parts, sheet: [Parts, 2, "3", 012, 08]}
+  - from: {input: lookup, sheet: "Lookup"}
+  - from: {input: lookup, sheet: 4}
+  - from: parts
+  - from: {input: lookup}
+  - save: saved
+  - from: saved
+  - if: "true"
+    then:
+      - from: "untouched[Conditional]"
+    else:
+      - from: {input: untouched, sheet: 4}
+`);
+    expect(p.inputs.map(({ sheetRequirements }) => sheetRequirements)).toEqual([
+      [["2"], ["Parts", 2, "3", 12, "08"]],
+      [["Lookup"], [4]],
+      [],
+    ]);
+  });
+  it("leaves invalid and ambiguous sheet requirements to the workflow parser", () => {
+    const p = readPipeline(`input: {parts: {}}
+steps:
+  - from: "parts[]"
+  - from: {input: parts, sheet: [Parts, 0]}
+  - from: {input: parts, sheet: []}
+  - from: {input: parts, sheet: {name: Parts}}
+  - from: {input: parts, sheet: [Parts, 9223372036854775807]}
+  - from: {input: missing, sheet: Parts}
+`);
+    expect(p.inputs[0].sheetRequirements).toEqual([]);
+  });
   it("reads forms: short forms, entries, nested keys and aggregates", () => {
     const p = readPipeline(bom);
     const read = (i: number) => readForm(bom, p.steps[i].argPath, stepForm(p.steps[i].spec!));

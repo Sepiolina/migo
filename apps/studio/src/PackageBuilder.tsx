@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useDialogFocus } from "./useDialogFocus";
 import { native as invoke } from "./api";
 import "./package-builder.css";
 
@@ -146,6 +147,7 @@ export function PackageBuilder({
   onPending,
 }: Props) {
   const dialogRef = useRef<HTMLElement>(null);
+  useDialogFocus(dialogRef);
   const [profile, setProfile] = useState<PackageProfile>({
     ...defaults,
     configPath,
@@ -184,10 +186,6 @@ export function PackageBuilder({
     };
   }, [storageKey]);
   useEffect(() => {
-    const previous = document.activeElement as HTMLElement | null;
-    return () => previous?.focus();
-  }, []);
-  useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
       if (event.key === "Tab") {
         const items = Array.from(
@@ -197,20 +195,20 @@ export function PackageBuilder({
         );
         const first = items[0],
           last = items[items.length - 1];
+        const active = document.activeElement;
+        const needsEntry = active === dialogRef.current || !dialogRef.current?.contains(active);
         if (!first) {
           event.preventDefault();
           dialogRef.current?.focus();
         } else if (
           event.shiftKey &&
-          (document.activeElement === first ||
-            !dialogRef.current?.contains(document.activeElement))
+          (active === first || needsEntry)
         ) {
           event.preventDefault();
           last.focus();
         } else if (
           !event.shiftKey &&
-          (document.activeElement === last ||
-            !dialogRef.current?.contains(document.activeElement))
+          (active === last || needsEntry)
         ) {
           event.preventDefault();
           first.focus();
@@ -304,7 +302,6 @@ export function PackageBuilder({
             </p>
           </div>
           <button
-            autoFocus
             disabled={locked}
             onClick={onClose}
             aria-label="Close package builder"

@@ -1,0 +1,93 @@
+.workflow-diagram {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--panel);
+}
+
+.diagram-toolbar, .diagram-footer {
+  display: flex;
+  flex: none;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 5px 10px;
+  background: var(--panel);
+}
+
+.diagram-toolbar { border-bottom: 1px solid var(--line); }
+.diagram-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; }
+.diagram-zoom { min-width: 5ch; text-align: center; color: var(--ink-2); font: 11px var(--mono); }
+.diagram-export { margin-inline-start: auto; }
+
+.diagram-scroll {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: radial-gradient(circle at 1px 1px, var(--line) 1px, transparent 1.1px) 0 0 / 18px 18px var(--well);
+}
+
+.diagram-scaled { position: relative; margin-inline: auto; overflow: clip; }
+.diagram-canvas { position: absolute; inset: 0 auto auto 0; transform-origin: top left; }
+.diagram-edges { position: absolute; inset: 0; pointer-events: none; }
+.diagram-edge { fill: none; stroke: currentColor; stroke-width: 1.6; }
+.diagram-edge-order { color: var(--ink-2); }
+.diagram-edge.diagram-edge-read { stroke-dasharray: 5 4; }
+.diagram-edge.diagram-edge-write { stroke-dasharray: 2 3; }
+.diagram-edge-read { color: var(--accent-ink); }
+.diagram-edge-write { color: var(--add); }
+.diagram-edges marker { fill: currentColor; }
+.diagram-edge-label {
+  fill: currentColor;
+  stroke: var(--well);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+  paint-order: stroke;
+  text-anchor: middle;
+  font: 600 11px var(--sans);
+}
+
+.diagram-node {
+  --node-accent: var(--line);
+  position: absolute;
+  display: block;
+  border: 1px solid var(--line);
+  border-inline-start: 3px solid var(--node-accent);
+  border-radius: 7px;
+  padding: 0;
+  color: var(--ink);
+  background: var(--panel);
+  text-align: start;
+  box-shadow: 0 1px 2px rgb(0 0 0 / .09);
+}
+
+.diagram-node-input { --node-accent: var(--accent-ink); }
+.diagram-node-output { --node-accent: var(--add); }
+.diagram-node-section { --node-accent: var(--ink-2); }
+.diagram-node-section[aria-expanded="true"] { background: var(--chrome); }
+.diagram-node-table { --node-accent: var(--k-Columns); }
+.diagram-node-branch, .diagram-node-merge { --node-accent: var(--warn); }
+button.diagram-node { cursor: pointer; }
+button.diagram-node:hover { border-color: var(--accent-ink); }
+.diagram-node[data-selected] { border-color: var(--accent-ink); background: var(--sel); }
+.diagram-node:focus-visible { outline: 2px solid var(--accent-ink); outline-offset: 3px; z-index: 1; }
+.diagram-node-content { position: absolute; inset: 7px 10px 5px 11px; display: block; overflow: hidden; }
+.diagram-node-title, .diagram-node-detail, .diagram-node-warning { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.diagram-node-title { font: 600 13px/17px var(--sans); }
+.diagram-node-detail, .diagram-node-warning { font: 11px/17px var(--sans); }
+.diagram-node-detail { color: var(--ink-2); }
+.diagram-node-warning { color: var(--warn); }
+.diagram-chevron { float: right; margin-inline-start: 8px; color: var(--ink-2); font-size: 13px; }
+.diagram-empty { margin: 32px 16px; text-align: center; color: var(--ink-2); }
+
+.diagram-footer { min-height: 31px; border-top: 1px solid var(--line); color: var(--ink-2); font-size: 11px; }
+.diagram-legend { display: flex; flex-wrap: wrap; gap: 2px 12px; list-style: none; margin: 0; padding: 0; }
+.diagram-legend li { display: flex; align-items: center; gap: 5px; }
+.diagram-legend i { width: 14px; border-top: 1.5px solid currentColor; }
+.diagram-legend .diagram-read-key { color: var(--accent-ink); border-top-style: dashed; }
+.diagram-legend .diagram-write-key { color: var(--add); border-top-style: dotted; }
+.diagram-warning-key { color: var(--warn); }

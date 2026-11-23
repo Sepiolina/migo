@@ -18,13 +18,14 @@ npm ci
 npm run desktop:dev
 ```
 
-`npm run dev` opens a browser preview that edits YAML only; opening folders,
-previews, runs and saving need the desktop app.
+`npm run dev` opens a browser preview where you can edit a template, explore its
+workflow diagram and download an SVG. Use the desktop app to open a project
+folder, preview workbook data, run a workflow or save YAML to the project.
 
 ## The home screen
 
 Choose **Open folder…** and select your project folder, for example a clone of
-this repository. Studio lists the workflows in its `workflows/` folder with the
+this repository. Studio lists the workflows in its `workflows/` folder and the examples directly under `examples/` with the
 route each one is served at, and offers templates:
 
 | Template | Sources → output |
@@ -45,11 +46,34 @@ at once.
 | --- | --- |
 | Toolbar | The workflow name, its status (valid, rows out, errors), Search (⌘K), Undo/Redo, appearance, panel switches, Save and Run |
 | Left: Workflow | The **Endpoint** (`/api/<route>`), **Sources**, **Steps** in order (nested steps of `if` and `split` indented, YAML comments shown as section notes) and **Outputs** |
-| Centre: the table | The data after the selected step, with a profile on each column: type, how full it is, distinct values or a histogram, blanks |
+| Centre | **Table** shows the data after the selected step and profiles each column. **Diagram** shows the workflow structure and named-table connections. |
 | Right: Inspector | Settings of the selected item, generated from the step registry |
 | Bottom: Console | **Problems**, **Run log** (lines the workflow logs) and **YAML**, the whole file, editable |
 
-On a phone-sized window the three areas become tabs: Steps, Table, Settings.
+In a wide window, drag either divider to resize a side panel. You can also
+Tab to a divider and move it with the left and right arrow keys. Home and End
+set the adjoining panel to its minimum or maximum width. Studio remembers
+your preferred widths when you reopen it.
+
+In a phone-sized window, switch between **Steps**, **Table**, **Diagram**, and **Settings**.
+Keyboard shortcut labels use Ctrl on Windows and Linux and ⌘ on macOS.
+
+### Explore and export a workflow diagram
+
+Choose **Diagram** beside **Table**, or use **Show workflow diagram** in Search.
+You can explore a workflow before binding any sample files. Start with the
+section overview and expand the part you want to inspect. Selecting a step
+also selects it in the navigator and inspector. Choose **Table** to inspect the
+same step's data when samples are available.
+
+Within the diagram, use the arrow keys to move between nodes. Enter or Space
+activates the focused step or section. **Fit to view** shows the whole graph.
+Zoom in to read individual steps and their connections.
+
+Use **Export SVG** to share the current overview or expanded diagram. The SVG
+opens offline and includes the whole diagram, even when the viewport shows
+only part of it. Changing the view and exporting leave the YAML and undo
+history intact.
 
 ### Build by working on the table
 
@@ -83,6 +107,50 @@ The eye icon on a step previews the workflow **without** that step. It is not
 saved; use Delete to remove a step. Move up/down, Duplicate and Delete are in
 the inspector.
 
+### Navigate a table preview
+
+In a table preview, click a cell and use the arrow keys to move. Hold Shift
+while pressing an arrow key to extend the selection. Copy with Ctrl+C
+(⌘C on macOS) to paste the selected rows and columns into a spreadsheet.
+In a step table, Shift+F10 opens the active column’s actions. Escape closes
+the menu and returns focus to the grid.
+For a **Fill blanks down** step, use the inspector’s column navigation to
+jump straight to a fill target. In the example BOM, choose `EffPartNumber`
+at step 15 to inspect the effective part numbers.
+
+To inspect a row in a sample file, select the file under **Sources**. Enter
+its one-based row number in **Worksheet row** and choose **Go to row**. For
+example, entering 90000 opens up to 200 rows starting at worksheet row 90,000.
+The left gutter shows the original row numbers, including the header row.
+Choose **First row** to return to the start of the sheet.
+
+### Compare a fill or filter
+
+With samples bound, select a top-level **Fill blanks down** or **Filter** step.
+Use **Before** and **After** to inspect the input and result. For a fill, choose
+**Affected columns** to narrow the table to the configured targets. A dashed
+underline identifies cells the step filled. In the BOM example, row 2 of
+`EffPartNumber` goes from blank to `TOPASSY-001`.
+
+For a filter, **Removed rows** shows rejected rows with their input row numbers.
+Counts cover the entire input. The viewport shows a bounded sample and reports
+how many rows are displayed. Skipped steps and nested steps retain their usual
+preview.
+
+### Set up or repair sample files
+
+From **Workflows**, use **Set up samples** beside a workflow. In the editor,
+the same action is available under **Sources**. Each input shows its saved
+workspace-relative path and the sheets Studio can read. Browse for the sample
+or enter its path. When a file has moved, use **Locate file** on that input.
+For a BOM workflow, the customer BOM and the priority workbook each have
+their own binding.
+
+Choose **Finish** when the inputs are ready. Studio applies the bindings
+together and previews the selected step. Closing setup without finishing
+preserves the previous bindings. Sample bindings are local to the workspace
+and workflow. Opening a folder and inspecting samples requires desktop Studio.
+
 ### Sources and outputs
 
 Select a source to see the raw sheet with column letters and row numbers, which
@@ -107,13 +175,42 @@ catalogue), the form clients send, and a `curl` example to copy.
 
 **Run** (⌘↵) runs the workflow on the sample files and writes the output under
 `.studio/runs/` in the folder, then shows it. Local runs are offline: SQL and
-REST steps are skipped, and the Problems tab says so.
+REST steps use their fallback values. **Preview details** explains this behavior.
 
 **Save** (⌘S) writes the file. A new workflow asks for a path; files in
 `workflows/` become endpoints. Saves check that the file did not change on disk
 since it was opened; a conflict keeps your edits so you can save them elsewhere.
 Switching workflows or closing the window asks before discarding unsaved
 changes.
+
+### Inspect the saved workbook
+
+After a successful XLSX run, **Workbook preview** opens the saved file. The filename and completion time appear above the sheet. Select a sheet tab, enter an address such as `J6` in **Cell address**, and press Enter. Use arrow keys to move and Page Up or Page Down to navigate a longer sheet. Hold Shift while moving to select a range within the loaded window and copy it to another spreadsheet. Use **Open workbook preview** in the command menu to return to the latest result for the open workflow.
+
+In the sample BOM, jump to `J6` to see the saved red fill, then to `O3` for a blue priority cell. Studio reads displayed values, fills, fonts, alignment, borders, column widths, and row heights from the output. A row can expand to fit its text. Cells using Excel's General alignment show text on the left, numbers and dates on the right, and logical values and errors in the center. When Studio encounters features it cannot fully display, such as frozen panes, expand **Preview limitations** to see what to check in Excel. CSV output opens in the data table.
+
+If the workflow or a sample changes, **Previous run** identifies the open artifact. Choose **Run to refresh** to generate a new one. If the workbook was saved but its preview fails, **Retry** reads the saved file again.
+
+### Run workflow regression tests
+
+Open the repository folder in Studio, choose **Customer order totals** with the path
+`examples/orders-totals.yaml`, then choose **Tests**. Run the suite to check its
+customer totals against the saved workbook and verify that a workbook missing
+the Orders sheet produces the expected error. The suite supplies its own inputs.
+
+For an edited workflow, **Test saved version** checks the file on disk and keeps
+your edits in the editor. **Save and run tests** saves the edits first. Each run
+reports the tested revision. Inspect a failure to find the first differing sheet
+and cell or CSV line and compare the expected and actual values. Studio leaves
+the expected files untouched. Choose **Cancel tests** to stop an active run.
+
+### Reopen an earlier run
+
+Open the workspace and choose **Runs**. Select a run by workflow and completion time, then choose **Open output** to inspect its saved XLSX or CSV. The same history is available after restarting Studio. In the editor, **Back to workflow** returns to the draft and step you were working on.
+
+To investigate why two results differ, compare the workflow YAML, each input's bound path, and its SHA-256 fingerprint. A file replaced at the same path can produce a different fingerprint. Studio flags an input that changed during execution and warns when the output on disk differs from the recorded output. A run created by an earlier version can still open if its output exists, even when its provenance is unavailable.
+
+**Run current workflow** executes the open editor draft with its current bindings and creates another history entry.
 
 ## Worked example: customer order totals
 
@@ -281,6 +378,11 @@ vulnerability audit. Avoid editing saved source or inputs during compilation.
 
 ## Recover from editing and preview problems
 
+- **Updating** means the displayed cells come from the previous preview while
+  Studio checks the current edit. A completed check updates the table and
+  diagnostics. If a current request fails, use its **Retry** action.
+- When a bound workbook changes in another application, return to Studio to
+  recheck its contents. The path can stay the same.
 - **The YAML has an error**: the table and forms keep the last valid version.
   Fix the file in the YAML tab of the console; the error is listed under
   Problems.

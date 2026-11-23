@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -93,5 +94,50 @@ func TestTrace(t *testing.T) {
 	tr, _ = bad.Trace(context.Background(), workflow.Runtime{}, in, workflow.TraceOptions{Focus: -1})
 	if len(tr) != 4 || !strings.Contains(tr[3].Error, "Nope") {
 		t.Errorf("error %+v", tr)
+	}
+}
+
+func TestFillAndFilterComparisons(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sample.csv")
+	if err := os.WriteFile(path, []byte("ID;Qty;Note\n0;1;\n1;0;alpha\n1;0;alpha\n2;2;\n3;2;\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	source := strings.Replace(csvFlow, "  - filter: Qty > 0", "  - fill: [Note]\n  - filter: Qty > 0", 1)
+	wf, err := workflow.Parse([]byte(source))
+	if err != nil {
+		t.Fatal(err)
+	}
+	trace := func(opt workflow.TraceOptions) []workflow.StepTrace {
+		t.Helper()
+		steps, err := wf.Trace(context.Background(), workflow.Runtime{}, map[string]string{"orders": path}, opt)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return steps
+	}
+	plain := trace(workflow.TraceOptions{Focus: 2, Limit: 5})
+	fill := trace(workflow.TraceOptions{Focus: 2, Limit: 5, Compare: true})
+	c := fill[2].Comparison
+	if c == nil || c.ChangedCells != 2 || c.ChangedRows != 2 || c.Before[3][2] != "" || len(c.Changed[0]) != 0 || c.Changed[3][0] != 2 || fill[2].Rows[3][2] != "alpha" {
+		t.Fatalf("fill comparison: %+v", c)
+	}
+	if plain[2].Comparison != nil || fill[3].Comparison != nil || !reflect.DeepEqual(plain[2].Rows, fill[2].Rows) {
+		t.Fatal("comparison changed ordinary trace")
+	}
+	if trace(workflow.TraceOptions{Focus: 2, Skip: []int{2}, Compare: true})[2].Comparison != nil {
+		t.Fatal("compared skipped step")
+	}
+	filter := trace(workflow.TraceOptions{Focus: 3, Limit: 2, Compare: true})[3]
+	c = filter.Comparison
+	if c.Input != 5 || filter.Total != 3 || !reflect.DeepEqual(c.RemovedPositions, []int{2, 3}) || !reflect.DeepEqual(c.KeptPositions, []int{1, 4}) || !reflect.DeepEqual(c.Removed[0], c.Removed[1]) {
+		t.Fatalf("filter comparison: %+v", c)
+	}
+	if err := os.WriteFile(path, []byte("ID;Qty;Note\n1;0;"+strings.Repeat("a", 100000)+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	filter = trace(workflow.TraceOptions{Focus: 3, Compare: true})[3]
+	c = filter.Comparison
+	if c.Input != 1 || filter.Total != 0 || len(c.Removed) != 0 || len(c.Before) != 0 {
+		t.Fatalf("oversize all-removed comparison: %+v", c)
 	}
 }

@@ -1,0 +1,100 @@
+.workflow-tests {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  min-width: 0;
+  background: var(--panel);
+}
+
+.workflow-tests-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--chrome);
+}
+
+.workflow-tests h1,
+.workflow-tests h2 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.workflow-tests-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.workflow-tests-toolbar .workflow-tests-actions { margin-inline-start: auto; }
+
+.workflow-tests-body {
+  padding: 4px 20px 18px;
+  overflow: auto;
+}
+
+.workflow-tests-choice {
+  margin: 12px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--well);
+}
+
+.workflow-tests-choice p { margin: 0 0 8px; }
+
+.workflow-tests-suite {
+  margin: 12px 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.workflow-tests-suite header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 12px;
+  background: var(--chrome);
+  overflow-wrap: anywhere;
+}
+
+.workflow-tests-suite ul { list-style: none; margin: 0; padding: 0; }
+.workflow-tests-suite > p { margin: 10px 12px; }
+
+.workflow-tests-case {
+  padding: 8px 12px;
+  border-top: 1px solid var(--line-soft);
+}
+
+.workflow-tests-case-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  overflow-wrap: anywhere;
+}
+
+.workflow-tests-outcome { border-radius: 4px; padding: 0 5px; }
+.workflow-tests-outcome.passed { background: var(--add-tint); color: var(--add); }
+.workflow-tests-outcome.failed { background: var(--del-tint); color: var(--del); }
+
+.workflow-tests-fields {
+  display: grid;
+  grid-template-columns: minmax(100px, max-content) minmax(0, 1fr);
+  gap: 3px 12px;
+  margin: 6px 0;
+}
+
+.workflow-tests-fields dt { color: var(--ink-2); }
+.workflow-tests-fields dd { margin: 0; overflow-wrap: anywhere; }
+.workflow-tests-fields code { white-space: pre-wrap; }
+.workflow-tests-error { color: var(--del); overflow-wrap: anywhere; }
+
+.workflow-tests-diagnostics { margin: 12px 0; }
+.workflow-tests-diagnostics ul { margin: 6px 0 0; padding-inline-start: 20px; overflow-wrap: anywhere; }
+.workflow-tests-diagnostics li p { margin: 2px 0 6px; }

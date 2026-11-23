@@ -125,8 +125,8 @@ builds the separate Linux service deployment ZIP.
 
 Choose **Open folder…** and the repository folder, then a workflow or a template.
 Templates bind their sources to files in `examples/`. Artifacts are stored under
-`.studio/runs/`. Previews show cell values; styles and formulas are in the
-generated file itself.
+`.studio/runs/`. Step previews show intermediate values. The XLSX output
+viewer reads values and supported styles from the saved workbook.
 
 ## Runner protocol
 
@@ -143,6 +143,16 @@ Failures contain `ok: false` and an `error` with `code` and `message`. `validate
 `trace` and `run` take `params.yaml`; `trace` and `run` also take named relative
 paths in `params.inputs`, and `trace` takes `step` (the step whose rows to
 return), `skip` and `limit`. `inspectWorkbook` accepts `sheet`, `offset`, and `limit`.
+`inspectWorkbookPage` reads formatted XLSX cells in a rectangle. It accepts
+zero-based `offset` and `columnOffset` plus `limit` and `columnLimit`. The response
+includes sheet names, physical extents, formatted text, a grid of style IDs, a
+style dictionary, column widths in Excel units, saved row heights in points when
+present, and detected rendering limitations. Optional `generalAlignment` has a
+string per page row. Within each string, `r` means right-aligned, `c` means
+centered, and `.` or an omitted trailing position uses the cell style or the
+default left alignment.
+Studio passes `omitPreview: true` to `run` and reads the saved file through a separate
+preview request. The runner's default response still includes its inline preview.
 The native bridge replaces the workspace path with the folder approved by the
 native picker. The standalone runner is a local developer utility, not a remotely
 accessible authorization service.
@@ -162,6 +172,29 @@ Workbook inputs and inspection targets must resolve inside the approved
 workspace. Runs write artifacts under `.studio/runs/`; use fixtures and exclude
 those outputs from commits. Source saves and offline execution are independent:
 a run executes editor YAML, including unsaved edits.
+
+### Run manifests and listing
+
+A successful `run` publishes its output and a version 1 `manifest.json` together under `.studio/runs/run-*/`. The runner writes both into a hidden staging directory, closes the files, then renames the directory. The result includes `runId`, the workspace-relative output path, and its SHA-256.
+
+The manifest records the completion timestamp, workflow name and optional workspace-relative `workflowPath`, SHA-256 of the executed YAML, input binding names and paths, and input and output SHA-256 digests. The executed YAML may contain unsaved edits. Inputs are checked before and after execution. An observed change sets the input's `changed` flag and the manifest's `uncertain` flag. The recorded input digest describes the pre-run file.
+
+`listRuns` takes an offset and optional limit in the selected workspace. It returns `runs` and, when more entries are available, `nextOffset`. Entries carry an ID, timestamp, output path, availability and, when valid, a manifest. Existing runs without a usable manifest can still point to their original output. The history listing excludes staging directories.
+
+For the restart, comparison, and draft-preservation browser check, build Studio and run `node scripts/smoke-history.mjs` from `apps/studio`.
+
+### Workflow regression suites
+
+The editor's Tests panel discovers `*.test.yaml` suites that reference its saved
+workflow. `discoverTests` and `runTests` take `workflowPath` in the selected
+workspace. Pass `path` to select one suite or omit it to test all matching
+suites. The returned `revision` is the SHA-256 of the YAML on disk.
+`runTests` accepts a revision from a successful save and checks it before
+executing. Cases use the same offline test engine as `migo test`.
+
+Build Studio and run `node scripts/smoke-tests.mjs` from `apps/studio` to
+exercise the orders tutorial with the real runner and compare its first
+mismatch with the CLI. The smoke check works on a temporary copy of the project.
 
 ## Native troubleshooting
 
