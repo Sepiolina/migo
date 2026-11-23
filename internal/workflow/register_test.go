@@ -12,6 +12,14 @@ import (
 )
 
 func init() {
+	workflow.DescribeStep(workflow.StepInfo{
+		Op: "upper_test", Category: "Columns", Icon: "A", Title: "Upper-case columns",
+		Heading: "Upper-case", Description: "Upper-case text in columns.",
+		Help: "Column titles separated by commas.",
+		Form: "map", List: new(string),
+		Fields:  []workflow.FieldInfo{{Kind: "list", Name: "COLUMNS"}},
+		Example: "[Column]",
+	})
 	workflow.RegisterTableStep("upper_test", func(arg *yaml.Node) (workflow.TableFunc, error) {
 		var cols []string
 		if err := arg.Decode(&cols); err != nil || len(cols) == 0 {

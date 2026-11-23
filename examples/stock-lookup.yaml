@@ -1,0 +1,21 @@
+# Enrich a parts list from an HTTP API: one request per 50 part numbers.
+# The API is mocked in examples/tests/stock-lookup.mocks.yaml, so this runs
+# with no network:
+#   go run ./cmd/migo run -in parts=examples/parts.xlsx -mocks examples/tests/stock-lookup.mocks.yaml -out stock.xlsx examples/stock-lookup.yaml
+name: Stock lookup
+input:
+  parts: {label: Parts list}
+steps:
+  - from: {input: parts, sheet: Parts, trim: true}
+  - rest:
+      url: '{config("stock_url")}/stock'
+      method: POST
+      each: 'map(rows, #["Part Number"])'
+      batch: '50'
+      body: '{codes: batch}'
+      rows: response.items
+      save: stock
+  - join: {with: stock, on: [Part Number], right_on: [code], take: {In stock: qty}}
+  - save: result
+output:
+  sheets: {Parts: result}

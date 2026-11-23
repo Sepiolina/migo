@@ -1,0 +1,1704 @@
+{
+  "steps": [
+    {
+      "op": "from",
+      "type": "mai_from",
+      "category": "Data",
+      "icon": "↳",
+      "title": "Read data",
+      "heading": "Read",
+      "description": "Start with an input workbook or a saved table.",
+      "help": "Starts the table from a source or a table saved earlier. Leave the sheet blank for the first sheet; a number counts from 1. A CSV file has one sheet, Sheet1.",
+      "form": "map",
+      "fields": [
+        {
+          "kind": "text",
+          "key": "input",
+          "name": "SOURCE",
+          "label": "source"
+        },
+        {
+          "kind": "enum",
+          "key": "",
+          "name": "SHEET_KIND",
+          "label": "sheet",
+          "virtual": true,
+          "options": [
+            [
+              "name / first",
+              "name"
+            ],
+            [
+              "number",
+              "number"
+            ]
+          ],
+          "fallback": "name"
+        },
+        {
+          "kind": "text",
+          "key": "sheet",
+          "name": "SHEET",
+          "label": "",
+          "optional": true
+        },
+        {
+          "kind": "number",
+          "key": "start",
+          "name": "START",
+          "label": "first data row",
+          "optional": true,
+          "advanced": true,
+          "integer": true,
+          "min": 1
+        },
+        {
+          "kind": "bool",
+          "key": "trim",
+          "name": "TRIM",
+          "label": "trim cells",
+          "optional": true,
+          "advanced": true
+        },
+        {
+          "kind": "bool",
+          "key": "skip_blank",
+          "name": "SKIP_BLANK",
+          "label": "skip blank rows",
+          "optional": true,
+          "advanced": true
+        },
+        {
+          "kind": "text",
+          "key": "row_number",
+          "name": "ROW_NUMBER",
+          "label": "row number column",
+          "optional": true,
+          "advanced": true
+        },
+        {
+          "kind": "template",
+          "key": "empty",
+          "name": "EMPTY",
+          "label": "fail if empty",
+          "optional": true,
+          "advanced": true
+        },
+        {
+          "kind": "entries",
+          "key": "columns",
+          "name": "COLUMNS",
+          "label": "fixed columns",
+          "optional": true,
+          "advanced": true,
+          "item": "mai_position"
+        },
+        {
+          "kind": "number",
+          "key": "header.search",
+          "name": "HEADER.SEARCH",
+          "label": "find header in first",
+          "optional": true,
+          "advanced": true,
+          "integer": true,
+          "min": 1
+        },
+        {
+          "kind": "number",
+          "key": "header.min",
+          "name": "HEADER.MIN",
+          "label": "with at least",
+          "optional": true,
+          "advanced": true,
+          "integer": true,
+          "min": 1
+        },
+        {
+          "kind": "entries",
+          "key": "header.columns",
+          "name": "HEADER_COLUMNS",
+          "label": "header titles",
+          "optional": true,
+          "advanced": true,
+          "item": "mai_alias"
+        },
+        {
+          "kind": "entries",
+          "key": "header.fallback",
+          "name": "HEADER_FALLBACK",
+          "label": "fallback positions",
+          "optional": true,
+          "advanced": true,
+          "item": "mai_position"
+        }
+      ],
+      "example": "{input: input}"
+    },
+    {
+      "op": "save",
+      "type": "mai_save",
+      "category": "Data",
+      "icon": "▣",
+      "title": "Save table",
+      "heading": "Save dataset as",
+      "description": "Keep a copy of the current table for later steps or output sheets.",
+      "help": "Keeps a copy of the current table under this name, for lookups and output sheets. It cannot share a name with a source.",
+      "form": "map",
+      "scalar": "",
+      "fields": [
+        {
+          "kind": "text",
+          "key": "",
+          "name": "NAME",
+          "label": ""
+        }
+      ],
+      "example": "result"
+    },
+    {
+      "op": "append",
+      "type": "mai_append",
+      "category": "Data",
+      "icon": "+",
+      "title": "Append tables",
+      "heading": "Append datasets",
+      "description": "Add the rows of saved tables; columns are matched by name.",
+      "help": "Saved dataset names separated by commas. Their rows are added below the current table.",
+      "form": "map",
+      "list": "",
+      "fields": [
+        {
+          "kind": "list",
+          "key": "",
+          "name": "DATASETS",
+          "label": ""
+        }
+      ],
+      "example": "[other]"
+    },
+    {
+      "op": "join",
+      "type": "mai_join",
+      "category": "Data",
+      "icon": "⋈",
+      "title": "Join tables",
+      "heading": "Join dataset",
+      "description": "Add columns from a saved table by matching keys.",
+      "help": "Adds columns from a table saved earlier where the key columns match. Take chooses and names the added columns; rows without a match get blanks.",
+      "form": "map",
+      "fields": [
+        {
+          "kind": "text",
+          "key": "with",
+          "name": "WITH",
+          "label": ""
+        },
+        {
+          "kind": "list",
+          "key": "on",
+          "name": "ON",
+          "label": "on columns"
+        },
+        {
+          "kind": "enum",
+          "key": "how",
+          "name": "HOW",
+          "label": "",
+          "options": [
+            [
+              "keep all rows",
+              "left"
+            ],
+            [
+              "matching rows only",
+              "inner"
+            ]
+          ],
+          "fallback": "left"
+        },
+        {
+          "kind": "list",
+          "key": "right_on",
+          "name": "RIGHT_ON",
+          "label": "matching their",
+          "optional": true,
+          "advanced": true
+        },
+        {
+          "kind": "bool",
+          "key": "normalize",
+          "name": "NORMALIZE",
+          "label": "ignore case and spaces",
+          "optional": true,
+          "advanced": true
+        },
+        {
+          "kind": "text",
+          "key": "suffix",
+          "name": "SUFFIX",
+          "label": "suffix for clashes",
+          "optional": true,
+          "advanced": true
+        },
+        {
+          "kind": "entries",
+          "key": "take",
+          "name": "TAKE",
+          "label": "take",
+          "optional": true,
+          "advanced": true,
+          "item": "mai_pair"
+        }
+      ],
+      "example": "{with: other, on: [Key]}"
+    },
+    {
+      "op": "filter",
+      "type": "mai_filter",
+      "category": "Rows",
+      "icon": "◇",
+      "title": "Filter rows",
+      "heading": "Keep rows where",
+      "description": "Keep rows that match a condition.",
+      "help": "Keeps the rows where the condition is true, for example Quantity > 0 or Status != \"Cancelled\".",
+      "form": "map",
+      "scalar": "",
+      "fields": [
+        {
+          "kind": "expr",
+          "key": "",
+          "name": "VALUE",
+          "label": "",
+          "scope": "row",
+          "condition": true
+        }
+      ],
+      "example": "\"true\""
+    },
+    {
+      "op": "sort",
+      "type": "mai_sort",
+      "category": "Rows",
+      "icon": "⇅",
+      "title": "Sort rows",
+      "heading": "Sort by",
+      "description": "Order rows by columns (stable).",
+      "help": "Separate column titles with commas. Choose numeric sorting for quantities and prices.",
+      "form": "map",
+      "fields": [
+        {
+          "kind": "list",
+          "key": "by",
+          "name": "COLUMNS",
+          "label": ""
+        },
+        {
+          "kind": "enum",
+          "key": "desc",
+          "name": "DIRECTION",
+          "label": "",
+          "options": [
+            [
+              "ascending",
+              "false"
+            ],
+            [
+              "descending",
+              "true"
+            ]
+          ],
+          "fallback": "false",
+          "boolean": true
+        },
+        {
+          "kind": "enum",
+          "key": "numeric",
+          "name": "NUMERIC",
+          "label": "",
+          "options": [
+            [
+              "as text",
+              "false"
+            ],
+            [
+              "as numbers",
+              "true"
+            ]
+          ],
+          "fallback": "false",
+          "boolean": true
+        }
+      ],
+      "example": "{by: [Column]}"
+    },
+    {
+      "op": "dedupe",
+      "type": "mai_dedupe",
+      "category": "Rows",
+      "icon": "≠",
+      "title": "Remove duplicates",
+      "heading": "Remove duplicates by",
+      "description": "Keep one row per key.",
+      "help": "Keep one row for each unique combination of these column titles, separated by commas.",
+      "form": "map",
+      "list": "by",
+      "fields": [
+        {
+          "kind": "list",
+          "key": "by",
+          "name": "BY",
+          "label": ""
+        },
+        {
+          "kind": "enum",
+          "key": "keep",
+          "name": "KEEP",
+          "label": "keep",
+          "options": [
+            [
+              "first",
+              "first"
+            ],
+            [
+              "last",
+              "last"
+            ]
+          ],
+          "fallback": "first"
+        },
+        {
+          "kind": "bool",
+          "key": "normalize",
+          "name": "NORMALIZE",
+          "label": "ignore case and spaces",
+          "optional": true,
+          "advanced": true
+        }
+      ],
+      "example": "[Column]"
+    },
+    {
+      "op": "stack",
+      "type": "mai_stack",
+      "category": "Rows",
+      "icon": "⇵",
+      "title": "Stack columns",
+      "heading": "Stack columns",
+      "description": "One row per listed column, its value in a new column.",
+      "help": "Each row is repeated once per listed column, with that column's value in the new column.",
+      "form": "map",
+      "fields": [
+        {
+          "kind": "list",
+          "key": "columns",
+          "name": "COLUMNS",
+          "label": ""
+        },
+        {
+          "kind": "text",
+          "key": "into",
+          "name": "INTO",
+          "label": "into"
+        }
+      ],
+      "example": "{columns: [A, B], into: Value}"
+    },
+    {
+      "op": "compare",
+      "type": "mai_compare_tables",
+      "category": "Rows",
+      "icon": "⇄",
+      "title": "Compare tables",
+      "heading": "Compare with",
+      "description": "Mark rows added, removed, changed or unchanged against a saved table.",
+      "help": "Compares the current table with a saved baseline by key columns and writes a status column.",
+      "form": "map",
+      "fields": [
+        {
+          "kind": "text",
+          "key": "with",
+          "name": "WITH",
+          "label": ""
+        },
+        {
+          "kind": "list",
+          "key": "by",
+          "name": "BY",
+          "label": "by keys"
+        },
+        {
+          "kind": "list",
+          "key": "columns",
+          "name": "COLUMNS",
+          "label": "compare columns",
+          "optional": true
+        },
+        {
+          "kind": "text",
+          "key": "status",
+          "name": "STATUS",
+          "label": "status column",
+          "optional": true
+        },
+        {
+          "kind": "bool",
+          "key": "normalize",
+          "name": "NORMALIZE",
+          "label": "ignore case and spaces",
+          "optional": true,
+          "advanced": true
+        }
+      ],
+      "example": "{with: baseline, by: [Key]}"
+    },
+    {
+      "op": "set",
+      "type": "mai_set",
+      "category": "Columns",
+      "icon": "ƒ",
+      "title": "Calculate columns",
+      "heading": "Set columns",
+      "description": "Create or update columns with expressions, in order.",
+      "help": "Creates or replaces columns, in order, so later ones can use earlier ones. prev(\"Col\") reads the row above.",
+      "form": "entries",
+      "fields": [
+        {
+          "kind": "entries",
+          "key": "",
+          "name": "ENTRIES",
+          "label": "",
+          "item": "mai_assign"
+        }
+      ],
+      "example": "{Column: \"\\\"\\\"\"}"
+    },
+    {
+      "op": "select",
+      "type": "mai_select",
+      "category": "Columns",
+      "icon": "☷",
+      "title": "Select columns",
+      "heading": "Keep columns",
+      "description": "Choose, rename and order columns.",
+      "help": "Keep only these columns, in this order. The left name is the output, the right name the source column.",
+      "form": "entries",
+      "fields": [
+        {
+          "kind": "entries",
+          "key": "",
+          "name": "ENTRIES",
+          "label": "",
+          "item": "mai_pair"
+        }
+      ],
+      "example": "{Column: Column}"
+    },
+    {
+      "op": "rename",
+      "type": "mai_rename",
+      "category": "Columns",
+      "icon": "✎",
+      "title": "Rename columns",
+      "heading": "Rename columns",
+      "description": "Give columns new names.",
+      "help": "Enter the exact current column title, then its new title.",
+      "form": "entries",
+      "fields": [
+        {
+          "kind": "entries",
+          "key": "",
+          "name": "ENTRIES",
+          "label": "",
+          "item": "mai_rename_pair"
+        }
+      ],
+      "example": "{Old: New}"
+    },
+    {
+      "op": "fill",
+      "type": "mai_fill",
+      "category": "Columns",
+      "icon": "↓",
+      "title": "Fill blanks down",
+      "heading": "Fill blanks from above in",
+      "description": "Fill blank cells from the row above.",
+      "help": "Column titles separated by commas. A blank cell takes the last non-blank value above it.",
+      "form": "map",
+      "list": "",
+      "fields": [
+        {
+          "kind": "list",
+          "key": "",
+          "name": "COLUMNS",
+          "label": ""
+        }
+      ],
+      "example": "[Column]"
+    },
+    {
+      "op": "drop",
+      "type": "mai_drop",
+      "category": "Columns",
+      "icon": "−",
+      "title": "Remove columns",
+      "heading": "Remove columns",
+      "description": "Remove columns from the table.",
+      "help": "Column titles separated by commas. Later steps no longer see them.",
+      "form": "map",
+      "list": "",
+      "fields": [
+        {
+          "kind": "list",
+          "key": "",
+          "name": "COLUMNS",
+          "label": ""
+        }
+      ],
+      "example": "[Column]"
+    },
+    {
+      "op": "group",
+      "type": "mai_group",
+      "category": "Groups",
+      "icon": "⊞",
+      "title": "Group rows",
+      "heading": "Group by",
+      "description": "Summarize rows by key: one row per group.",
+      "help": "Separate column titles with commas. Leave Group by empty to total the whole table. Add one summary per aggregate.",
+      "form": "map",
+      "fields": [
+        {
+          "kind": "list",
+          "key": "by",
+          "name": "BY",
+          "label": "",
+          "optional": true
+        },
+        {
+          "kind": "entries",
+          "key": "",
+          "name": "AGGREGATES",
+          "label": "summaries",
+          "item": "mai_aggregate",
+          "rest": true
+        }
+      ],
+      "example": "{by: [Key], sum: [Quantity]}"
+    },
+    {
+      "op": "window",
+      "type": "mai_window",
+      "category": "Groups",
+      "icon": "▤",
+      "title": "Calculate by group",
+      "heading": "For each group of",
+      "description": "Compute columns per group, keeping every row.",
+      "help": "Expressions see group (the group's rows), index (position in group) and size. Leave by empty for one group.",
+      "form": "map",
+      "fields": [
+        {
+          "kind": "list",
+          "key": "by",
+          "name": "BY",
+          "label": "",
+          "optional": true
+        },
+        {
+          "kind": "expr",
+          "key": "where",
+          "name": "WHERE",
+          "label": "only rows where",
+          "optional": true,
+          "scope": "row",
+          "condition": true
+        },
+        {
+          "kind": "entries",
+          "key": "set",
+          "name": "SET",
+          "label": "set",
+          "item": "mai_assign"
+        }
+      ],
+      "example": "{by: [Key], set: {Column: '\"\"'}}"
+    },
+    {
+      "op": "pick",
+      "type": "mai_pick",
+      "category": "Groups",
+      "icon": "✓",
+      "title": "Pick rows",
+      "heading": "Pick one row per",
+      "description": "Choose one row per group with ordered rules.",
+      "help": "Rules run in order; the first rule with candidate rows chooses. The chosen row is marked true and gets the rule's reason.",
+      "form": "map",
+      "fields": [
+        {
+          "kind": "list",
+          "key": "by",
+          "name": "BY",
+          "label": "",
+          "optional": true
+        },
+        {
+          "kind": "expr",
+          "key": "where",
+          "name": "WHERE",
+          "label": "taking part",
+          "optional": true,
+          "scope": "row",
+          "condition": true
+        },
+        {
+          "kind": "text",
+          "key": "mark",
+          "name": "MARK",
+          "label": "mark column"
+        },
+        {
+          "kind": "text",
+          "key": "reason",
+          "name": "REASON",
+          "label": "reason column",
+          "optional": true
+        },
+        {
+          "kind": "items",
+          "key": "rules",
+          "name": "RULES",
+          "label": "rules",
+          "item": "mai_pick_rule"
+        }
+      ],
+      "example": "{by: [Key], mark: Chosen, rules: [{rows: 'true'}]}"
+    },
+    {
+      "op": "if",
+      "type": "mai_if",
+      "category": "Control",
+      "icon": "⑂",
+      "title": "If / else",
+      "heading": "If",
+      "description": "Run steps only when a table condition holds.",
+      "help": "A table expression: it sees rows, table(\"name\"), sheets(\"input\") and config(\"key\").",
+      "form": "inline",
+      "fields": [
+        {
+          "kind": "expr",
+          "key": "if",
+          "name": "CONDITION",
+          "label": "",
+          "scope": "table",
+          "condition": true
+        },
+        {
+          "kind": "steps",
+          "key": "then",
+          "name": "THEN",
+          "label": "then"
+        },
+        {
+          "kind": "steps",
+          "key": "else",
+          "name": "ELSE",
+          "label": "else",
+          "optional": true
+        }
+      ],
+      "example": ""
+    },
+    {
+      "op": "split",
+      "type": "mai_split",
+      "category": "Control",
+      "icon": "⫘",
+      "title": "Split rows",
+      "heading": "Split rows where",
+      "description": "Route matching rows and the others through different steps.",
+      "help": "Matching rows run through then, the others through else; the results are appended (then first).",
+      "form": "map",
+      "fields": [
+        {
+          "kind": "expr",
+          "key": "where",
+          "name": "WHERE",
+          "label": "",
+          "scope": "row",
+          "condition": true
+        },
+        {
+          "kind": "steps",
+          "key": "then",
+          "name": "THEN",
+          "label": "then",
+          "optional": true
+        },
+        {
+          "kind": "steps",
+          "key": "else",
+          "name": "ELSE",
+          "label": "else",
+          "optional": true
+        }
+      ],
+      "example": "{where: 'true', then: [], else: []}"
+    },
+    {
+      "op": "log",
+      "type": "mai_log",
+      "category": "Control",
+      "icon": "☰",
+      "title": "Log message",
+      "heading": "Log",
+      "description": "Write a message to the run log.",
+      "help": "Text with {expression} parts, e.g. Loaded {len(rows)} rows. Add a condition to log only sometimes.",
+      "form": "map",
+      "scalar": "message",
+      "fields": [
+        {
+          "kind": "template",
+          "key": "message",
+          "name": "MESSAGE",
+          "label": ""
+        },
+        {
+          "kind": "expr",
+          "key": "when",
+          "name": "WHEN",
+          "label": "when",
+          "optional": true,
+          "scope": "table",
+          "condition": true
+        }
+      ],
+      "example": "\"Loaded {len(rows)} rows.\""
+    },
+    {
+      "op": "fail",
+      "type": "mai_fail",
+      "category": "Control",
+      "icon": "!",
+      "title": "Stop with error",
+      "heading": "Stop with error",
+      "description": "Stop the run; the message becomes the API error.",
+      "help": "Text with {expression} parts. With a condition, the run stops only when it is true.",
+      "form": "map",
+      "scalar": "message",
+      "fields": [
+        {
+          "kind": "template",
+          "key": "message",
+          "name": "MESSAGE",
+          "label": ""
+        },
+        {
+          "kind": "expr",
+          "key": "when",
+          "name": "WHEN",
+          "label": "when",
+          "optional": true,
+          "scope": "table",
+          "condition": true
+        }
+      ],
+      "example": "{when: 'len(rows) == 0', message: The file is empty.}"
+    },
+    {
+      "op": "sql",
+      "type": "mai_sql",
+      "category": "Services",
+      "icon": "⌘",
+      "title": "SQL query",
+      "heading": "SQL query",
+      "description": "Query a configured database and save the result.",
+      "help": "Parameters are table expressions; a list expands to @p1, @p2… The current table is unchanged.",
+      "form": "map",
+      "fields": [
+        {
+          "kind": "text",
+          "key": "query",
+          "name": "QUERY",
+          "label": "",
+          "multiline": true
+        },
+        {
+          "kind": "text",
+          "key": "save",
+          "name": "SAVE",
+          "label": "save as"
+        },
+        {
+          "kind": "entries",
+          "key": "params",
+          "name": "PARAMS",
+          "label": "parameters",
+          "optional": true,
+          "item": "mai_param"
+        },
+        {
+          "kind": "list",
+          "key": "columns",
+          "name": "COLUMNS",
+          "label": "columns",
+          "optional": true
+        },
+        {
+          "kind": "text",
+          "key": "connection",
+          "name": "CONNECTION",
+          "label": "connection",
+          "optional": true,
+          "advanced": true
+        },
+        {
+          "kind": "number",
+          "key": "batch",
+          "name": "BATCH",
+          "label": "values per query",
+          "optional": true,
+          "advanced": true,
+          "integer": true,
+          "min": 1
+        },
+        {
+          "kind": "template",
+          "key": "on_error",
+          "name": "ON_ERROR",
+          "label": "on error, log",
+          "optional": true,
+          "advanced": true
+        }
+      ],
+      "example": "{query: SELECT 1 AS One, save: result}",
+      "service": true
+    },
+    {
+      "op": "rest",
+      "type": "mai_rest",
+      "category": "Services",
+      "icon": "↗",
+      "title": "REST request",
+      "heading": "REST",
+      "description": "Call an HTTP API in batches and save the returned rows.",
+      "help": "url, headers and on_error are text with {expression} parts. body sees batch and batch_number.",
+      "form": "map",
+      "fields": [
+        {
+          "kind": "enum",
+          "key": "method",
+          "name": "METHOD",
+          "label": "",
+          "options": [
+            [
+              "GET",
+              "GET"
+            ],
+            [
+              "POST",
+              "POST"
+            ],
+            [
+              "PUT",
+              "PUT"
+            ],
+            [
+              "PATCH",
+              "PATCH"
+            ],
+            [
+              "DELETE",
+              "DELETE"
+            ]
+          ],
+          "fallback": "GET"
+        },
+        {
+          "kind": "template",
+          "key": "url",
+          "name": "URL",
+          "label": "url"
+        },
+        {
+          "kind": "text",
+          "key": "save",
+          "name": "SAVE",
+          "label": "save as"
+        },
+        {
+          "kind": "expr",
+          "key": "each",
+          "name": "EACH",
+          "label": "for each value of",
+          "optional": true,
+          "scope": "table"
+        },
+        {
+          "kind": "expr",
+          "key": "batch",
+          "name": "BATCH",
+          "label": "batch size",
+          "optional": true,
+          "scope": "table"
+        },
+        {
+          "kind": "expr",
+          "key": "body",
+          "name": "BODY",
+          "label": "body",
+          "optional": true,
+          "scope": "table"
+        },
+        {
+          "kind": "expr",
+          "key": "rows",
+          "name": "ROWS",
+          "label": "rows from response",
+          "optional": true,
+          "scope": "table"
+        },
+        {
+          "kind": "list",
+          "key": "columns",
+          "name": "COLUMNS",
+          "label": "columns",
+          "optional": true
+        },
+        {
+          "kind": "entries",
+          "key": "headers",
+          "name": "HEADERS",
+          "label": "headers",
+          "optional": true,
+          "advanced": true,
+          "item": "mai_header"
+        },
+        {
+          "kind": "expr",
+          "key": "retries",
+          "name": "RETRIES",
+          "label": "retries",
+          "optional": true,
+          "advanced": true,
+          "scope": "table"
+        },
+        {
+          "kind": "enum",
+          "key": "keys",
+          "name": "KEYS",
+          "label": "key case",
+          "advanced": true,
+          "options": [
+            [
+              "as sent",
+              ""
+            ],
+            [
+              "lower",
+              "lower"
+            ],
+            [
+              "upper",
+              "upper"
+            ]
+          ]
+        },
+        {
+          "kind": "template",
+          "key": "on_error",
+          "name": "ON_ERROR",
+          "label": "on error, log",
+          "optional": true,
+          "advanced": true
+        }
+      ],
+      "example": "{url: 'http://localhost/api', save: result}",
+      "service": true
+    }
+  ],
+  "items": [
+    {
+      "type": "mai_assign",
+      "category": "Columns",
+      "shape": "entry",
+      "check": "MaiAssign",
+      "title": "Column calculation",
+      "heading": "",
+      "help": "Create or replace this column. Columns are calculated in order, so later ones can use earlier ones.",
+      "entryKey": {
+        "kind": "text",
+        "key": "",
+        "name": "COLUMN",
+        "label": "column"
+      },
+      "entryValue": {
+        "kind": "expr",
+        "key": "",
+        "name": "VALUE",
+        "label": "=",
+        "scope": "row"
+      }
+    },
+    {
+      "type": "mai_pair",
+      "category": "Columns",
+      "shape": "entry",
+      "check": "MaiPair",
+      "title": "Column mapping",
+      "heading": "",
+      "help": "Map one name to another: the left name is written, the right name is read.",
+      "entryKey": {
+        "kind": "text",
+        "key": "",
+        "name": "FROM",
+        "label": ""
+      },
+      "entryValue": {
+        "kind": "text",
+        "key": "",
+        "name": "TO",
+        "label": "←"
+      }
+    },
+    {
+      "type": "mai_rename_pair",
+      "category": "Columns",
+      "shape": "entry",
+      "check": "MaiRenamePair",
+      "title": "Rename",
+      "heading": "",
+      "help": "Enter the exact current column title and its new title.",
+      "entryKey": {
+        "kind": "text",
+        "key": "",
+        "name": "FROM",
+        "label": "column"
+      },
+      "entryValue": {
+        "kind": "text",
+        "key": "",
+        "name": "TO",
+        "label": "to"
+      }
+    },
+    {
+      "type": "mai_param",
+      "category": "Services",
+      "shape": "entry",
+      "check": "MaiParam",
+      "title": "Query parameter",
+      "heading": "",
+      "help": "A query parameter (@name). The table expression sees rows; a list expands to several values.",
+      "entryKey": {
+        "kind": "text",
+        "key": "",
+        "name": "NAME",
+        "label": "@"
+      },
+      "entryValue": {
+        "kind": "expr",
+        "key": "",
+        "name": "VALUE",
+        "label": "=",
+        "scope": "table"
+      }
+    },
+    {
+      "type": "mai_header",
+      "category": "Services",
+      "shape": "entry",
+      "check": "MaiHeader",
+      "title": "HTTP header",
+      "heading": "",
+      "help": "An HTTP header. The value is text with {expression} parts.",
+      "entryKey": {
+        "kind": "text",
+        "key": "",
+        "name": "NAME",
+        "label": "header"
+      },
+      "entryValue": {
+        "kind": "template",
+        "key": "",
+        "name": "VALUE",
+        "label": ":"
+      }
+    },
+    {
+      "type": "mai_alias",
+      "category": "Data",
+      "shape": "entry",
+      "check": "MaiAlias",
+      "title": "Header column",
+      "heading": "",
+      "help": "A column found by any of these header titles (case-insensitive), separated by commas.",
+      "entryKey": {
+        "kind": "text",
+        "key": "",
+        "name": "COLUMN",
+        "label": "column"
+      },
+      "entryValue": {
+        "kind": "list",
+        "key": "",
+        "name": "TITLES",
+        "label": "titles"
+      }
+    },
+    {
+      "type": "mai_position",
+      "category": "Data",
+      "shape": "entry",
+      "check": "MaiPosition",
+      "title": "Column position",
+      "heading": "",
+      "help": "A column read from a fixed sheet column letter, such as A or BA.",
+      "entryKey": {
+        "kind": "text",
+        "key": "",
+        "name": "COLUMN",
+        "label": "column"
+      },
+      "entryValue": {
+        "kind": "text",
+        "key": "",
+        "name": "LETTER",
+        "label": "at"
+      }
+    },
+    {
+      "type": "mai_aggregate",
+      "category": "Groups",
+      "shape": "entry",
+      "check": "MaiAggregate",
+      "title": "Summary",
+      "heading": "",
+      "help": "Summarize these columns in each group.",
+      "entryKey": {
+        "kind": "enum",
+        "key": "",
+        "name": "AGGREGATE",
+        "label": "",
+        "options": [
+          [
+            "sum",
+            "sum"
+          ],
+          [
+            "count",
+            "count"
+          ],
+          [
+            "mean",
+            "mean"
+          ],
+          [
+            "min",
+            "min"
+          ],
+          [
+            "max",
+            "max"
+          ],
+          [
+            "first",
+            "first"
+          ],
+          [
+            "last",
+            "last"
+          ],
+          [
+            "join",
+            "join"
+          ]
+        ],
+        "fallback": "sum"
+      },
+      "entryValue": {
+        "kind": "list",
+        "key": "",
+        "name": "COLUMNS",
+        "label": "of"
+      }
+    },
+    {
+      "type": "mai_pick_rule",
+      "category": "Groups",
+      "shape": "object",
+      "check": "MaiPickRule",
+      "title": "Pick rule",
+      "heading": "Rule",
+      "help": "The first rule with matching rows chooses one row per group. Ties go to the top-most row.",
+      "fields": [
+        {
+          "kind": "expr",
+          "key": "rows",
+          "name": "ROWS",
+          "label": "candidates",
+          "scope": "row",
+          "condition": true
+        },
+        {
+          "kind": "text",
+          "key": "best",
+          "name": "BEST",
+          "label": "highest",
+          "optional": true,
+          "hint": "A numeric column; the highest value wins."
+        },
+        {
+          "kind": "expr",
+          "key": "when",
+          "name": "WHEN",
+          "label": "applies when",
+          "optional": true,
+          "hint": "Sees size, best and tied. Default: size > 0.",
+          "scope": "name"
+        },
+        {
+          "kind": "template",
+          "key": "reason",
+          "name": "REASON",
+          "label": "reason",
+          "optional": true
+        }
+      ]
+    },
+    {
+      "type": "mai_sheet",
+      "category": "Output",
+      "shape": "object",
+      "check": "MaiSheet",
+      "title": "Output sheet",
+      "heading": "Sheet",
+      "help": "One worksheet of the output workbook, written from a saved dataset.",
+      "fields": [
+        {
+          "kind": "text",
+          "key": "name",
+          "name": "NAME",
+          "label": "name"
+        },
+        {
+          "kind": "text",
+          "key": "from",
+          "name": "FROM",
+          "label": "from dataset",
+          "optional": true
+        },
+        {
+          "kind": "text",
+          "key": "like",
+          "name": "LIKE",
+          "label": "like sheet",
+          "optional": true,
+          "advanced": true
+        },
+        {
+          "kind": "bool",
+          "key": "freeze",
+          "name": "FREEZE",
+          "label": "freeze header",
+          "optional": true,
+          "advanced": true
+        },
+        {
+          "kind": "number",
+          "key": "header_height",
+          "name": "HEADER_HEIGHT",
+          "label": "header height",
+          "optional": true,
+          "advanced": true
+        },
+        {
+          "kind": "yaml",
+          "key": "header",
+          "name": "HEADER",
+          "label": "header style",
+          "optional": true,
+          "advanced": true
+        },
+        {
+          "kind": "yaml",
+          "key": "style",
+          "name": "STYLE",
+          "label": "cell style",
+          "optional": true,
+          "advanced": true
+        },
+        {
+          "kind": "items",
+          "key": "columns",
+          "name": "COLUMNS",
+          "label": "columns",
+          "optional": true,
+          "item": "mai_out_column"
+        },
+        {
+          "kind": "items",
+          "key": "styles",
+          "name": "STYLES",
+          "label": "styles",
+          "optional": true,
+          "item": "mai_out_style"
+        }
+      ]
+    },
+    {
+      "type": "mai_service",
+      "category": "Services",
+      "shape": "object",
+      "check": "MaiService",
+      "title": "Service endpoint",
+      "heading": "Service",
+      "help": "How MaiService exposes this workflow: POST /api/<route>/upload and /run, GET /api/<route>. Every setting is optional.",
+      "fields": [
+        {
+          "kind": "text",
+          "key": "route",
+          "name": "ROUTE",
+          "label": "route /api/",
+          "optional": true,
+          "hint": "Lowercase letters, digits and hyphens. Default: the file name.",
+          "placeholder": "file name"
+        },
+        {
+          "kind": "template",
+          "key": "description",
+          "name": "DESCRIPTION",
+          "label": "description",
+          "optional": true
+        },
+        {
+          "kind": "text",
+          "key": "owner_field",
+          "name": "OWNER_FIELD",
+          "label": "owner field",
+          "optional": true,
+          "advanced": true,
+          "hint": "The form field with the requester id. Default: bam."
+        },
+        {
+          "kind": "enum",
+          "key": "owner_required",
+          "name": "OWNER_REQUIRED",
+          "label": "owner",
+          "advanced": true,
+          "options": [
+            [
+              "required",
+              "true"
+            ],
+            [
+              "optional",
+              "false"
+            ]
+          ],
+          "fallback": "true",
+          "boolean": true
+        },
+        {
+          "kind": "number",
+          "key": "max_upload_mb",
+          "name": "MAX_UPLOAD_MB",
+          "label": "max upload MB",
+          "optional": true,
+          "advanced": true,
+          "integer": true,
+          "min": 1
+        }
+      ]
+    },
+    {
+      "type": "mai_out_column",
+      "category": "Output",
+      "shape": "object",
+      "check": "MaiOutColumn",
+      "title": "Output column",
+      "heading": "Column",
+      "help": "One output column: a dataset column, or a value calculated per row.",
+      "fields": [
+        {
+          "kind": "text",
+          "key": "header",
+          "name": "HEADER",
+          "label": "header"
+        },
+        {
+          "kind": "text",
+          "key": "id",
+          "name": "ID",
+          "label": "id",
+          "optional": true,
+          "advanced": true
+        },
+        {
+          "kind": "text",
+          "key": "column",
+          "name": "COLUMN",
+          "label": "from column",
+          "optional": true
+        },
+        {
+          "kind": "expr",
+          "key": "value",
+          "name": "VALUE",
+          "label": "value",
+          "optional": true,
+          "scope": "row"
+        },
+        {
+          "kind": "number",
+          "key": "width",
+          "name": "WIDTH",
+          "label": "width",
+          "optional": true
+        },
+        {
+          "kind": "text",
+          "key": "number_format",
+          "name": "NUMBER_FORMAT",
+          "label": "number format",
+          "optional": true,
+          "advanced": true
+        },
+        {
+          "kind": "yaml",
+          "key": "style",
+          "name": "STYLE",
+          "label": "style",
+          "optional": true,
+          "advanced": true
+        },
+        {
+          "kind": "yaml",
+          "key": "header_style",
+          "name": "HEADER_STYLE",
+          "label": "header style",
+          "optional": true,
+          "advanced": true
+        }
+      ]
+    },
+    {
+      "type": "mai_out_style",
+      "category": "Output",
+      "shape": "object",
+      "check": "MaiOutStyle",
+      "title": "Conditional style",
+      "heading": "Style",
+      "help": "Conditional formatting. Later styles win over earlier ones.",
+      "fields": [
+        {
+          "kind": "expr",
+          "key": "when",
+          "name": "WHEN",
+          "label": "when",
+          "optional": true,
+          "scope": "row",
+          "condition": true
+        },
+        {
+          "kind": "list",
+          "key": "columns",
+          "name": "COLUMNS",
+          "label": "columns",
+          "optional": true
+        },
+        {
+          "kind": "text",
+          "key": "fill",
+          "name": "FILL",
+          "label": "fill",
+          "optional": true,
+          "placeholder": "#FFFF00"
+        },
+        {
+          "kind": "yaml",
+          "key": "font",
+          "name": "FONT",
+          "label": "font",
+          "optional": true
+        },
+        {
+          "kind": "yaml",
+          "key": "border",
+          "name": "BORDER",
+          "label": "border",
+          "optional": true
+        },
+        {
+          "kind": "text",
+          "key": "number_format",
+          "name": "NUMBER_FORMAT",
+          "label": "number format",
+          "optional": true,
+          "advanced": true
+        },
+        {
+          "kind": "text",
+          "key": "align",
+          "name": "ALIGN",
+          "label": "align",
+          "optional": true,
+          "advanced": true
+        },
+        {
+          "kind": "bool",
+          "key": "bold",
+          "name": "BOLD",
+          "label": "bold",
+          "optional": true,
+          "advanced": true
+        }
+      ]
+    }
+  ],
+  "functions": [
+    {
+      "name": "config",
+      "signature": "config(\"key\")",
+      "doc": "A config.json value."
+    },
+    {
+      "name": "norm",
+      "signature": "norm(v)",
+      "doc": "Text, trimmed and in upper case."
+    },
+    {
+      "name": "trim",
+      "signature": "trim(v)",
+      "doc": "Text without leading and trailing whitespace (JavaScript rules)."
+    },
+    {
+      "name": "str",
+      "signature": "str(v)",
+      "doc": "The value as text."
+    },
+    {
+      "name": "num",
+      "signature": "num(v)",
+      "doc": "The value as a number; an error if it is not one."
+    },
+    {
+      "name": "toNumber",
+      "signature": "toNumber(v, d)",
+      "doc": "JavaScript parseFloat with commas ignored; d when it is not a number."
+    },
+    {
+      "name": "parseFloat",
+      "signature": "parseFloat(v)",
+      "doc": "JavaScript parseFloat; nil when it is not a number."
+    },
+    {
+      "name": "blank",
+      "signature": "blank(v)",
+      "doc": "True for nil and for whitespace-only text."
+    },
+    {
+      "name": "truthy",
+      "signature": "truthy(v)",
+      "doc": "JavaScript truthiness."
+    },
+    {
+      "name": "coalesce",
+      "signature": "coalesce(a, b, ...)",
+      "doc": "The first truthy value."
+    },
+    {
+      "name": "fields",
+      "signature": "fields(v)",
+      "doc": "The whitespace-separated words of the text."
+    },
+    {
+      "name": "splitAny",
+      "signature": "splitAny(v, \",;\")",
+      "doc": "The pieces of the text between any of the characters."
+    },
+    {
+      "name": "replaceRe",
+      "signature": "replaceRe(v, \"^0+\", \"\")",
+      "doc": "Replace every match of a regular expression."
+    }
+  ],
+  "templates": [
+    {
+      "id": "clean-sheet",
+      "title": "Clean a sheet",
+      "description": "Trim cells, drop blank and duplicate rows, and write a tidy copy.",
+      "inputs": [
+        "xlsx"
+      ],
+      "output": "xlsx",
+      "samples": {
+        "sheet": "examples/parts.xlsx"
+      },
+      "source": "name: Clean a sheet\ninput:\n  sheet: {label: Workbook to clean}\nsteps:\n  - from: {input: sheet, trim: true, skip_blank: true}\n  - dedupe: [Part Number]\n  - save: clean\noutput:\n  sheets: {Clean: clean}\n"
+    },
+    {
+      "id": "parts-summary",
+      "title": "Summarize by group",
+      "description": "Keep rows with a positive quantity, then total the quantity for each part.",
+      "inputs": [
+        "xlsx"
+      ],
+      "output": "xlsx",
+      "samples": {
+        "parts": "examples/parts.xlsx"
+      },
+      "source": "name: Parts summary\ninput:\n  parts: {label: Parts list}\nsteps:\n  - from: {input: parts, sheet: Parts, trim: true}\n  - filter: num(Quantity) > 0\n  - group: {by: [Part Number], sum: [Quantity]}\n  - save: summary\noutput:\n  sheets: {Parts: summary}\n"
+    },
+    {
+      "id": "lookup-enrich",
+      "title": "Look up and enrich",
+      "description": "Add each customer's region from a CSV list, then total sales per region.",
+      "inputs": [
+        "xlsx",
+        "csv"
+      ],
+      "output": "xlsx",
+      "samples": {
+        "orders": "examples/orders.xlsx",
+        "regions": "examples/regions.csv"
+      },
+      "source": "name: Sales by region\ninput:\n  orders: {label: Orders workbook}\n  regions: {label: Customer regions, match: \"(?i)region\"}\nsteps:\n  - from: regions\n  - save: region_list\n  - from: {input: orders, sheet: Orders, trim: true}\n  - filter: num(Quantity) > 0\n  - join: {with: region_list, on: [Customer], take: {Region: Region}}\n  - set:\n      Line total: num(Quantity) * num(col(\"Unit price\"))\n  - group: {by: [Region], sum: [Line total], count: [Customer]}\n  - save: by_region\noutput:\n  sheets: {By region: by_region}\n"
+    },
+    {
+      "id": "orders-totals",
+      "title": "Customer order totals",
+      "description": "The tutorial: filter quantities, calculate line totals and total each customer.",
+      "inputs": [
+        "xlsx"
+      ],
+      "output": "xlsx",
+      "samples": {
+        "orders": "examples/orders.xlsx"
+      },
+      "source": "name: Customer order totals\ninput:\n  orders: {label: Orders workbook}\nsteps:\n  - from: {input: orders, sheet: Orders, trim: true}\n  - filter: num(Quantity) > 0\n  - set:\n      Line total: num(Quantity) * num(col(\"Unit price\"))\n  - group: {by: [Customer], sum: [Line total]}\n  - save: totals\noutput:\n  sheets: {Totals: totals}\n"
+    },
+    {
+      "id": "excel-to-csv",
+      "title": "Excel to CSV",
+      "description": "Convert a sheet to a UTF-8 CSV file, for imports into other systems.",
+      "inputs": [
+        "xlsx"
+      ],
+      "output": "csv",
+      "samples": {
+        "sheet": "examples/parts.xlsx"
+      },
+      "source": "name: Excel to CSV\ninput:\n  sheet: {label: Workbook}\nsteps:\n  - from: {input: sheet, trim: true}\n  - save: rows\noutput:\n  format: csv\n  sheets: {Rows: rows}\n"
+    },
+    {
+      "id": "blank",
+      "title": "Blank workflow",
+      "description": "One source, one output. Add steps from the table or the command menu.",
+      "inputs": [
+        "xlsx"
+      ],
+      "output": "xlsx",
+      "samples": {},
+      "source": "name: New workflow\ninput:\n  data: {label: Data file}\nsteps:\n  - from: data\n  - save: result\noutput:\n  sheets: {Result: result}\n"
+    }
+  ]
+}

@@ -1,4 +1,5 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { columnReference, suggest, type Suggestion } from "./completion";
 import {
   addItem,
   deleteAt,
@@ -13,7 +14,11 @@ import {
 } from "./pipeline";
 import { itemByType, type Field } from "./stepRegistry";
 
-/** A text control that applies on blur or Enter (⌘↵ in a box), so one edit is one undo step. */
+/**
+ * A text control that applies on blur or Enter (⌘↵ in a box), so one edit is one undo step.
+ * With `columns` it is a formula box: typing a word offers matching columns and
+ * helpers (↑ ↓ to choose, Tab or Enter to accept, Esc to dismiss).
+ */
 export function Draft({
   id,
   value,
@@ -23,7 +28,10 @@ export function Draft({
   placeholder,
   label,
   disabled,
+  columns,
 }: {
+  /** The columns a formula here can use; set (even empty) to turn completion on. */
+  columns?: string[];
   id?: string;
   value: string;
   onCommit: (value: string) => void;
@@ -36,17 +44,50 @@ export function Draft({
   const [draft, setDraft] = useState(value);
   useEffect(() => setDraft(value), [value]);
   const commit = () => draft !== value && onCommit(draft);
+  const box = useRef<HTMLInputElement & HTMLTextAreaElement>(null);
+  const [menu, setMenu] = useState<{ from: number; list: Suggestion[]; index: number } | null>(null);
+  const caret = useRef<number | null>(null);
+  useEffect(() => {
+    if (caret.current === null) return;
+    box.current?.setSelectionRange(caret.current, caret.current);
+    caret.current = null;
+  }, [draft]);
+  const accept = (choice: Suggestion) => {
+    if (!menu) return;
+    const end = box.current?.selectionStart ?? draft.length;
+    caret.current = menu.from + choice.insert.length;
+    setDraft(draft.slice(0, menu.from) + choice.insert + draft.slice(end));
+    setMenu(null);
+  };
   const common = {
     id,
+    ref: box,
     "aria-label": label,
     className: `ctl${code ? " code" : ""}`,
     value: draft,
     placeholder,
     disabled,
     spellCheck: false,
-    onChange: (e: { target: { value: string } }) => setDraft(e.target.value),
-    onBlur: commit,
+    onChange: (e: { target: { value: string; selectionStart?: number | null } }) => {
+      setDraft(e.target.value);
+      const found = columns && suggest(e.target.value, e.target.selectionStart ?? e.target.value.length, columns);
+      setMenu(found ? { ...found, index: 0 } : null);
+    },
+    onBlur: () => {
+      setMenu(null);
+      commit();
+    },
     onKeyDown: (e: React.KeyboardEvent) => {
+      if (menu) {
+        const move = e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0;
+        if (move || e.key === "Enter" || e.key === "Tab" || e.key === "Escape") {
+          e.preventDefault();
+          if (move) setMenu({ ...menu, index: (menu.index + move + menu.list.length) % menu.list.length });
+          else if (e.key === "Escape") setMenu(null);
+          else accept(menu.list[menu.index]);
+          return;
+        }
+      }
       if (e.key === "Escape") {
         setDraft(value);
         (e.target as HTMLElement).blur();
@@ -57,10 +98,34 @@ export function Draft({
       }
     },
   };
-  return multiline || draft.length > 48 || draft.includes("\n") ? (
+  const control = multiline || draft.length > 48 || draft.includes("\n") ? (
     <textarea rows={Math.min(8, Math.max(1, Math.ceil(draft.length / 34), draft.split("\n").length))} {...common} />
   ) : (
     <input {...common} />
+  );
+  if (!columns) return control;
+  return (
+    <span className="complete">
+      {control}
+      {menu && (
+        <ul className="complete-list" role="listbox" aria-label="Suggestions">
+          {menu.list.map((s, i) => (
+            <li
+              key={s.label}
+              role="option"
+              aria-selected={i === menu.index}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                accept(s);
+              }}
+            >
+              <code>{s.label}</code>
+              <span>{s.detail}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </span>
   );
 }
 
@@ -89,7 +154,7 @@ function ColumnChips({ columns }: { columns: string[] }) {
           onClick={() => {
             const box = lastBox;
             if (!box || !box.isConnected) return;
-            const text = /^[A-Za-z_][A-Za-z0-9_]*$/.test(c) ? c : `col(${JSON.stringify(c)})`;
+            const text = columnReference(c);
             const s = box.selectionStart ?? box.value.length, e = box.selectionEnd ?? s;
             const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(box), "value")!.set!;
             setter.call(box, box.value.slice(0, s) + text + box.value.slice(e));
@@ -124,7 +189,7 @@ function EntriesEditor({ field, rows, onCommit, columns }: { field: Field & { ki
             <Draft label={`${label(field)} ${i + 1} name`} value={k} onCommit={(nk) => update(i, nk, v)} />
           )}
           <span onFocusCapture={(e) => (lastBox = e.target as unknown as HTMLTextAreaElement)}>
-            <Draft label={`${k} value`} value={v} code={code} multiline={code && v.length > 30} onCommit={(nv) => update(i, k, nv)} />
+            <Draft label={`${k} value`} value={v} code={code} multiline={code && v.length > 30} columns={valueField.kind === "expr" ? (valueField.scope === "row" ? columns : []) : undefined} onCommit={(nv) => update(i, k, nv)} />
           </span>
           <button className="tb" aria-label={`Remove ${k}`} title="Remove" onClick={() => onCommit(rows.filter((_, j) => j !== i))}>✕</button>
         </div>
@@ -258,6 +323,7 @@ export function StepForm({ source, argPath, form, onChange, onError, columns, sh
                 value={String(v)}
                 code={isCode}
                 multiline={isCode && ("multiline" in f ? !!f.multiline : false)}
+                columns={f.kind === "expr" ? (f.scope === "row" ? columns : []) : undefined}
                 placeholder={f.kind === "list" ? "Names, separated by commas" : f.kind === "yaml" ? "{bold: true}" : f.optional ? "Optional" : "Required"}
                 onCommit={(nv) => commit(f, nv)}
               />

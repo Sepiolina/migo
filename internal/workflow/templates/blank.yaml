@@ -1,0 +1,8 @@
+name: New workflow
+input:
+  data: {label: Data file}
+steps:
+  - from: data
+  - save: result
+output:
+  sheets: {Result: result}

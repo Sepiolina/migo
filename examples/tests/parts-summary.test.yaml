@@ -1,0 +1,7 @@
+# Tests for the parts summary example. Run them with:  migo test examples
+# After a deliberate change to the output:             migo test -update examples
+workflow: ../parts-summary.yaml
+tests:
+  - name: totals per part
+    in: {parts: ../parts.xlsx}
+    expect: parts-summary.xlsx

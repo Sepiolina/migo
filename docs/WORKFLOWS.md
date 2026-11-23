@@ -123,7 +123,34 @@ workbook with one sheet, `Sheet1`; its delimiter (comma, semicolon, tab or `|`)
 is detected from the first line, and text that is not UTF-8 is read as
 Windows-1252.
 
+## Editor support
+
+`docs/workflow.schema.json` is a JSON Schema for workflow files. With it an
+editor completes step names and keys, shows each one's help on hover and
+underlines unknown keys while you type.
+
+- **VS Code, in this repository:** install the
+  [YAML extension](https://marketplace.visualstudio.com/items?itemName=redhat.vscode-yaml).
+  `.vscode/settings.json` already maps `workflows/*.yaml` and `examples/*.yaml` to the schema.
+- **Any other folder or editor** (anything using yaml-language-server): put
+  this comment on the first line of the workflow, with the path or URL of the schema:
+
+  ```yaml
+  # yaml-language-server: $schema=https://raw.githubusercontent.com/Sepiolina/migo/main/docs/workflow.schema.json
+  ```
+- **A build with extra steps:** write its own schema with `migo schema -out workflow.schema.json`.
+
+The schema checks structure only (step names, keys, required settings, fixed
+choices). Expressions, column names and dataset names are checked by the
+parser: `migo -check` or Mai Studio.
+
 ## Steps
+
+The [step reference](STEP_REFERENCE.md) lists every step with all its settings;
+it is generated from the engine, as is the catalog that `migo describe` prints
+as JSON and `GET /api/workflows` returns under `reference`. The sections below
+explain the steps by task.
+
 
 ### Reading
 
@@ -290,11 +317,11 @@ and SAP stubs) gave identical values.
 ## Run locally
 
 ```sh
-go run ./cmd/migo -in bom=testdata/bom_basic.xlsx -in priority=testdata/prio_basic.xlsx -out out.xlsx workflows/bom.yaml
-go run ./cmd/migo -in parts=examples/parts.xlsx -check examples/parts-summary.yaml
+go run ./cmd/migo validate workflows/bom.yaml
+go run ./cmd/migo run -in bom=testdata/bom_basic.xlsx -in priority=testdata/prio_basic.xlsx -out out.xlsx workflows/bom.yaml
+go run ./cmd/migo test examples
 ```
 
-The flags:
-- `-check` runs everything and keeps no file.
-- `-cfg '<json>'` takes `config.json` keys. The default `{}` turns the database and SAP off.
-- `-sql-stub file.json` gives every `sql` step a fixed table, `{"columns": [...], "rows": [[...]]}`. See `testdata/stub_master.json`.
+`validate` checks a file without running it, `run` runs it on local files and
+`test` compares a run with an expected output. The [CLI guide](CLI.md) has
+every command and flag, including `-check`, `-cfg` and `-sql-stub`.

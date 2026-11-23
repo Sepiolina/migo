@@ -42,7 +42,8 @@ workflow on the computer, not in the YAML.
 - Column actions (sort, filter, dedupe, fill, convert, trim, group, rename,
   remove) add steps.
 - The inspector edits every engine step, nested pick rules, output columns and
-  styles, and the service settings; formulas are text with column chips.
+  styles, and the service settings; formulas are text with column chips and
+  completion for columns and helpers as you type.
 - The command menu (⌘K) adds steps and reaches every command.
 - The console shows problems from the parser and the preview, the run log and
   the editable YAML.
@@ -57,7 +58,9 @@ touch and keep comments and CRLF line endings.
 - A step-by-step preview (offline trace) after each edit, with rows for the
   selected step and profiles for all.
 - **Run** writes `.studio/runs/<run>/output.xlsx` or `output.csv` and shows it.
-- Runs are offline: SQL and REST steps are skipped.
+- Runs are offline: SQL and REST steps are skipped, unless the workflow has a
+  mocks file (`tests/<name>.mocks.yaml`), which then answers them.
+- **Save as test…** keeps a run as a regression test that `migo test` runs.
 
 Preview limits: 25 MiB per file, 64 MiB expanded for XLSX, 200 rows per table
 (profiles cover every row). There is no cancel button; native requests have a
@@ -85,8 +88,11 @@ exposes:
   supported cell styles, including row-dependent styles resolved while writing.
   These are not a general Excel formula engine.
 
-Run any workflow through `migo`, either writing a workbook or using `-check` to
-execute without keeping output. The CLI also accepts runtime JSON configuration
+`migo` creates a workflow from a template (`new`), checks files without running
+them (`validate`), runs them on local files (`run`, with `-check` to keep no
+output) and runs workflow tests that compare a run with an expected output
+(`test`); see the [CLI guide](CLI.md). `migo describe`, `migo schema` and `migo docs` write
+the step catalog, a JSON Schema for editors and the step reference. The CLI also accepts runtime JSON configuration
 and a SQL stub for fixture-based testing. See the [workflow reference](WORKFLOWS.md)
 for exact syntax and examples.
 
@@ -163,5 +169,8 @@ live company integrations. Test those on the intended desktop and Linux server.
 - [README: installation, Windows desktop, microservice, and PM2](../README.md)
 - [Studio user guide](MAI_STUDIO_USER_GUIDE.md)
 - [Studio developer guide](MAI_STUDIO_DEVELOPMENT.md)
+- [CLI guide: create, check, run and test workflows](CLI.md)
 - [Workflow syntax and supported operations](WORKFLOWS.md)
+- [Step reference: every step and setting](STEP_REFERENCE.md), and
+  [editor completion for workflow files](WORKFLOWS.md#editor-support)
 - [Planned implementation](MAI_DEV_TOOL_IMPLEMENTATION_PLAN.md)

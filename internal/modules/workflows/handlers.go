@@ -210,9 +210,10 @@ func (e *endpoint) describe(w http.ResponseWriter, _ *http.Request) error {
 // catalog handles GET /api/workflows: every workflow this service runs.
 func (m *Module) catalog(w http.ResponseWriter, _ *http.Request) error {
 	out := struct {
-		Workflows []Description `json:"workflows"`
-		Steps     []string      `json:"steps"`
-	}{Workflows: []Description{}, Steps: workflow.StepNames()}
+		Workflows []Description    `json:"workflows"`
+		Steps     []string         `json:"steps"`
+		Reference workflow.Catalog `json:"reference"` // every step's form and help, and the expression helpers
+	}{Workflows: []Description{}, Steps: workflow.StepNames(), Reference: workflow.Describe()}
 	for _, e := range m.endpoints {
 		out.Workflows = append(out.Workflows, e.description())
 	}

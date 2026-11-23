@@ -1,0 +1,9 @@
+# What the stock API answers in tests and previews (docs/CLI.md, "Mocks").
+config: {stock_url: "http://stock.example"}
+rest:
+  - url: /stock
+    method: POST
+    body:
+      items:
+        - {code: "00123", qty: 40}
+        - {code: "00456", qty: 0}

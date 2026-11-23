@@ -161,13 +161,34 @@ when it is generic, meaning not tied to one process.
        })
    }
    ```
-   `GET /api/workflows` lists the registered step names.
-3. Make it editable in Mai Studio: add one entry to `steps` in
-   `apps/studio/src/stepRegistry.ts` (see the Studio development guide).
-   Blocks, toolbox, step library and inspector are generated from it; until
-   then the step still round-trips as a preserved block.
-4. Test it in `internal/workflow/workflow_test.go` (`TestTableSteps` runs a
+3. Describe it, so Mai Studio and API clients can offer it. Add one
+   `StepInfo` to `builtinSteps` in `internal/workflow/steps_info.go` (a step
+   registered from another package calls `workflow.DescribeStep` beside
+   `RegisterTableStep`):
+
+   ```go
+   {
+       Op: "upper", Category: "Columns", Icon: "A",
+       Title: "Upper-case columns", Heading: "Upper-case",
+       Description: "Upper-case text in columns.",
+       Help:        "Column titles separated by commas.",
+       Form: "map", List: short(""),          // `upper: [A, B]` fills the field with no key
+       Fields:  []FieldInfo{{Kind: "list", Name: "COLUMNS"}},
+       Example: "[Column]",                   // what a newly inserted step starts with
+   },
+   ```
+   `describe.go` documents every `StepInfo` and `FieldInfo` setting.
+4. Run `make describe`. It rewrites `apps/studio/src/steps.generated.json`
+   (the step appears in Studio's step library, command menu and inspector
+   with no TypeScript change), `docs/workflow.schema.json` (editors complete
+   and check it) and `docs/STEP_REFERENCE.md`. `GET /api/workflows` serves the same catalog
+   under `reference`, and `migo describe` prints it.
+5. Test it in `internal/workflow/workflow_test.go` (`TestTableSteps` runs a
    small workflow on `testdata/parts.xls`), and document it in `docs/WORKFLOWS.md`.
+
+`go test ./...` fails when a step has no descriptor, when a descriptor is
+invalid, when its example does not compile, when the schema rejects a workflow
+in this repository, or when a generated file was not regenerated.
 
 **After touching the engine or `bom.yaml`, run `go test ./...`.** It includes
 `TestBOMMatchesGolden`. If the BOM output is *supposed* to change, regenerate
@@ -205,3 +226,17 @@ Elsewhere:
 * Inject external systems (database, HTTP, clock) as function values or small
   structs so tests never need the real thing (`workflow.Runtime{SQL, HTTP, Sleep}`).
 * `gofmt` + `go vet ./...` + `go test ./...` before every commit.
+
+## 6. Add a starter template
+
+Templates are what `migo new -template <id>` and Mai Studio's start page offer.
+
+1. Add `internal/workflow/templates/<id>.yaml`: a complete workflow whose
+   first line is `name: ...`.
+2. Add its entry to `templates` in `internal/workflow/templates.go`: the id,
+   a title, a one-line description, and a sample file for each input
+   (relative to the repository root, usually in `examples/`).
+3. Run `make describe` and commit the regenerated files.
+
+`go test ./...` creates a workflow from every template, validates it and runs
+it on its sample files.

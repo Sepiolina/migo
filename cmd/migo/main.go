@@ -1,12 +1,17 @@
-// migo runs a workflow file on local files, without HTTP:
+// migo creates, checks, runs and tests workflow files without HTTP:
 //
-//	migo -in bom=Customer.xlsx -in priority=Prio.xlsx -out out.xlsx workflows/bom.yaml
+//	migo new order-totals -template parts-summary
+//	migo validate workflows/order-totals.yaml
+//	migo run -in parts=examples/parts.xlsx -out out.xlsx workflows/order-totals.yaml
+//	migo test examples
 //
-// -check runs everything but keeps no output. -cfg takes config.json keys as
-// JSON ("{}" skips DB and SAP); -sql-stub stands in for the database.
+// "migo help" lists every command; docs/CLI.md is the guide. For run, -check
+// runs everything but keeps no output, -cfg takes config.json keys as JSON
+// ("{}" skips DB and SAP) and -sql-stub stands in for the database.
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -20,6 +25,7 @@ import (
 
 	"miservice/internal/clients/sqlserver"
 	"miservice/internal/config"
+	"miservice/internal/mock"
 	"miservice/internal/modules/workflows"
 	"miservice/internal/workflow"
 )
@@ -46,17 +52,33 @@ func (f inputFlags) Set(v string) error {
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 {
+		switch name := args[0]; {
+		case generators[name] != nil:
+			return generate(name, args[1:], stdout, stderr)
+		case commands[name] != nil:
+			return commands[name](ctx, args[1:], stdout, stderr)
+		case name == "run":
+			args = args[1:]
+		}
+	} else {
+		fmt.Fprint(stderr, usage)
+		return 2
+	}
 	flags := flag.NewFlagSet("migo", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	inputs := inputFlags{}
 	flags.Var(inputs, "in", "input file as name=path (repeat per workflow input)")
-	out := flags.String("out", "", "output .xlsx (required unless -check)")
+	out := flags.String("out", "", "output file, .xlsx or .csv as the workflow writes (required unless -check)")
 	check := flags.Bool("check", false, "run the workflow but keep no output")
 	cfgJSON := flags.String("cfg", "{}", "runtime config as JSON (keys like config.json)")
 	stub := flags.String("sql-stub", "", `JSON table every sql step returns: {"columns": [...], "rows": [[...]]}`)
+	mocks := flags.String("mocks", "", "answer sql and rest steps from this mocks file instead of real systems")
+	record := flags.String("record", "", "write the sql results and rest responses of this run to a mocks file")
 	flags.Usage = func() {
-		fmt.Fprintln(stderr, "usage: migo [-in name=path ...] [-out file.xlsx | -check] [-cfg json] [-sql-stub file] workflow.yaml")
+		fmt.Fprintln(stderr, "usage: migo run [-in name=path ...] [-out file | -check] [-cfg json] [-sql-stub file | -mocks file | -record file] workflow.yaml")
 		flags.PrintDefaults()
+		fmt.Fprintln(stderr, "\nOther commands: migo help")
 	}
 	// Accept flags before and after the workflow path.
 	var positional []string
@@ -82,11 +104,33 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if (*out == "") == !*check {
 		return fail(2, fmt.Errorf("give either -out or -check"))
 	}
+	if *mocks != "" && (*record != "" || *stub != "") {
+		return fail(2, fmt.Errorf("-mocks replaces real systems: do not combine it with -record or -sql-stub"))
+	}
 	rt, closeDB, err := runtime(*cfgJSON, *stub, func(s string) { fmt.Fprintln(stdout, "LOG:", s) })
 	if err != nil {
 		return fail(2, err)
 	}
 	defer closeDB()
+	if *mocks != "" {
+		set, err := mock.Load(*mocks)
+		if err != nil {
+			return fail(2, err)
+		}
+		var keys map[string]any
+		if err := json.Unmarshal([]byte(*cfgJSON), &keys); err != nil {
+			return fail(2, fmt.Errorf("-cfg: %w", err))
+		}
+		log := rt.Log
+		if rt, err = set.Runtime(keys); err != nil {
+			return fail(2, err)
+		}
+		rt.Log = log
+	}
+	var recorded *mock.Set
+	if *record != "" {
+		recorded = mock.Record(&rt)
+	}
 	wf, err := workflow.Load(positional[0])
 	if err != nil {
 		return fail(2, err)
@@ -102,8 +146,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 
 	dir := os.TempDir()
 	if !*check {
-		if !strings.EqualFold(filepath.Ext(*out), ".xlsx") {
-			return fail(2, fmt.Errorf("-out must be an .xlsx file"))
+		if !strings.EqualFold(filepath.Ext(*out), wf.Ext()) {
+			return fail(2, fmt.Errorf("-out must be an %s file", wf.Ext()))
 		}
 		for _, p := range inputs {
 			if samePath(p, *out) {
@@ -112,7 +156,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		}
 		dir = filepath.Dir(*out)
 	}
-	tmp, err := os.CreateTemp(dir, ".migo-*.xlsx")
+	tmp, err := os.CreateTemp(dir, ".migo-*"+wf.Ext())
 	if err != nil {
 		return fail(1, err)
 	}
@@ -120,6 +164,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	defer os.Remove(tmp.Name())
 	if err := wf.Run(ctx, rt, inputs, tmp.Name()); err != nil {
 		return fail(1, err)
+	}
+	if recorded != nil {
+		if err := recorded.Save(*record); err != nil {
+			return fail(1, err)
+		}
+		fmt.Fprintf(stdout, "recorded %d sql result(s) and %d rest response(s) to %s\n", len(recorded.SQL), len(recorded.REST), *record)
 	}
 	if *check {
 		fmt.Fprintln(stdout, "workflow checked; no output kept")
@@ -182,4 +232,51 @@ func runtime(cfgJSON, stub string, log func(string)) (workflow.Runtime, func(), 
 	})
 	rt.SQL = workflows.SQL(db)
 	return rt, func() { _ = db.Close() }, nil
+}
+
+// generators are the commands that write a file derived from the step
+// descriptors: the catalog Mai Studio builds its forms from, the JSON Schema
+// editors complete workflow files with, and the Markdown step reference.
+var generators = map[string]func() ([]byte, error){
+	"describe": func() ([]byte, error) { return indentJSON(workflow.Describe()) },
+	"schema":   func() ([]byte, error) { return indentJSON(workflow.Schema()) },
+	"docs":     func() ([]byte, error) { return []byte(workflow.Reference()), nil },
+}
+
+func generate(name string, args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet("migo "+name, flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	out := flags.String("out", "", "write to this file instead of standard output")
+	if err := flags.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
+		return 2
+	}
+	if flags.NArg() != 0 {
+		fmt.Fprintf(stderr, "ERR %s takes no arguments\n", name)
+		return 2
+	}
+	data, err := generators[name]()
+	if err == nil {
+		if *out == "" {
+			_, err = stdout.Write(data)
+		} else {
+			err = os.WriteFile(*out, data, 0o644)
+		}
+	}
+	if err != nil {
+		fmt.Fprintln(stderr, "ERR", err)
+		return 1
+	}
+	return 0
+}
+
+func indentJSON(v any) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	err := enc.Encode(v)
+	return buf.Bytes(), err
 }

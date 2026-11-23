@@ -12,7 +12,7 @@ const col = (name: string, kind: "text" | "number" = "text") => ({ name, kind, f
 /** A runner stand-in: the trace after each step of the parts template. */
 const handlers: Record<string, (payload: unknown) => void> = {};
 const emit = (event: string, payload: unknown) => act(async () => handlers[event]?.(payload));
-function bridge() {
+function bridge(more: Record<string, (params: Record<string, unknown>) => unknown> = {}) {
   const calls: { command: string; args?: Record<string, unknown> }[] = [];
   const trace = (step: number): StepTrace[] =>
     [0, 1, 2, 3].map((i) => ({
@@ -27,11 +27,13 @@ function bridge() {
   (window as unknown as { __maiBridge: unknown }).__maiBridge = {
     invoke: async (command: string, args?: Record<string, unknown>) => {
       calls.push({ command, args });
+      if (more[command]) return more[command](args ?? {});
       if (command === "choose_workspace") return { path: "/work" };
       if (command === "list_workflows") return { paths: [] };
       if (command === "choose_sample_files") return { files: [{ name: "parts.xlsx", path: "samples/parts.xlsx", copied: true }] };
       if (command === "runner_request") {
         const req = (args as { request: { command: string; params: { step: number } } }).request;
+        if (more[req.command]) return { ok: true, result: more[req.command](req.params) };
         if (req.command === "trace") return { ok: true, result: { steps: trace(req.params.step), format: "xlsx" } };
         if (req.command === "validate") return { ok: true, result: { name: "x", inputs: [], sheets: [] } };
       }
@@ -70,6 +72,28 @@ describe("Studio", () => {
     expect(parse(yaml()).steps[1].filter).toBe("num(Quantity) > 0");
   });
 
+  it("completes helpers in a formula box", async () => {
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /Summarize by group/ }));
+    const nav = screen.getByRole("complementary", { name: "Workflow" });
+    fireEvent.click(within(nav).getByText("Keep rows where num(Quantity) > 0"));
+    const condition = () => screen.getByLabelText("Condition") as HTMLTextAreaElement;
+    fireEvent.change(condition(), { target: { value: "!bl" } });
+    const options = within(screen.getByRole("listbox", { name: "Suggestions" })).getAllByRole("option");
+    expect(options.map((o) => o.textContent)).toEqual(["blank(v)True for nil and for whitespace-only text."]);
+    fireEvent.keyDown(condition(), { key: "Tab" });
+    expect(condition().value).toBe("!blank(");
+    expect(screen.queryByRole("listbox", { name: "Suggestions" })).toBeNull();
+    // Escape dismisses the list without discarding the edit.
+    fireEvent.change(condition(), { target: { value: "!blank(Quantity) && tr" } });
+    fireEvent.keyDown(condition(), { key: "Escape" });
+    expect(screen.queryByRole("listbox", { name: "Suggestions" })).toBeNull();
+    expect(condition().value).toBe("!blank(Quantity) && tr");
+    fireEvent.change(condition(), { target: { value: "!blank(Quantity)" } });
+    fireEvent.blur(condition());
+    expect(parse(yaml()).steps[1].filter).toBe("!blank(Quantity)");
+  });
+
   it("adds steps from the command menu and documents the endpoint", async () => {
     render(<App />);
     fireEvent.click(screen.getByRole("button", { name: /Summarize by group/ }));
@@ -101,6 +125,37 @@ describe("Studio", () => {
     expect(parse(yaml()).steps[1]).toEqual({ sort: { by: ["Quantity"], desc: true, numeric: true } });
     // The new step is selected and previewed in its turn.
     await waitFor(() => expect(document.querySelector(".nav .row.sel")?.textContent).toContain("Sort by Quantity, largest first"));
+  });
+
+  it("keeps a run as a workflow test and previews service steps from the mocks file", async () => {
+    const source = "name: Parts\ninput:\n  parts: {label: Parts}\nsteps:\n  - from: parts\n  - sql: {query: SELECT 1, save: one}\n  - save: out\noutput:\n  sheets: {Out: out}\n";
+    const step = (i: number, name: string): StepTrace => ({ step: i, name, line: i + 5, columns: [col("Part Number")], total: 1, rows: [["00123"]], ms: 1 });
+    const calls = bridge({
+      list_workflows: () => ({ paths: ["workflows/parts.yaml"] }),
+      read_workflow: () => ({ path: "workflows/parts.yaml", source, revision: "r1" }),
+      trace: () => ({ steps: [step(0, "from"), step(1, "sql"), step(2, "save")], format: "xlsx", mocks: true }),
+      saveTest: () => ({ file: "tests/parts.test.yaml", expected: "tests/parts.typical-file.xlsx" }),
+    });
+    localStorage.setItem("mai.bindings:/work:workflows/parts.yaml", JSON.stringify({ parts: "examples/parts.xlsx" }));
+    render(<App />);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Open folder…" })));
+    await act(async () => fireEvent.click(await screen.findByRole("button", { name: /workflows\/parts\.yaml/ })));
+    // The preview asks for the workflow's mocks file and says when it answers.
+    await waitFor(() => expect(screen.getByText(/answered from tests\/parts\.mocks\.yaml/)).toBeTruthy(), { timeout: 3000 });
+    const params = (command: string) =>
+      (calls.filter((c) => (c.args as { request?: { command: string } })?.request?.command === command).at(-1)!.args as { request: { params: Record<string, unknown> } }).request.params;
+    expect(params("trace").mocks).toBe("tests/parts.mocks.yaml");
+
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    fireEvent.click(await screen.findByText("Save this run as a test…"));
+    const dialog = screen.getByRole("dialog", { name: "Save as test" });
+    const save = within(dialog).getByRole("button", { name: "Save test" }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    fireEvent.change(within(dialog).getByLabelText("Test name"), { target: { value: "Typical file" } });
+    await act(async () => fireEvent.click(save));
+    expect(params("saveTest")).toMatchObject({ workspace: "/work", path: "workflows/parts.yaml", name: "Typical file", inputs: { parts: "examples/parts.xlsx" }, mocks: "tests/parts.mocks.yaml" });
+    expect(screen.queryByRole("dialog", { name: "Save as test" })).toBeNull();
+    expect(screen.getByText(/Test saved to tests\/parts\.test\.yaml/)).toBeTruthy();
   });
 
   it("binds a sample file chosen with Browse", async () => {
