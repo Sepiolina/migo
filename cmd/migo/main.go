@@ -25,6 +25,7 @@ import (
 
 	"miservice/internal/clients/sqlserver"
 	"miservice/internal/config"
+	"miservice/internal/mock"
 	"miservice/internal/modules/workflows"
 	"miservice/internal/workflow"
 )
@@ -72,8 +73,10 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	check := flags.Bool("check", false, "run the workflow but keep no output")
 	cfgJSON := flags.String("cfg", "{}", "runtime config as JSON (keys like config.json)")
 	stub := flags.String("sql-stub", "", `JSON table every sql step returns: {"columns": [...], "rows": [[...]]}`)
+	mocks := flags.String("mocks", "", "answer sql and rest steps from this mocks file instead of real systems")
+	record := flags.String("record", "", "write the sql results and rest responses of this run to a mocks file")
 	flags.Usage = func() {
-		fmt.Fprintln(stderr, "usage: migo run [-in name=path ...] [-out file | -check] [-cfg json] [-sql-stub file] workflow.yaml")
+		fmt.Fprintln(stderr, "usage: migo run [-in name=path ...] [-out file | -check] [-cfg json] [-sql-stub file | -mocks file | -record file] workflow.yaml")
 		flags.PrintDefaults()
 		fmt.Fprintln(stderr, "\nOther commands: migo help")
 	}
@@ -101,11 +104,33 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	if (*out == "") == !*check {
 		return fail(2, fmt.Errorf("give either -out or -check"))
 	}
+	if *mocks != "" && (*record != "" || *stub != "") {
+		return fail(2, fmt.Errorf("-mocks replaces real systems: do not combine it with -record or -sql-stub"))
+	}
 	rt, closeDB, err := runtime(*cfgJSON, *stub, func(s string) { fmt.Fprintln(stdout, "LOG:", s) })
 	if err != nil {
 		return fail(2, err)
 	}
 	defer closeDB()
+	if *mocks != "" {
+		set, err := mock.Load(*mocks)
+		if err != nil {
+			return fail(2, err)
+		}
+		var keys map[string]any
+		if err := json.Unmarshal([]byte(*cfgJSON), &keys); err != nil {
+			return fail(2, fmt.Errorf("-cfg: %w", err))
+		}
+		log := rt.Log
+		if rt, err = set.Runtime(keys); err != nil {
+			return fail(2, err)
+		}
+		rt.Log = log
+	}
+	var recorded *mock.Set
+	if *record != "" {
+		recorded = mock.Record(&rt)
+	}
 	wf, err := workflow.Load(positional[0])
 	if err != nil {
 		return fail(2, err)
@@ -139,6 +164,12 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	defer os.Remove(tmp.Name())
 	if err := wf.Run(ctx, rt, inputs, tmp.Name()); err != nil {
 		return fail(1, err)
+	}
+	if recorded != nil {
+		if err := recorded.Save(*record); err != nil {
+			return fail(1, err)
+		}
+		fmt.Fprintf(stdout, "recorded %d sql result(s) and %d rest response(s) to %s\n", len(recorded.SQL), len(recorded.REST), *record)
 	}
 	if *check {
 		fmt.Fprintln(stdout, "workflow checked; no output kept")
