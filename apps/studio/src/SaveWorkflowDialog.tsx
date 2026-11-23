@@ -1,13 +1,16 @@
 import { useRef } from "react";
 import { useDialogFocus } from "./useDialogFocus";
 
-export function SaveWorkflowDialog({ path, route, returnFocusTo, onChange, onClose, onSave }: {
+export function SaveWorkflowDialog({ path, route, returnFocusTo, onChange, onClose, onSave, copy, saving, error }: {
   path: string;
   route: string;
   returnFocusTo?: HTMLElement | null;
   onChange: (path: string) => void;
   onClose: () => void;
   onSave: () => void;
+  copy?: boolean;
+  saving?: boolean;
+  error?: string;
 }) {
   const dialog = useRef<HTMLFormElement>(null);
   const input = useRef<HTMLInputElement>(null);
@@ -24,7 +27,7 @@ export function SaveWorkflowDialog({ path, route, returnFocusTo, onChange, onClo
         className="dialog"
         role="dialog"
         aria-modal="true"
-        aria-label="Save workflow"
+        aria-label={copy ? "Save a workflow copy" : "Save workflow"}
         onSubmit={(e) => { e.preventDefault(); onSave(); }}
         onKeyDown={(e) => {
           if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) e.preventDefault();
@@ -45,13 +48,14 @@ export function SaveWorkflowDialog({ path, route, returnFocusTo, onChange, onClo
           }
         }}
       >
-        <h2>Save workflow</h2>
+        <h2>{copy ? "Save a workflow copy" : "Save workflow"}</h2>
         <p>Files in <code>workflows/</code> become API endpoints. The file name is the route unless the service settings name another.</p>
         <input ref={input} className="ctl" aria-label="File path" value={path} onChange={(e) => onChange(e.target.value)} />
         <div className="hint">Serves <code>/api/{route}</code></div>
+        {error && <p className="err" role="alert">{error}</p>}
         <div className="actions">
           <button type="button" className="btn" onClick={onClose}>Cancel</button>
-          <button className="primary" disabled={!/\.ya?ml$/.test(path)}>Save</button>
+          <button className="primary" disabled={saving || !/\.ya?ml$/.test(path)}>{copy ? "Save copy" : "Save"}</button>
         </div>
       </form>
     </div>

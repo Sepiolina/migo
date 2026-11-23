@@ -18,9 +18,10 @@ import { DataGrid, profileRows, type ColumnAction } from "./DataGrid";
 import { Console, type LogLine, type Problem } from "./Console";
 import { CommandMenu, type Command } from "./CommandMenu";
 import { Home, type WorkflowEntry } from "./Home";
-import { PackageBuilder } from "./PackageBuilder";
 import { DiscardChangesDialog } from "./DiscardChangesDialog";
 import { SaveWorkflowDialog } from "./SaveWorkflowDialog";
+import { createDraftId, draftKey, type RecoveryDraft } from "./draftRecovery";
+import { useDraftRecovery } from "./useDraftRecovery";
 import { steps as stepSpecs } from "./stepRegistry";
 import { workflowTemplates, type Template } from "./workflowTemplates";
 import { parse } from "yaml";
@@ -28,11 +29,24 @@ import { parse } from "yaml";
 const WorkflowTests = lazy(() => import("./WorkflowTests").then(({ WorkflowTests }) => ({ default: WorkflowTests })));
 const RunsPanel = lazy(() => import("./RunsPanel").then(({ RunsPanel }) => ({ default: RunsPanel })));
 const WorkflowDiagram = lazy(() => import("./WorkflowDiagram").then(({ WorkflowDiagram }) => ({ default: WorkflowDiagram })));
+const DraftRecoveryDialog = lazy(() => import("./DraftRecoveryDialog").then(({ DraftRecoveryDialog }) => ({ default: DraftRecoveryDialog })));
+const PackageBuilder = lazy(() => import("./PackageBuilder").then(({ PackageBuilder }) => ({ default: PackageBuilder })));
 
 type Theme = "system" | "light" | "dark";
 type Toast = { text: string; undo?: boolean } | null;
 type Panel = "steps" | "table" | "insp";
 type RunIdentity = { key: string };
+type WorkflowFile = { path: string; source: string; revision: string };
+type RecoveryReview = {
+  path: string;
+  disk: WorkflowFile | null;
+  record?: RecoveryDraft;
+  conflict: boolean;
+  setup?: boolean;
+};
+type YamlDraft = { revision: number; source: string };
+const unassignedWorkspace = "unassigned";
+const errorMessage = (error: unknown) => error instanceof Error ? error.message : String(error);
 
 const letters = (i: number): string => (i >= 26 ? letters(Math.floor(i / 26) - 1) : "") + String.fromCharCode(65 + (i % 26));
 const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 40) || "workflow";
@@ -73,9 +87,41 @@ export default function App() {
   const testsButton = useRef<HTMLButtonElement>(null);
   const runsButton = useRef<HTMLButtonElement>(null);
   const [workspace, setWorkspace] = useState("");
+  const currentWorkspace = useRef("");
+  const choosingWorkspace = useRef(false);
+  const openRequest = useRef(0);
   const [entries, setEntries] = useState<WorkflowEntry[]>([]);
   const [workflowPath, setWorkflowPath] = useState("");
   const [revision, setRevision] = useState<string | null>(null);
+  const [draftId, setDraftId] = useState("");
+  const restoredDraft = useRef<RecoveryDraft | undefined>(undefined);
+  const clearUnassignedDraft = useRef<(() => void) | undefined>(undefined);
+  const [yamlDraft, setYamlDraft] = useState<YamlDraft>();
+  const latestYamlDraft = useRef<YamlDraft | undefined>(undefined);
+  const updateYamlDraft = (next?: YamlDraft) => {
+    latestYamlDraft.current = next;
+    setYamlDraft(next);
+  };
+  const draftSource = yamlDraft?.revision === doc.snapshot.revision ? yamlDraft.source : source;
+  const dirty = draftSource !== doc.savedSource;
+  const latestEditor = () => {
+    const snapshot = doc.getCurrent();
+    const raw = latestYamlDraft.current;
+    return {
+      source: raw?.revision === snapshot.present.revision ? raw.source : snapshot.present.source,
+      savedSource: snapshot.savedSource,
+    };
+  };
+  const recovery = useDraftRecovery({
+    workspace: workspace || unassignedWorkspace,
+    workflowPath,
+    draftId,
+    baseRevision: revision,
+    source: draftSource,
+    savedSource: doc.savedSource,
+    dirty,
+    enabled: true,
+  });
   const [selection, setSelection] = useState<Selection>({ kind: "step", id: "steps.0" });
   const [showNav, setShowNav] = useState(true);
   const [showInsp, setShowInsp] = useState(true);
@@ -121,9 +167,14 @@ export default function App() {
   const [runFailure, setRunFailure] = useState<{ identity: RunIdentity; error: RunnerError }>();
   const [log, setLog] = useState<LogLine[]>([]);
   const [saving, setSaving] = useState(false);
+  const savePending = useRef(false);
   const [toast, setToast] = useState<Toast>(null);
   const [palette, setPalette] = useState<null | "all" | "add">(null);
   const [saveAs, setSaveAs] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string>();
+  const [recoveryReview, setRecoveryReview] = useState<RecoveryReview>();
+  const [reviewError, setReviewError] = useState<string>();
+  const [reviewBusy, setReviewBusy] = useState(false);
   const saveOpener = useRef<HTMLElement | null>(null);
   const [packaging, setPackaging] = useState(false);
   const [packagePending, setPackagePending] = useState(false);
@@ -190,12 +241,18 @@ export default function App() {
    * also restores the selection from before the edit. */
   const selections = useRef<{ undo: Selection[]; redo: Selection[] }>({ undo: [], redo: [] });
   const change = useCallback((next: string, label: string) => {
-    if (next === source) return;
+    if (next === doc.getCurrent().present.source) return;
     selections.current.undo = [...selections.current.undo.slice(-199), selection];
     selections.current.redo = [];
     doc.transact(label, () => next);
     say(label, true);
-  }, [doc, source, say, selection]);
+  }, [doc, say, selection]);
+  const commitYamlDraft = () => {
+    if (!latestYamlDraft.current) return;
+    const current = latestEditor();
+    updateYamlDraft();
+    change(current.source, "Edit YAML");
+  };
   const undo = () => {
     if (!doc.canUndo) return;
     doc.undo();
@@ -391,33 +448,90 @@ export default function App() {
   };
   const onColumnAction = (a: ColumnAction) => insertAfter(a.step, a.label);
 
+  const reportStorageError = () => say("Draft recovery storage is unavailable.");
+  function discardEditorChanges() {
+    const current = latestEditor();
+    clearUnassignedDraft.current?.();
+    const removed = recovery.clearCurrent();
+    const originalRemoved = !restoredDraft.current || recovery.discard(restoredDraft.current);
+    if (!removed || !originalRemoved) reportStorageError();
+    restoredDraft.current = undefined;
+    updateYamlDraft();
+    doc.load(current.savedSource);
+    if (!workflowPath) setDraftId("");
+    selections.current = { undo: [], redo: [] };
+  }
+  function guard(action: () => void) {
+    if (savePending.current || choosingWorkspace.current) return;
+    const current = latestEditor();
+    if (current.source !== current.savedSource) {
+      setPendingDiscard(() => action);
+    } else {
+      openRequest.current++;
+      action();
+    }
+  }
   async function chooseWorkspace() {
+    if (savePending.current || choosingWorkspace.current) return;
+    choosingWorkspace.current = true;
+    openRequest.current++;
     try {
       const picked = await native<{ path: string } | null>("choose_workspace");
       if (!picked) return;
+      const previousWorkspace = currentWorkspace.current;
+      if (!previousWorkspace && draftId) {
+        const original = restoredDraft.current;
+        clearUnassignedDraft.current = () => {
+          const activeRemoved = recovery.clearCurrent();
+          const originalRemoved = !original || recovery.discard(original);
+          if (activeRemoved && originalRemoved) clearUnassignedDraft.current = undefined;
+          else reportStorageError();
+        };
+        const current = latestEditor();
+        if (current.source === current.savedSource || recovery.writeCurrent({
+          ...current, workflowPath: "", draftId, baseRevision: null,
+        }, picked.path)) {
+          clearUnassignedDraft.current();
+        }
+        restoredDraft.current = undefined;
+      }
+      if (previousWorkspace && previousWorkspace !== picked.path) {
+        doc.load(workflowTemplates[1].source);
+        updateYamlDraft();
+        restoredDraft.current = undefined;
+        setWorkflowPath("");
+        setRevision(null);
+        setDraftId("");
+        setView("home");
+        setEntries([]);
+      }
+      currentWorkspace.current = picked.path;
       setWorkspace(picked.path);
-      await loadEntries();
+      await loadEntries(picked.path);
       addLog(`Opened folder ${picked.path}`);
     } catch (e) {
       fail(e);
+    } finally {
+      choosingWorkspace.current = false;
     }
   }
-  async function loadEntries() {
+  async function loadEntries(root: string) {
     const list = await native<{ paths: string[] }>("list_workflows");
     const out: WorkflowEntry[] = [];
     for (const path of list.paths) {
+      if (currentWorkspace.current !== root) return;
       try {
-        const file = await native<{ source: string }>("read_workflow", { path });
+        const file = await native<WorkflowFile>("read_workflow", { path });
         const y = parse(file.source) as { name?: string; service?: { route?: string } };
         out.push({ path, name: y?.name ?? "", route: y?.service?.route ?? base(path) });
       } catch {
         out.push({ path, name: "", route: base(path) });
       }
     }
-    setEntries(out);
+    if (currentWorkspace.current === root) setEntries(out);
   }
-  const guard = (action: () => void) => (doc.dirty ? setPendingDiscard(() => action) : action());
   const resetEditor = () => {
+    updateYamlDraft();
     selections.current = { undo: [], redo: [] };
     setDocumentEpoch((value) => value + 1);
     setSkipped(new Set());
@@ -427,22 +541,63 @@ export default function App() {
     setView("editor");
     setDiagram("unopened");
     setPanel("table");
+    setSampleSetup(false);
   };
-  async function openWorkflow(path: string, setup = false) {
-    if (runContext.current) runContext.current.navigation = { ...navigation };
-    try {
-      const file = await native<{ path: string; source: string; revision: string }>("read_workflow", { path });
-      doc.load(file.source);
-      setWorkflowPath(file.path);
-      setRevision(file.revision);
-      resetEditor();
-      if (setup) {
-        readPipeline(file.source);
-        setSampleSetup(true);
+  function loadWorkflow(file: WorkflowFile, setup = false, record?: RecoveryDraft) {
+    doc.load(file.source);
+    setWorkflowPath(file.path);
+    setRevision(file.revision);
+    setDraftId("");
+    resetEditor();
+    restoredDraft.current = record;
+    if (record) doc.setSource(record.source);
+    if (setup && !record) {
+      readPipeline(file.source);
+      setSampleSetup(true);
+    }
+    addLog(record ? `Restored draft for ${file.path}` : `Opened ${file.path}`);
+  }
+  function showRecoveryReview(next: RecoveryReview) {
+    setReviewError(undefined);
+    setRecoveryReview(next);
+  }
+  async function reviewDraft(record: RecoveryDraft, setup = false) {
+    const id = ++openRequest.current;
+    let disk: WorkflowFile | null = null;
+    if (record.workflowPath) {
+      try {
+        disk = await native<WorkflowFile>("read_workflow", { path: record.workflowPath });
+      } catch {
+        // An inaccessible or removed saved file can still be recovered to a different path.
       }
-      addLog(`Opened ${file.path}`);
+    }
+    if (id !== openRequest.current) return;
+    showRecoveryReview({
+      path: record.workflowPath,
+      disk,
+      record,
+      conflict: !!record.workflowPath && disk?.revision !== record.baseRevision,
+      setup,
+    });
+  }
+  async function openWorkflow(path: string, setup = false) {
+    const record = recovery.refresh().find((draft) => draft.workflowPath === path);
+    if (record) return reviewDraft(record, setup);
+    const id = ++openRequest.current;
+    try {
+      const file = await native<WorkflowFile>("read_workflow", { path });
+      if (id !== openRequest.current) return;
+      const canonicalDraft = recovery.refresh().find((draft) => draft.workflowPath === file.path);
+      if (canonicalDraft) {
+        showRecoveryReview({
+          path: file.path, disk: file, record: canonicalDraft,
+          conflict: file.revision !== canonicalDraft.baseRevision, setup,
+        });
+      } else {
+        loadWorkflow(file, setup);
+      }
     } catch (e) {
-      fail(e);
+      if (id === openRequest.current) fail(e);
     }
   }
   function startTemplate(t: Template) {
@@ -450,40 +605,145 @@ export default function App() {
     doc.markSaved("");
     setWorkflowPath("");
     setRevision(null);
+    setDraftId(createDraftId());
+    restoredDraft.current = undefined;
     resetEditor();
     const key = `mai.bindings:${workspace}:${readPipeline(t.source).name}`;
     if (!Object.keys(store.get(key, {})).length && Object.keys(t.samples).length) store.set(key, t.samples);
     setBindingState({ key, values: store.get(key, t.samples) });
     say(`New workflow from “${t.title}”. Save it to serve it as /api/${slug(readPipeline(t.source).name)}.`);
   }
+  function restoreRecovery() {
+    const record = recoveryReview?.record;
+    if (!record) return;
+    if (record.workflowPath) return void openDiskVersion("restore");
+    doc.load(record.savedSource);
+    doc.setSource(record.source);
+    setWorkflowPath("");
+    setRevision(null);
+    setDraftId(record.draftId);
+    resetEditor();
+    restoredDraft.current = record;
+    setRecoveryReview(undefined);
+  }
+  async function openDiskVersion(action: "open" | "restore" | "reload") {
+    const review = recoveryReview;
+    if (!review || reviewBusy) return;
+    setReviewBusy(true);
+    setReviewError(undefined);
+    try {
+      const file = await native<WorkflowFile>("read_workflow", { path: review.path });
+      if (action === "restore" && file.revision !== review.record?.baseRevision) {
+        showRecoveryReview({ ...review, disk: file, conflict: true });
+        return;
+      }
+      if (action === "reload") {
+        if (review.record && !recovery.discard(review.record)) {
+          setReviewError("Draft recovery storage is unavailable.");
+          return;
+        }
+        if (!review.record) discardEditorChanges();
+      }
+      loadWorkflow(file, review.setup, action === "restore" ? review.record : undefined);
+      setRecoveryReview(undefined);
+    } catch (error) {
+      if (action === "restore") showRecoveryReview({ ...review, disk: null, conflict: true });
+      setReviewError(errorMessage(error));
+    } finally {
+      setReviewBusy(false);
+    }
+  }
+  function discardRecoveryCopy() {
+    const record = recoveryReview?.record;
+    if (record && !recovery.discard(record)) {
+      setReviewError("Draft recovery storage is unavailable.");
+      return;
+    }
+    setRecoveryReview(undefined);
+  }
+  function beginSaveAs(path: string, opener: HTMLElement | null = null) {
+    if (savePending.current) return;
+    saveOpener.current = opener;
+    setSaveError(undefined);
+    setSaveAs(path);
+  }
+  function saveCopy() {
+    const path = recoveryReview?.path;
+    const extension = path?.match(/\.ya?ml$/i)?.[0] ?? ".yaml";
+    beginSaveAs(path ? `${path.slice(0, -extension.length)}-copy${extension}` : `workflows/${slug(pipeline.name)}-copy.yaml`);
+  }
   async function save(path = workflowPath, opener: HTMLElement | null = null) {
     if (!desktop || !workspace) { say("Open a project folder to save workflows."); return null; }
+    if (savePending.current || choosingWorkspace.current) return null;
     if (!path) {
-      saveOpener.current = opener;
-      setSaveAs(`workflows/${slug(pipeline.name)}.yaml`);
+      beginSaveAs(`workflows/${slug(pipeline.name)}.yaml`, opener);
       return null;
     }
+    const review = recoveryReview;
+    const copy = !!review && saveAs !== null;
+    const recoveredCopy = copy ? review.record : undefined;
+    const record = recoveredCopy ?? restoredDraft.current;
+    if (!recoveredCopy) commitYamlDraft();
+    const submitted = recoveredCopy?.source ?? latestEditor().source;
+    const expectedRevision = !copy && path === workflowPath ? revision : null;
+    const saveBindings = bindings;
+    openRequest.current++;
     try {
+      savePending.current = true;
       setSaving(true);
-      const saved = await native<{ path: string; source: string; revision: string }>("save_workflow", {
-        path,
-        source,
-        expectedRevision: path === workflowPath ? revision : null,
+      setSaveError(undefined);
+      const saved = await native<WorkflowFile>("save_workflow", {
+        path, source: submitted, expectedRevision,
       });
-      doc.markSaved(saved.source);
-      const key = `mai.bindings:${workspace}:${saved.path}`;
-      store.set(key, bindings);
-      setWorkflowPath(saved.path);
-      setRevision(saved.revision);
+      if (recoveredCopy) {
+        loadWorkflow(saved);
+      } else {
+        const latest = latestEditor().source;
+        const pendingDraftWritten = latest === saved.source || recovery.writeCurrent({
+          workflowPath: saved.path,
+          draftId: "",
+          baseRevision: saved.revision,
+          source: latest,
+          savedSource: saved.source,
+        });
+        if (pendingDraftWritten && (saved.path !== workflowPath || latest === saved.source)) {
+          recovery.clearCurrent();
+        }
+        if (pendingDraftWritten) clearUnassignedDraft.current?.();
+        doc.markSaved(saved.source);
+        store.set(`mai.bindings:${workspace}:${saved.path}`, saveBindings);
+        setWorkflowPath(saved.path);
+        setRevision(saved.revision);
+        setDraftId("");
+      }
+      if (record) recovery.discard(record);
+      restoredDraft.current = undefined;
       setSaveAs(null);
+      setRecoveryReview(undefined);
       say(`Saved ${saved.path}`);
       addLog(`Saved ${saved.path}`);
-      loadEntries().catch(() => undefined);
+      loadEntries(workspace).catch(() => undefined);
       return saved.revision;
-    } catch (e) {
-      fail(e);
+    } catch (error) {
+      const message = errorMessage(error);
+      if (message.startsWith("Workflow conflict:") && !copy) {
+        let disk: WorkflowFile | null = null;
+        try {
+          disk = await native<WorkflowFile>("read_workflow", { path });
+        } catch {
+          // The workflow may have been removed since opening.
+        }
+        recovery.flush();
+        setSaveAs(null);
+        showRecoveryReview({ path, disk, conflict: true });
+      } else if (saveAs !== null) {
+        setSaveError(message);
+      } else {
+        fail(error);
+      }
       return null;
     } finally {
+      savePending.current = false;
       setSaving(false);
     }
   }
@@ -522,18 +782,35 @@ export default function App() {
   };
 
   // ---- close guard and shortcuts ------------------------------------------------------------
-  const dirtyRef = useRef(false);
-  dirtyRef.current = doc.dirty;
+  const closeGuard = useRef<() => boolean>(() => false);
+  closeGuard.current = () => {
+    if (savePending.current) return true;
+    const editor = latestEditor();
+    return editor.source !== editor.savedSource;
+  };
   useEffect(() => {
     if (!("__TAURI_INTERNALS__" in window)) return;
     let stop: (() => void) | undefined;
+    let disposed = false;
     const w = getCurrentWindow();
     w.onCloseRequested((e) => {
-      if (!dirtyRef.current) return;
+      if (!closeGuard.current()) return;
       e.preventDefault();
-      setPendingDiscard(() => () => void w.destroy());
-    }).then((s) => (stop = s), () => undefined);
-    return () => stop?.();
+      if (!savePending.current) setPendingDiscard(() => () => void w.destroy());
+    }).then((s) => { if (disposed) s(); else stop = s; }, () => undefined);
+    return () => {
+      disposed = true;
+      stop?.();
+    };
+  }, []);
+  useEffect(() => {
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      if (!closeGuard.current()) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", beforeUnload);
+    return () => window.removeEventListener("beforeunload", beforeUnload);
   }, []);
   const keys = useRef<(e: KeyboardEvent) => void>(() => undefined);
   const saveCurrent = useRef(save);
@@ -557,13 +834,14 @@ export default function App() {
     }
   };
   keys.current = (e: KeyboardEvent) => {
-    if (panelOpen || palette || saveAs !== null || packaging || pendingDiscard || sampleSetup) return;
+    if (panelOpen || palette || saveAs !== null || recoveryReview || packaging || pendingDiscard || sampleSetup) return;
     const mod = e.metaKey || e.ctrlKey;
     const active = document.activeElement;
     const typing = active instanceof HTMLElement && /INPUT|TEXTAREA|SELECT/.test(active.tagName);
     const k = e.key.toLowerCase();
     if (mod && k === "k") { e.preventDefault(); setPalette("all"); return; }
     if (mod && k === "s") {
+      if (view !== "editor") return;
       e.preventDefault();
       if (typing) active.blur();
       setTimeout(() => void saveCurrent.current(undefined, active instanceof HTMLElement ? active : null), 0);
@@ -621,14 +899,22 @@ export default function App() {
     } }] : []),
     ...(editorOpen && !parsed.error ? [{group: "Workflow", label: "Set up samples", glyph: "↳", run: () => setSampleSetup(true)}] : []),
     { group: "Workflow", label: "Run with sample files", glyph: "▶", kbd: shortcut("Enter"), run: () => void runWorkflow() },
-    { group: "Workflow", label: "Save", glyph: "↓", kbd: shortcut("S"), run: () => void save() },
-    { group: "Workflow", label: "Save as…", glyph: "↓", run: () => {
-      saveOpener.current = null;
-      setSaveAs(workflowPath || `workflows/${slug(pipeline.name)}.yaml`);
-    } },
+    ...(view === "editor" ? [
+      ...(desktop && !workspace ? [{ group: "Workflow", label: "Open project folder…", glyph: "▤", run: () => void chooseWorkspace() }] : []),
+      { group: "Workflow", label: "Save", glyph: "↓", kbd: shortcut("S"), run: () => void save() },
+      { group: "Workflow", label: "Save as…", glyph: "↓", run: () => beginSaveAs(workflowPath || `workflows/${slug(pipeline.name)}.yaml`) },
+      ...(dirty ? [{ group: "Workflow", label: "Discard recovery copy", glyph: "×", run: () => {
+        clearUnassignedDraft.current?.();
+        const removed = recovery.clearCurrent();
+        const originalRemoved = !restoredDraft.current || recovery.discard(restoredDraft.current);
+        if (originalRemoved) restoredDraft.current = undefined;
+        if (removed && originalRemoved) say("Discarded recovery copy.");
+        else reportStorageError();
+      } }] : []),
+    ] : []),
     { group: "Workflow", label: "API endpoint and distribution", glyph: "⇄", run: () => setSelection({ kind: "endpoint" }) },
     { group: "Workflow", label: "Build Linux package…", glyph: "▣", run: () => setPackaging(true) },
-    { group: "Workflow", label: "All workflows", glyph: "⌂", run: () => setView("home") },
+    { group: "Workflow", label: "All workflows", glyph: "⌂", run: () => guard(() => setView("home")) },
     { group: "Edit", label: "Undo", glyph: "↶", kbd: shortcut("Z"), run: undo },
     { group: "Edit", label: "Redo", glyph: "↷", kbd: shortcut("Z", true), run: redo },
     ...addCommands,
@@ -774,7 +1060,7 @@ export default function App() {
   const panes = `panes${showNav ? "" : " no-nav"}${showInsp ? "" : " no-insp"}`;
   const editorToolbar = view === "editor" && !panelOpen;
   return (
-    <div ref={appRef} className="app" data-m={panelOpen ? "table" : panel}>
+    <div ref={appRef} className="app" data-m={panelOpen ? "table" : panel} data-draft-storage-error={recovery.storageUnavailable || undefined}>
       <header className="toolbar">
         <div className="tl">
           {editorToolbar && <button className="tb hide-sm" aria-label="Steps panel" aria-pressed={showNav} title={`Steps panel (${shortcut("1")})`} onClick={() => setShowNav(!showNav)}>{icons.nav}</button>}
@@ -785,7 +1071,7 @@ export default function App() {
               <>
                 <span className="kbd">/</span>
                 <b title={workflowPath || "Not saved yet"}>{pipeline.name || "Untitled"}</b>
-                <span className="edited">{doc.dirty ? (workflowPath ? "— Edited" : "— Not saved") : ""}</span>
+                <span className="edited">{dirty ? (workflowPath ? "— Edited" : "— Not saved") : ""}</span>
               </>
             )}
           </div>
@@ -811,6 +1097,9 @@ export default function App() {
           )}
         </div>
       </header>
+      {recovery.storageUnavailable && (
+        <div className="draft-storage-status" role="status">Draft recovery storage is unavailable. You can still save workflows.</div>
+      )}
 
       {workspacePanel === "runs" && <Suspense fallback={<div className="empty" role="status">Loading runs…</div>}><RunsPanel
         key={workspace}
@@ -832,7 +1121,7 @@ export default function App() {
         } : undefined}
       /></Suspense>}
       {workspacePanel === "tests" && <Suspense fallback={<div className="empty" role="status">Loading workflow tests…</div>}>
-        <WorkflowTests workspace={workspace} workflowPath={workflowPath} dirty={doc.dirty} busy={!!busy}
+        <WorkflowTests workspace={workspace} workflowPath={workflowPath} dirty={dirty} busy={!!busy}
           onSave={() => save()} onBack={() => {
             setWorkspacePanel(null);
             requestAnimationFrame(() => testsButton.current?.focus());
@@ -844,11 +1133,18 @@ export default function App() {
           workspace={workspace}
           desktop={desktop}
           workflows={entries}
+          recoveryDrafts={recovery.drafts.map((draft) => ({
+            id: draftKey(draft), label: draft.workflowPath || "Untitled workflow", updatedAt: draft.timestamp,
+          }))}
+          onOpenRecoveryDraft={(id) => guard(() => {
+            const record = recovery.refresh().find((draft) => draftKey(draft) === id);
+            if (record) void reviewDraft(record);
+          })}
           onOpenWorkspace={() => guard(() => void chooseWorkspace())}
           onOpen={(p) => guard(() => void openWorkflow(p))}
           onSetup={(path) => guard(() => void openWorkflow(path, true))}
           onTemplate={(t) => guard(() => startTemplate(t))}
-          onBack={doc.dirty || workflowPath ? () => setView("editor") : undefined}
+          onBack={dirty || workflowPath ? () => { openRequest.current++; setView("editor"); } : undefined}
         />
       ) : (
         <div className={panes} style={paneStyle} data-step={selectedStep ? true : undefined} data-diagram={diagram === "open" || undefined}>
@@ -918,7 +1214,7 @@ export default function App() {
                 inspection={selection.kind === "source" ? inspection.data : undefined}
                 route={route}
                 workflowPath={workflowPath}
-                canPackage={desktop && !!workspace && !!workflowPath && !doc.dirty}
+                canPackage={desktop && !!workspace && !!workflowPath && !dirty}
                 onPackage={() => setPackaging(true)}
                 onAddRead={(input) => {
                   change(insertStep(source, ["steps"], 0, { from: input }), `Read ${input}`);
@@ -933,8 +1229,13 @@ export default function App() {
         <Console
           problems={problems}
           log={log}
-          source={source}
-          onSource={(s) => change(keepLineEndings(source, s), "Edit YAML")}
+          source={draftSource}
+          onSourceDraft={(text) => {
+            const present = doc.getCurrent().present;
+            const next = keepLineEndings(present.source, text);
+            updateYamlDraft(next === present.source ? undefined : { revision: present.revision, source: next });
+          }}
+          onSource={commitYamlDraft}
           onGoTo={(id) => setSelection({ kind: "step", id })}
           open={consoleTab}
           onOpen={setConsoleTab}
@@ -971,27 +1272,52 @@ export default function App() {
         <SaveWorkflowDialog
           path={saveAs}
           route={String(pipeline.service.route ?? "") || base(saveAs)}
+          copy={!!recoveryReview}
+          saving={saving}
+          error={saveError}
           returnFocusTo={saveOpener.current}
-          onChange={setSaveAs}
-          onClose={() => setSaveAs(null)}
+          onChange={(path) => { setSaveError(undefined); setSaveAs(path); }}
+          onClose={() => { if (!savePending.current) setSaveAs(null); }}
           onSave={() => void save(saveAs)}
         />
       )}
+      {recoveryReview && saveAs === null && (
+        <Suspense fallback={<div className="scrim"><p role="status">Loading draft comparison…</p></div>}>
+          <DraftRecoveryDialog
+            path={recoveryReview.path || "Untitled workflow"}
+            draftSource={recoveryReview.record?.source ?? draftSource}
+            savedSource={recoveryReview.disk?.source ?? null}
+            updatedAt={recoveryReview.record?.timestamp}
+            conflict={recoveryReview.conflict}
+            error={reviewError}
+            busy={reviewBusy}
+            onRestore={recoveryReview.record && !recoveryReview.conflict ? restoreRecovery : undefined}
+            onOpenSaved={recoveryReview.disk && !recoveryReview.conflict ? () => void openDiskVersion("open") : undefined}
+            onDiscard={recoveryReview.record ? discardRecoveryCopy : undefined}
+            onSaveCopy={recoveryReview.conflict ? saveCopy : undefined}
+            onReloadDisk={recoveryReview.disk && recoveryReview.conflict ? () => void openDiskVersion("reload") : undefined}
+            onCancel={() => setRecoveryReview(undefined)}
+          />
+        </Suspense>
+      )}
       {packaging && (
-        <PackageBuilder
+        <Suspense fallback={<div className="scrim"><p role="status">Loading package builder…</p></div>}><PackageBuilder
           workspace={workspace}
           workflows={entries.map((e) => e.path).filter((path) => path.startsWith("workflows/"))}
-          blocked={doc.dirty}
+          blocked={dirty}
           onPending={setPackagePending}
           onClose={() => !packagePending && setPackaging(false)}
-        />
+        /></Suspense>
       )}
       {pendingDiscard && (
         <DiscardChangesDialog
           onCancel={() => setPendingDiscard(null)}
           onDiscard={() => {
             const a = pendingDiscard;
+            if (savePending.current) return;
+            discardEditorChanges();
             setPendingDiscard(null);
+            openRequest.current++;
             a();
           }}
         />

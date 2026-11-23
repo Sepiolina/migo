@@ -42,6 +42,8 @@ code, pre, textarea.code, .kbd, .mono { font-family: var(--mono); font-variant-l
 .kbd { font-size: 10.5px; color: var(--ink-3); }
 
 .app { height: 100%; display: grid; grid-template-rows: 44px minmax(0, 1fr) auto auto; }
+.app[data-draft-storage-error] { grid-template-rows: 44px auto minmax(0, 1fr) auto auto; }
+.draft-storage-status { padding: 5px 10px; color: var(--warn); background: var(--warn-tint); }
 .workspace-views { display: contents; }
 
 /* ---- toolbar ---------------------------------------------------------------------- */
@@ -304,6 +306,42 @@ button.problem:hover { background: var(--hover); }
 .discard-dialog h2 { margin: 0 0 8px; font-size: 15px; }
 .discard-dialog p { margin: 0 0 14px; color: var(--ink-2); line-height: 1.5; }
 .discard-dialog button { height: 28px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); padding: 0 12px; margin-right: 8px; color: var(--ink); }
+.dialog.draft-recovery-dialog { width: min(880px, 100%); max-height: 100%; min-height: 0; overflow: auto; }
+.draft-recovery-dialog header { overflow-wrap: anywhere; }
+.draft-recovery-dialog header p { margin-top: 4px; }
+.recovery-comparison { display: flex; flex-wrap: wrap; gap: 12px; }
+.recovery-comparison section { flex: 1 1 280px; min-width: 0; }
+.recovery-comparison h3 { margin: 0 0 4px; font-size: 12px; }
+.recovery-comparison .recovery-changed-line {
+  max-height: 4em;
+  margin-bottom: 4px;
+  padding: 4px 10px;
+  overflow: auto;
+  border-radius: 6px;
+  background: var(--accent-tint);
+  color: var(--ink);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.recovery-comparison pre {
+  max-height: min(40vh, 380px);
+  min-height: 6em;
+  margin: 0;
+  padding: 10px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--well);
+}
+.draft-recovery-dialog .actions { flex-wrap: wrap; }
+.draft-recovery-dialog .recovery-discard { margin-inline-end: auto; }
+.draft-recovery-dialog .recovery-error { color: var(--del); overflow-wrap: anywhere; }
+.recovery-entry { grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr)); gap: 4px 12px; }
+.recovery-entry .n { overflow-wrap: anywhere; }
+.recovery-entry time { color: var(--ink-2); }
+@media (max-width: 640px) {
+  .recovery-comparison pre { max-height: min(20vh, 150px); }
+}
 
 /* ---- compact layouts ---------------------------------------------------------------------- */
 .mtabs { display: none; }

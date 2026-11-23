@@ -133,6 +133,8 @@ Draft recovery can ship independently after the Release 1 document-state work. A
 
 ## Independent improvement. Recover drafts and handle save conflicts
 
+**Implemented in Studio.** Recovery copies preserve unsaved YAML. Compare the saved and draft text before restoring, reloading, or saving a copy. [User guide](MAI_STUDIO_USER_GUIDE.md#recover-edits-after-studio-closes)
+
 Studio already has undo, dirty-state guards, and revision-checked saves. A local recovery draft covers a crash or interrupted session. A conflict screen makes the existing revision check actionable when another editor has saved changes.
 
 1. After edits settle, write a versioned local draft containing workflow identity, base revision, source, and timestamp. Include untitled templates using a draft ID. Keep recovery separate from production YAML and workspace sample data. Avoid persisting stale drafts from late writes by sequencing writes per document. Define an expiry policy and expose **Discard recovery copy**.

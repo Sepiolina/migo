@@ -183,6 +183,22 @@ since it was opened; a conflict keeps your edits so you can save them elsewhere.
 Switching workflows or closing the window asks before discarding unsaved
 changes.
 
+### Recover edits after Studio closes
+
+Reopen the same project folder and check **Recovery drafts** on Home. For a
+template edited before choosing a folder, check Home before opening a project.
+The comparison shows the first differing line alongside the full YAML of each
+version. **Open saved version** keeps the draft available for later. **Restore draft**
+returns the text to the editor so you can continue editing and review it before
+saving. **Discard recovery copy** removes the selected draft.
+
+If the workflow changed on disk, **Save copy** writes your edits to a new file.
+**Reload disk version** opens the current contents of the original. A recovery
+copy contains workflow YAML, including any values you typed into it. Copies
+are local to the Studio profile and expire seven days after their last edit.
+If recovery storage is unavailable, save the
+workflow manually to preserve your work.
+
 ### Inspect the saved workbook
 
 After a successful XLSX run, **Workbook preview** opens the saved file. The filename and completion time appear above the sheet. Select a sheet tab, enter an address such as `J6` in **Cell address**, and press Enter. Use arrow keys to move and Page Up or Page Down to navigate a longer sheet. Hold Shift while moving to select a range within the loaded window and copy it to another spreadsheet. Use **Open workbook preview** in the command menu to return to the latest result for the open workflow.

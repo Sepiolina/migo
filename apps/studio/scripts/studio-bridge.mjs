@@ -4,7 +4,7 @@
 // folder and the real Go runner, through window.__maiBridge.
 import { execFile, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, lstatSync, mkdirSync, mkdtempSync, realpathSync, readdirSync, readFileSync, rmSync, writeFileSync, existsSync } from "node:fs";
+import { cpSync, linkSync, lstatSync, mkdtempSync, realpathSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -28,6 +28,42 @@ export function prepare({ runner: existingRunner } = {}) {
 }
 
 const revision = (text) => createHash("sha256").update(text).digest("hex");
+
+function saveWorkflow(workspace, { path, source, expectedRevision }) {
+  const file = join(workspace, path);
+  if (relative(workspace, file).startsWith("..")) throw new Error("Outside the workspace");
+  const replacing = expectedRevision != null;
+  const checkRevision = () => {
+    let current;
+    try {
+      current = readFileSync(file);
+    } catch {
+      throw new Error("Workflow conflict: file changed or was removed");
+    }
+    if (revision(current) !== expectedRevision) throw new Error("Workflow conflict: file changed externally");
+  };
+  if (replacing) checkRevision();
+  else if (existsSync(file)) throw new Error("Workflow conflict: file already exists");
+  const temporary = mkdtempSync(join(dirname(file), ".studio-save-"));
+  const staged = join(temporary, "workflow");
+  try {
+    writeFileSync(staged, source, replacing ? { mode: lstatSync(file).mode } : undefined);
+    if (replacing) {
+      checkRevision();
+      renameSync(staged, file);
+    } else {
+      try {
+        linkSync(staged, file);
+      } catch (error) {
+        if (error.code === "EEXIST") throw new Error("Workflow conflict: file already exists");
+        throw error;
+      }
+    }
+  } finally {
+    rmSync(temporary, { recursive: true, force: true });
+  }
+  return { path, source, revision: revision(source) };
+}
 
 const runnerOptions = { encoding: "utf8", maxBuffer: 4 << 20, timeout: 60000 };
 const isWorkflowTest = (command) => command === "discoverTests" || command === "runTests";
@@ -137,17 +173,8 @@ export async function installBridge(page, { workspace, runner }, chooseSample = 
         const source = readFileSync(join(workspace, args.path), "utf8");
         return { path: args.path, source, revision: revision(source) };
       }
-      case "save_workflow": {
-        const file = join(workspace, args.path);
-        if (relative(workspace, file).startsWith("..")) throw new Error("Outside the workspace");
-        if (!existsSync(dirname(file))) mkdirSync(dirname(file), { recursive: true });
-        if (existsSync(file) && args.expectedRevision !== revision(readFileSync(file, "utf8"))) {
-          if (args.expectedRevision === null) throw new Error("A file already exists at this path.");
-          throw new Error("The file changed on disk.");
-        }
-        writeFileSync(file, args.source);
-        return { path: args.path, source: args.source, revision: revision(args.source) };
-      }
+      case "save_workflow":
+        return saveWorkflow(workspace, args);
       case "runner_prepare_tests": {
         const { id } = args;
         if (typeof id !== "string" || !id.length || id.length > 64) throw new Error("Invalid test run ID");

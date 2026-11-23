@@ -15,6 +15,7 @@ node_modules/
 /apps/studio/src-tauri/target/
 /apps/studio/src-tauri/binaries/
 .studio/runs/
+.studio-workflow-save.lock
 /apps/studio/*.tsbuildinfo
 /apps/studio/src-tauri/gen/
 /apps/studio/src-tauri/workspace-core/target/

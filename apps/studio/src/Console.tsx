@@ -16,6 +16,7 @@ export function Console({
   problems,
   log,
   source,
+  onSourceDraft,
   onSource,
   onGoTo,
   open,
@@ -24,13 +25,17 @@ export function Console({
   problems: Problem[];
   log: LogLine[];
   source: string;
+  onSourceDraft?: (source: string) => void;
   onSource: (source: string) => void;
   onGoTo: (step: string) => void;
   open: Tab | null;
   onOpen: (tab: Tab | null) => void;
 }) {
-  const [draft, setDraft] = useState(source);
-  useEffect(() => setDraft(source), [source]);
+  const [localDraft, setLocalDraft] = useState(source);
+  useEffect(() => {
+    if (!onSourceDraft) setLocalDraft(source);
+  }, [source, onSourceDraft]);
+  const draft = onSourceDraft ? source : localDraft;
   const actionable = problems.filter((p) => p.level !== "info");
   const hasErrors = actionable.some((p) => p.level === "error");
   const tab = (t: Tab, label: React.ReactNode) => (
@@ -83,10 +88,10 @@ export function Console({
           aria-label="Workflow YAML"
           spellCheck={false}
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={() => draft !== source && onSource(draft)}
+          onChange={(e) => (onSourceDraft ?? setLocalDraft)(e.target.value)}
+          onBlur={() => (onSourceDraft || draft !== source) && onSource(draft)}
           onKeyDown={(e) => {
-            if (e.key === "s" && (e.metaKey || e.ctrlKey) && draft !== source) onSource(draft);
+            if (e.key.toLowerCase() === "s" && (e.metaKey || e.ctrlKey) && (onSourceDraft || draft !== source)) onSource(draft);
           }}
         />
       </div>

@@ -258,8 +258,24 @@ rollback, remote deployment, and signing-key lifecycle UI remain future work.
 
 `workflowDocument.ts` owns source/CST snapshots, revisions, bounded history and
 source transactions; `useDocument` is its React interface. Every edit is one
-transaction and one undo entry; invalid source is retained. This is an in-memory
-model, not a crash-recovery store.
+transaction and one undo entry. The document preserves invalid YAML so the editor
+can recover it as entered.
+
+Recovery uses versioned keys in local storage. A key identifies the workspace,
+document and editor instance. Each record contains the draft YAML, its saved
+baseline, the base revision and its last write time. Untitled documents get
+their own ID. Draft writes debounce for 750 ms and records expire after seven
+days. The project workflow is written only through the normal save operation
+with its expected revision. Studio processes serialize saves through an advisory
+lock on `.studio-workflow-save.lock` beside the target workflow. Building the
+native workspace crate requires Rust 1.89 or newer for file locking. An external
+editor can still write in the interval between Studio’s final revision check and
+replacement if it does not participate in the advisory lock.
+
+To exercise recovery across restarts and simultaneous editors, build Studio and
+run `node scripts/smoke-draft-recovery.mjs` from `apps/studio`. The script
+uses a temporary project and a persistent Chromium profile. Set
+`MAI_DRAFT_SCREENSHOT` to capture the conflict comparison.
 
 ### Document and preview error contracts
 

@@ -2,12 +2,18 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{
     collections::BTreeMap,
-    fs,
-    io::{Read, Write},
+    fs::{self, File, OpenOptions, TryLockError},
+    io::{ErrorKind, Read, Write},
     path::{Component, Path, PathBuf},
+    thread,
+    time::{Duration, Instant},
 };
 
 const LIMIT: u64 = 1024 * 1024;
+const MISSING_WORKFLOW: &str = "Cannot access workflow path";
+const CHANGED_OR_REMOVED: &str = "Workflow conflict: file changed or was removed";
+const CHANGED_EXTERNALLY: &str = "Workflow conflict: file changed externally";
+const ALREADY_EXISTS: &str = "Workflow conflict: file already exists";
 
 #[derive(Serialize)]
 pub struct Workflow {
@@ -40,7 +46,12 @@ fn valid_path(path: &str) -> Result<&Path, String> {
 
 // Reject symlinks at every level, including the file itself. The root comes from
 // the native picker and is canonicalized there.
-fn resolve(root: &Path, relative: &Path, allow_missing_file: bool) -> Result<PathBuf, String> {
+fn resolve(
+    root: &Path,
+    relative: &Path,
+    allow_missing_file: bool,
+    missing_error: &str,
+) -> Result<PathBuf, String> {
     let mut current = root.to_path_buf();
     let count = relative.components().count();
     for (index, component) in relative.components().enumerate() {
@@ -57,13 +68,12 @@ fn resolve(root: &Path, relative: &Path, allow_missing_file: bool) -> Result<Pat
             }
             Ok(_) => (),
             Err(e)
-                if e.kind() == std::io::ErrorKind::NotFound
-                    && allow_missing_file
-                    && index + 1 == count =>
+                if e.kind() == ErrorKind::NotFound && allow_missing_file && index + 1 == count =>
             {
                 ()
             }
-            Err(_) => return Err("Cannot access workflow path".into()),
+            Err(e) if e.kind() == ErrorKind::NotFound => return Err(missing_error.into()),
+            Err(_) => return Err(MISSING_WORKFLOW.into()),
         }
     }
     let parent = current
@@ -129,7 +139,53 @@ fn read_at(path: &Path, relative: &str) -> Result<Workflow, String> {
 
 pub fn read(root: &Path, path: &str) -> Result<Workflow, String> {
     let relative = valid_path(path)?;
-    read_at(&resolve(root, relative, false)?, path)
+    read_at(&resolve(root, relative, false, MISSING_WORKFLOW)?, path)
+}
+
+fn lock_workflow_saves(directory: &Path) -> Result<File, String> {
+    const LOCK_ERROR: &str = "Cannot lock workflow directory for saving";
+    let path = directory.join(".studio-workflow-save.lock");
+    // Keep the lock file beside the workflow so overlapping workspaces share it.
+    // The OS releases its advisory lock when the handle closes, including after a crash.
+    let options = || {
+        let mut options = OpenOptions::new();
+        options.read(true).write(true);
+        options
+    };
+    let lock = match options().create_new(true).open(&path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == ErrorKind::AlreadyExists => {
+            if !fs::symlink_metadata(&path)
+                .map_err(|_| LOCK_ERROR)?
+                .is_file()
+            {
+                return Err(LOCK_ERROR.into());
+            }
+            options().open(&path).map_err(|_| LOCK_ERROR)?
+        }
+        Err(_) => return Err(LOCK_ERROR.into()),
+    };
+    let deadline = Instant::now() + Duration::from_secs(1);
+    loop {
+        match lock.try_lock() {
+            Ok(()) => return Ok(lock),
+            Err(TryLockError::WouldBlock) if Instant::now() < deadline => {
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(TryLockError::WouldBlock) => {
+                return Err("Workflow directory saves are busy. Try again.".into());
+            }
+            Err(TryLockError::Error(_)) => return Err(LOCK_ERROR.into()),
+        }
+    }
+}
+
+fn check_revision(target: &Path, path: &str, revision: &str) -> Result<(), String> {
+    let current = read_at(target, path).map_err(|_| CHANGED_OR_REMOVED)?;
+    if current.revision != revision {
+        return Err(CHANGED_EXTERNALLY.into());
+    }
+    Ok(())
 }
 
 pub fn save(
@@ -142,24 +198,25 @@ pub fn save(
         return Err("Workflow exceeds 1 MiB".into());
     }
     let relative = valid_path(path)?;
-    let target = resolve(root, relative, true)?;
+    let missing_error = if expected.is_some() {
+        CHANGED_OR_REMOVED
+    } else {
+        MISSING_WORKFLOW
+    };
+    let target = resolve(root, relative, true, missing_error)?;
+    let parent = target.parent().ok_or("Invalid workflow path")?;
+    let _save_lock = lock_workflow_saves(parent)?;
+    resolve(root, relative, true, missing_error)?;
     match expected {
-        Some(revision) => {
-            let current = read_at(&target, path)
-                .map_err(|_| "Workflow conflict: file changed or was removed")?;
-            if current.revision != revision {
-                return Err("Workflow conflict: file changed externally".into());
-            }
-        }
-        None if target.exists() => return Err("Workflow conflict: file already exists".into()),
+        Some(revision) => check_revision(&target, path, revision)?,
+        None if target.exists() => return Err(ALREADY_EXISTS.into()),
         None => (),
     }
-    let parent = target.parent().ok_or("Invalid workflow path")?;
     let mut temporary =
         tempfile::NamedTempFile::new_in(parent).map_err(|_| "Cannot create temporary workflow")?;
     if expected.is_some() {
         let permissions = fs::metadata(&target)
-            .map_err(|_| "Workflow conflict: file changed or was removed")?
+            .map_err(|_| CHANGED_OR_REMOVED)?
             .permissions();
         temporary
             .as_file()
@@ -170,23 +227,21 @@ pub fn save(
         .write_all(source.as_bytes())
         .and_then(|_| temporary.as_file().sync_all())
         .map_err(|_| "Cannot write workflow")?;
-    // Recheck immediately before replacement, after all fallible preparation.
-    resolve(root, relative, expected.is_none())?;
+    // Editors outside Studio may change the file while the replacement is prepared.
+    resolve(root, relative, expected.is_none(), missing_error)?;
     if let Some(revision) = expected {
-        if read_at(&target, path)
-            .map_err(|_| "Workflow conflict: file changed or was removed")?
-            .revision
-            != revision
-        {
-            return Err("Workflow conflict: file changed externally".into());
-        }
+        check_revision(&target, path, revision)?;
         temporary
             .persist(&target)
             .map_err(|_| "Cannot replace workflow")?;
     } else {
-        temporary
-            .persist_noclobber(&target)
-            .map_err(|_| "Workflow conflict: file already exists or cannot be created")?;
+        temporary.persist_noclobber(&target).map_err(|e| {
+            if e.error.kind() == ErrorKind::AlreadyExists {
+                ALREADY_EXISTS
+            } else {
+                "Cannot create workflow"
+            }
+        })?;
     }
     Ok(Workflow {
         path: path.to_string(),
@@ -378,13 +433,51 @@ mod tests {
             fs::read_to_string(root.path().join("workflows/a.yaml")).unwrap(),
             "external"
         );
-        assert!(save(
-            root.path(),
-            "workflows/missing.yaml",
-            "clobber",
-            Some(&updated.revision)
-        )
-        .is_err());
+        fs::remove_file(root.path().join("workflows/a.yaml")).unwrap();
+        assert_eq!(
+            save(
+                root.path(),
+                "workflows/a.yaml",
+                "clobber",
+                Some(&updated.revision)
+            )
+            .err()
+            .as_deref(),
+            Some(CHANGED_OR_REMOVED)
+        );
+        assert!(!root.path().join("workflows/a.yaml").exists());
+    }
+
+    #[test]
+    fn simultaneous_updates_from_nested_workspaces_allow_only_one_commit() {
+        use std::sync::Barrier;
+
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        let root = root.as_path();
+        let nested = root.join("workflows");
+        fs::create_dir_all(nested.join("subdir")).unwrap();
+        let path = "workflows/subdir/workflow.yaml";
+        let original = save(root, path, "original", None).unwrap();
+        assert!(nested.join("subdir/.studio-workflow-save.lock").is_file());
+        assert!(!root.join(".studio-workflow-save.lock").exists());
+        let revision = original.revision.as_str();
+        let start = Barrier::new(2);
+        thread::scope(|scope| {
+            let update = |root, path, source| {
+                start.wait();
+                save(root, path, source, Some(revision))
+            };
+            let nested = nested.as_path();
+            let first = scope.spawn(move || update(root, path, "first"));
+            let second = scope.spawn(move || update(nested, "subdir//workflow.yaml", "second"));
+            let (saved, conflict) = match (first.join().unwrap(), second.join().unwrap()) {
+                (Ok(saved), Err(conflict)) | (Err(conflict), Ok(saved)) => (saved, conflict),
+                _ => panic!("expected exactly one save to succeed"),
+            };
+            assert_eq!(conflict, CHANGED_EXTERNALLY);
+            assert_eq!(read(root, path).unwrap().source, saved.source);
+        });
     }
 
     #[test]

@@ -1,6 +1,7 @@
 import { workflowTemplates, type Template } from "./workflowTemplates";
 
 export type WorkflowEntry = { path: string; name: string; route: string };
+type RecoveryEntry = { id: string; label: string; updatedAt: string | number };
 
 /** The start screen: the workspace, its workflows and templates. */
 export function Home({
@@ -12,6 +13,8 @@ export function Home({
   onSetup,
   onTemplate,
   onBack,
+  recoveryDrafts,
+  onOpenRecoveryDraft,
 }: {
   workspace: string;
   desktop: boolean;
@@ -21,6 +24,8 @@ export function Home({
   onSetup: (path: string) => void;
   onTemplate: (t: Template) => void;
   onBack?: () => void;
+  recoveryDrafts?: RecoveryEntry[];
+  onOpenRecoveryDraft?: (id: string) => void;
 }) {
   return (
     <main className="home" aria-label="Workflows">
@@ -39,6 +44,24 @@ export function Home({
             </div>
             <button className={workspace ? "btn" : "primary"} onClick={onOpenWorkspace}>{workspace ? "Change folder…" : "Open folder…"}</button>
           </div>
+        )}
+        {!!recoveryDrafts?.length && onOpenRecoveryDraft && (
+          <section aria-labelledby="recovery-drafts">
+            <h2 id="recovery-drafts">Recovery drafts</h2>
+            <div className="list">
+              {recoveryDrafts.map(({ id, label, updatedAt }) => {
+                const date = new Date(updatedAt);
+                return (
+                  <button className="wf recovery-entry" key={id} onClick={() => onOpenRecoveryDraft(id)}>
+                    <span className="n">{label}</span>
+                    {Number.isFinite(date.getTime()) && (
+                      <time dateTime={date.toISOString()}>{date.toLocaleString()}</time>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </section>
         )}
         {workspace && (
           <section>
