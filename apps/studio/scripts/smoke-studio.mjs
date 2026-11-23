@@ -105,7 +105,7 @@ try {
 
   assert.equal(await page.getByRole("tab", { name: "Problems", exact: true }).count(), 1);
   await page.getByText("Preview details", { exact: true }).click();
-  await page.getByText(/SQL and REST steps run on the server only/).waitFor();
+  await page.getByText(/Local previews skip SQL and REST calls and use the fallback values/).waitFor();
   await page.getByText("Preview details", { exact: true }).click();
 
   // Compare the same effective part number before and after forward fill.

@@ -130,7 +130,7 @@ output:
   }
 
   await workflow("bom").click();
-  await page.getByText("Add a sample file", { exact: true }).waitFor();
+  await page.getByText("Add sample files", { exact: true }).waitFor();
   const sourceBefore = await yaml.inputValue();
   assert.equal(sourceBefore, readFileSync(join(env.workspace, "workflows", "bom.yaml"), "utf8").replace(/\r\n/g, "\n"));
   assert.ok(await button("Undo").isDisabled());
@@ -171,7 +171,7 @@ output:
   }
 
   await table.click();
-  await page.getByText("Add a sample file", { exact: true }).waitFor();
+  await page.getByText("Add sample files", { exact: true }).waitFor();
   assert.match(await selectedStep.innerText(), /Fill blanks down/);
   assert.equal(await yaml.inputValue(), sourceBefore);
   assert.ok(await button("Undo").isDisabled());
@@ -191,7 +191,7 @@ output:
   assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
   await screenshot("compact");
   await table.click();
-  await page.getByText("Add a sample file", { exact: true }).waitFor();
+  await page.getByText("Add sample files", { exact: true }).waitFor();
   await button("Steps").click();
   assert.match(await selectedStep.innerText(), /Fill blanks down/);
   await page.setViewportSize({ width: 1600, height: 960 });
