@@ -10,6 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"miservice/internal/wftest"
+	"miservice/internal/workflow"
 )
 
 func fixtureRoot(t *testing.T) string {
@@ -239,5 +242,101 @@ func TestTraceTheBOMOffline(t *testing.T) {
 		if s.Error != "" {
 			t.Errorf("step %s failed offline: %s", s.Name, s.Error)
 		}
+	}
+}
+
+// With a mocks file in the workspace, previews and runs answer sql and rest
+// steps from it, and a run can be kept as a workflow test.
+func TestMocksAndSaveTest(t *testing.T) {
+	root := fixtureRoot(t)
+	workspace := t.TempDir()
+	data, err := os.ReadFile(filepath.Join(root, "examples/parts.xlsx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const source = `name: Enrich
+input:
+  parts: {label: Parts}
+steps:
+  - from: {input: parts, sheet: Parts, trim: true}
+  - rest: {url: 'http://erp.internal/stock', rows: response.items, save: stock}
+  - sql: {query: 'SELECT Code, Vendor FROM Vendors', save: vendors}
+  - join: {with: stock, on: [Part Number], right_on: [code], take: {Stock: qty}}
+  - join: {with: vendors, on: [Part Number], right_on: [Code], take: {Vendor: Vendor}}
+  - save: out
+output:
+  sheets: {Out: out}
+`
+	const mocks = `rest:
+  - url: /stock
+    body: {items: [{code: "00123", qty: 7}]}
+sql:
+  - query: Vendors
+    columns: [Code, Vendor]
+    rows: [["00123", Acme]]
+`
+	for name, content := range map[string]string{"parts.xlsx": string(data), "workflows/enrich.yaml": source, "tests/enrich.mocks.yaml": mocks} {
+		path := filepath.Join(workspace, name)
+		os.MkdirAll(filepath.Dir(path), 0o755)
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	p := Params{Workspace: workspace, YAML: source, Inputs: map[string]string{"parts": "parts.xlsx"}, Mocks: "tests/enrich.mocks.yaml"}
+
+	focus := 5
+	p.Step = &focus
+	r := request(t, "trace", p)
+	if !r.OK {
+		t.Fatalf("trace: %+v", r.Error)
+	}
+	traced := r.Result.(map[string]any)
+	steps := traced["steps"].([]workflow.StepTrace)
+	if traced["mocks"] != true || steps[5].Error != "" || len(steps[5].Rows) == 0 || !strings.Contains(strings.Join(steps[5].Rows[0], "|"), "7|Acme") {
+		t.Fatalf("trace with mocks: %+v", steps[5])
+	}
+	// Without the file, the same request is an offline preview as before.
+	p.Mocks = "tests/missing.mocks.yaml"
+	if r := request(t, "trace", p); !r.OK || r.Result.(map[string]any)["mocks"] != false {
+		t.Fatalf("trace without mocks: %+v", r)
+	}
+	p.Mocks, p.Step = "tests/enrich.mocks.yaml", nil
+	if r := request(t, "run", p); !r.OK {
+		t.Fatalf("run: %+v", r.Error)
+	}
+
+	p.Path, p.Name = "workflows/enrich.yaml", "One part in stock"
+	r = request(t, "saveTest", p)
+	if !r.OK {
+		t.Fatalf("saveTest: %+v", r.Error)
+	}
+	saved := r.Result.(map[string]any)
+	if saved["file"] != "tests/enrich.test.yaml" || saved["expected"] != "tests/enrich.one-part-in-stock.xlsx" {
+		t.Fatalf("saved %v", saved)
+	}
+	p.Name = "Second case"
+	if r := request(t, "saveTest", p); !r.OK {
+		t.Fatalf("second saveTest: %+v", r.Error)
+	}
+	if r := request(t, "saveTest", p); r.OK || !strings.Contains(r.Error.Message, "already has a test named") {
+		t.Fatalf("repeated name: %+v", r)
+	}
+	file, err := wftest.Load(filepath.Join(workspace, "tests/enrich.test.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := file.Run(context.Background(), false)
+	if len(results) != 2 || results[0].Err != nil || results[1].Err != nil {
+		t.Fatalf("the saved tests do not pass: %+v", results)
+	}
+	text, _ := os.ReadFile(filepath.Join(workspace, "tests/enrich.test.yaml"))
+	for _, want := range []string{"workflow: ../workflows/enrich.yaml", "in: {parts: ../parts.xlsx}", "mocks: enrich.mocks.yaml", "# Tests for enrich.yaml"} {
+		if !strings.Contains(string(text), want) {
+			t.Errorf("the test file lacks %q:\n%s", want, text)
+		}
+	}
+	p.Path = "../outside.yaml"
+	if r := request(t, "saveTest", p); r.OK {
+		t.Fatal("saveTest accepted a workflow outside the workspace")
 	}
 }

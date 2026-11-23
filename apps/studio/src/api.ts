@@ -100,7 +100,8 @@ export type StepTrace = {
   error?: string;
   ms: number;
 };
-export type Trace = { steps: StepTrace[]; format: string };
+/** `mocks`: sql and rest steps were answered from the workflow's mocks file. */
+export type Trace = { steps: StepTrace[]; format: string; mocks?: boolean };
 
 export class RunnerError extends Error {
   readonly code?: string;
@@ -117,7 +118,10 @@ export class RunnerError extends Error {
  * window.__maiBridge = { invoke(command, args) } answers the same commands
  * the Tauri host does (runner_request, list_workflows, read_workflow...).
  */
-type Bridge = { invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown> };
+type Bridge = {
+  invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
+  listen?: (event: string, handler: (payload: unknown) => void) => () => void;
+};
 const bridge = () => (window as unknown as { __maiBridge?: Bridge }).__maiBridge;
 
 export function isDesktop() {
@@ -159,6 +163,15 @@ async function runCancellableTests<T>(payload: Record<string, unknown>, id: stri
   } finally {
     signal.removeEventListener("abort", abort);
   }
+}
+
+/** Subscribe to an event the native host emits; resolves to an unsubscribe function. */
+export async function listenNative<T>(event: string, handler: (payload: T) => void): Promise<() => void> {
+  const b = bridge();
+  if (b) return b.listen ? b.listen(event, (p) => handler(p as T)) : () => undefined;
+  if (!isDesktop()) return () => undefined;
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<T>(event, (e) => handler(e.payload));
 }
 
 /** Send a request to the Go runner through the native host. */

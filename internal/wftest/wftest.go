@@ -11,9 +11,9 @@
 //	    in: {parts: empty.xlsx}
 //	    error: is empty                 # the run must fail with this text
 //
-// Optional per test: config (config.json keys) and sql_stub (a JSON table
-// every sql step returns), and rest_stub (a JSON response body every rest
-// request returns). Tests cannot reach the network.
+// Optional per test: config (config.json keys), mocks (a file or inline SQL
+// and REST answers, see package mock), sql_stub (a JSON table), and rest_stub
+// (a JSON response body). Tests cannot reach the network.
 package wftest
 
 import (
@@ -22,16 +22,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 
-	"miservice/internal/config"
+	"miservice/internal/mock"
 	"miservice/internal/workflow"
 )
 
@@ -50,6 +50,7 @@ type Case struct {
 	Name     string            `yaml:"name"`
 	In       map[string]string `yaml:"in"`
 	Config   map[string]any    `yaml:"config"`
+	Mocks    yaml.Node         `yaml:"mocks"`
 	SQLStub  string            `yaml:"sql_stub"`
 	RESTStub string            `yaml:"rest_stub"`
 	Expect   string            `yaml:"expect"`
@@ -282,76 +283,197 @@ func runCase(ctx context.Context, wf *workflow.Workflow, c Case, resolve resolve
 	return nil
 }
 
-type testTransport struct {
-	body []byte
+type noRESTMock struct {
+	http.RoundTripper
 }
 
-func (t testTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+func (t noRESTMock) RoundTrip(r *http.Request) (*http.Response, error) {
 	if err := r.Context().Err(); err != nil {
 		return nil, err
 	}
-	if t.body == nil {
-		return nil, fmt.Errorf("a test cannot call %s: rest steps have no network in tests", r.URL.Host)
-	}
-	return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(t.body))}, nil
+	_, err := t.RoundTripper.RoundTrip(r)
+	return nil, fmt.Errorf("rest steps have no network in tests: %w", err)
 }
 
-// runtime is a test's runtime: the case's config, its SQL stub, no network.
+// runtime uses the case's configuration and offline responses.
 func runtime(c Case, resolve resolver) (workflow.Runtime, error) {
-	transport := testTransport{}
-	rt := workflow.Runtime{}
-	if c.RESTStub != "" {
-		path, err := resolve(c.RESTStub)
+	set := &mock.Set{}
+	var err error
+	switch c.Mocks.Kind {
+	case 0:
+	case yaml.ScalarNode:
+		path, err := resolve(c.Mocks.Value)
 		if err != nil {
-			return rt, err
+			return workflow.Runtime{}, err
 		}
-		data, err := os.ReadFile(path)
+		if set, err = mock.Load(path); err != nil {
+			return workflow.Runtime{}, err
+		}
+	default:
+		data, err := yaml.Marshal(&c.Mocks)
 		if err != nil {
-			return rt, err
+			return workflow.Runtime{}, err
 		}
-		if !json.Valid(data) {
-			return rt, fmt.Errorf("%s: rest_stub must contain a JSON response body", c.RESTStub)
+		if set, err = mock.Parse(data); err != nil {
+			return workflow.Runtime{}, fmt.Errorf("mocks: %w", err)
 		}
-		transport.body = data
-	}
-	rt.HTTP = &http.Client{Transport: transport}
-	cfg := c.Config
-	if cfg == nil {
-		cfg = map[string]any{}
-	}
-	data, err := json.Marshal(cfg)
-	if err != nil {
-		return rt, fmt.Errorf("config: %w", err)
-	}
-	tmp, err := os.CreateTemp("", "cfg*.json")
-	if err != nil {
-		return rt, err
-	}
-	defer os.Remove(tmp.Name())
-	_, writeErr := tmp.Write(data)
-	if err := errors.Join(writeErr, tmp.Close()); err != nil {
-		return rt, err
-	}
-	if rt.Cfg, err = config.Load(tmp.Name()); err != nil {
-		return rt, err
-	}
-	rt.SQL = func(context.Context, string, string, []any) (*workflow.Table, error) {
-		return nil, errors.New("a sql step ran but the test has no sql_stub")
 	}
 	if c.SQLStub != "" {
 		path, err := resolve(c.SQLStub)
 		if err != nil {
-			return rt, err
+			return workflow.Runtime{}, err
 		}
 		b, err := os.ReadFile(path)
 		if err != nil {
-			return rt, err
+			return workflow.Runtime{}, err
 		}
 		var t workflow.Table
 		if err := json.Unmarshal(b, &t); err != nil {
-			return rt, fmt.Errorf("%s: %w", c.SQLStub, err)
+			return workflow.Runtime{}, fmt.Errorf("%s: %w", c.SQLStub, err)
 		}
-		rt.SQL = func(context.Context, string, string, []any) (*workflow.Table, error) { return &t, nil }
+		set.SQL = append(set.SQL, mock.SQL{Columns: t.Columns, Rows: t.Rows})
+	}
+	if c.RESTStub != "" {
+		path, err := resolve(c.RESTStub)
+		if err != nil {
+			return workflow.Runtime{}, err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return workflow.Runtime{}, err
+		}
+		if !json.Valid(data) {
+			return workflow.Runtime{}, fmt.Errorf("%s: rest_stub must contain a JSON response body", c.RESTStub)
+		}
+		set.REST = append(set.REST, mock.REST{Body: string(data)})
+	}
+	rt, err := set.Runtime(c.Config)
+	if err != nil {
+		return workflow.Runtime{}, err
+	}
+	if len(set.REST) == 0 {
+		rt.HTTP.Transport = noRESTMock{rt.HTTP.Transport}
 	}
 	return rt, nil
+}
+
+var slugRun = regexp.MustCompile(`[^a-z0-9]+`)
+
+// Add runs the workflow on the inputs and records the result as a new case
+// in the test file at path, which is created when missing: the output
+// becomes the case's expected file, beside the test file. workflowPath, the
+// inputs and mocks (optional) are files; the test file refers to them
+// relative to itself. It returns the expected file's path.
+func Add(ctx context.Context, path, workflowPath, name string, inputs map[string]string, mocks string) (string, error) {
+	name = strings.TrimSpace(name)
+	slug := strings.Trim(slugRun.ReplaceAllString(strings.ToLower(name), "-"), "-")
+	if slug == "" {
+		return "", errors.New("give the test a name with letters or digits")
+	}
+	dir := filepath.Dir(path)
+	rel := func(p string) (string, error) {
+		a, err := filepath.Abs(p)
+		if err != nil {
+			return "", err
+		}
+		d, err := filepath.Abs(dir)
+		if err != nil {
+			return "", err
+		}
+		r, err := filepath.Rel(d, a)
+		return filepath.ToSlash(r), err
+	}
+	wf, err := workflow.Load(workflowPath)
+	if err != nil {
+		return "", err
+	}
+	c := Case{Name: name, In: map[string]string{}}
+	c.Expect = strings.TrimSuffix(filepath.Base(path), Suffix) + "." + slug + wf.Ext()
+	for input, file := range inputs {
+		if c.In[input], err = rel(file); err != nil {
+			return "", err
+		}
+	}
+	if mocks != "" {
+		m, err := rel(mocks)
+		if err != nil {
+			return "", err
+		}
+		c.Mocks = yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: m}
+	}
+
+	var doc yaml.Node
+	data, err := os.ReadFile(path)
+	switch {
+	case errors.Is(err, os.ErrNotExist):
+		wfRel, err := rel(workflowPath)
+		if err != nil {
+			return "", err
+		}
+		header := fmt.Sprintf("# Tests for %s. Run them with: migo test %s\n# After a deliberate change to the output: migo test -update %s\nworkflow: %s\ntests: []\n",
+			filepath.Base(workflowPath), filepath.ToSlash(dir), filepath.ToSlash(dir), wfRel)
+		data = []byte(header)
+	case err != nil:
+		return "", err
+	}
+	if err := yaml.Unmarshal(data, &doc); err != nil {
+		return "", fmt.Errorf("%s: %w", path, err)
+	}
+	var tests *yaml.Node
+	if len(doc.Content) == 1 && doc.Content[0].Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(doc.Content[0].Content); i += 2 {
+			if doc.Content[0].Content[i].Value == "tests" {
+				tests = doc.Content[0].Content[i+1]
+			}
+		}
+	}
+	if tests == nil || tests.Kind != yaml.SequenceNode {
+		return "", fmt.Errorf("%s: no tests: list to add to", path)
+	}
+	for _, t := range tests.Content {
+		var existing Case
+		if t.Decode(&existing) == nil && (existing.Name == name || existing.Expect == c.Expect) {
+			return "", fmt.Errorf("%s already has a test named %q", filepath.Base(path), existing.Name)
+		}
+	}
+
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	here := func(p string) (string, error) {
+		return absolutePath(dir, p)
+	}
+	if err := runCase(ctx, wf, c, here, true, &Result{}); err != nil {
+		return "", err
+	}
+	entry := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	add := func(key string, value *yaml.Node) {
+		entry.Content = append(entry.Content, &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key}, value)
+	}
+	str := func(v string) *yaml.Node { return &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: v} }
+	add("name", str(name))
+	in := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map", Style: yaml.FlowStyle}
+	for _, input := range wf.Inputs {
+		in.Content = append(in.Content, str(input.Name), str(c.In[input.Name]))
+	}
+	add("in", in)
+	if mocks != "" {
+		add("mocks", str(c.Mocks.Value))
+	}
+	add("expect", str(c.Expect))
+	tests.Content = append(tests.Content, entry)
+	tests.Style = 0
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(&doc); err != nil {
+		return "", err
+	}
+	if err := enc.Close(); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		return "", err
+	}
+	return here(c.Expect)
 }

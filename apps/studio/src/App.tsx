@@ -5,7 +5,7 @@ import { shortcut } from "./shortcut";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./studio.css";
-import { isDesktop, native, request, type Inspection, type RunnerError, type RunResult, type Trace, type Validation } from "./api";
+import { isDesktop, listenNative, native, request, type Inspection, type RunnerError, type RunResult, type Trace, type Validation } from "./api";
 import { asRunnerError, useCurrentRequest } from "./useCurrentRequest";
 import { RequestCache } from "./RequestCache";
 import { useFileRevisions } from "./useFileRevisions";
@@ -16,6 +16,8 @@ import { Inspector } from "./Inspector";
 import { PaneSplitter, paneSizes, splitterWidth, type PanePreferences, type SidePane } from "./PaneSplitter";
 import { DataGrid, profileRows, type ColumnAction } from "./DataGrid";
 import { Console, type LogLine, type Problem } from "./Console";
+import { Splitter } from "./Splitter";
+import { assignSamples, type ImportedFile } from "./samples";
 import { CommandMenu, type Command } from "./CommandMenu";
 import { Home, type WorkflowEntry } from "./Home";
 import { DiscardChangesDialog } from "./DiscardChangesDialog";
@@ -151,6 +153,9 @@ export default function App() {
       visibleStage?.querySelector<HTMLElement>("[role=grid], [tabindex='0']") ?? visibleStage?.querySelector<HTMLElement>(".stage");
     element?.focus({ preventScroll: true });
   }, [panel, showInsp]);
+  const [consoleH, setConsoleH] = useState<number | null>(() => store.get<number | null>("mai.layout.console", null));
+  useEffect(() => store.set("mai.layout.console", consoleH), [consoleH]);
+  const [dropping, setDropping] = useState(false);
   const [consoleTab, setConsoleTab] = useState<"problems" | "log" | "yaml" | null>("problems");
   const [bindingState, setBindingState] = useState<{ key: string; values: Record<string, string> }>();
   const [documentEpoch, setDocumentEpoch] = useState(0);
@@ -176,6 +181,9 @@ export default function App() {
   const [reviewError, setReviewError] = useState<string>();
   const [reviewBusy, setReviewBusy] = useState(false);
   const saveOpener = useRef<HTMLElement | null>(null);
+  /** The name being typed for a new workflow test, while its dialog is open. */
+  const [testName, setTestName] = useState<string | null>(null);
+  const [savingTest, setSavingTest] = useState(false);
   const [packaging, setPackaging] = useState(false);
   const [packagePending, setPackagePending] = useState(false);
   const [pendingDiscard, setPendingDiscard] = useState<(() => void) | null>(null);
@@ -304,13 +312,61 @@ export default function App() {
     }
   }
 
+  /** Binds imported files to sources: all to `only`, or by file name (see assignSamples). */
+  function applySamples(files: ImportedFile[], opts: { only?: string; preferred?: string } = {}) {
+    for (const f of files) if (f.error) addLog(`Could not import ${f.name}: ${f.error}`, true);
+    const ok = files.filter((f) => f.path);
+    if (!ok.length) return;
+    const { bind: pairs, unassigned } = opts.only
+      ? { bind: { [opts.only]: ok[0].path! }, unassigned: ok.slice(1).map((f) => f.name) }
+      : assignSamples(pipeline.inputs, bindings, ok, opts.preferred);
+    const next = { ...bindings, ...pairs };
+    applyBindings(next);
+    fileRevisions.refresh();
+    for (const [id, path] of Object.entries(pairs)) {
+      const f = ok.find((x) => x.path === path)!;
+      addLog(`${id} ← ${path}${f.copied ? " (copied into the folder)" : ""}`);
+    }
+    if (unassigned.length) addLog(`Not used: ${unassigned.join(", ")}. Select a source and import again, or name the file after it.`, true);
+    const first = Object.keys(pairs)[0];
+    if (first) setSelection({ kind: "source", id: first });
+  }
+  /** Opens the file picker: one file for source `id`, or several matched to sources by name. */
+  async function importSamples(id?: string) {
+    try {
+      const picked = await native<{ files: ImportedFile[] }>("choose_sample_files", { multiple: !id });
+      applySamples(picked.files, { only: id });
+    } catch (e) {
+      fail(e);
+    }
+  }
+  // Files dropped on the window (desktop app). The handler reads the latest state.
+  const onDrop = useRef<(p: { files: ImportedFile[]; error?: string }) => void>(() => undefined);
+  onDrop.current = (p) => {
+    if (p.error) return fail(new Error(p.error));
+    if (view !== "editor") return addLog("Open a workflow, then drop its sample files.", true);
+    applySamples(p.files, { preferred: selection.kind === "source" ? selection.id : undefined });
+  };
+  useEffect(() => {
+    let alive = true;
+    const offs: (() => void)[] = [];
+    void listenNative<{ files: ImportedFile[]; error?: string }>("samples-dropped", (p) => onDrop.current(p)).then((off) => (alive ? offs.push(off) : off()));
+    void listenNative<boolean>("samples-drag", (on) => setDropping(on)).then((off) => (alive ? offs.push(off) : off()));
+    return () => {
+      alive = false;
+      offs.forEach((off) => off());
+    };
+  }, []);
+
   // ---- live preview: trace the workflow on the sample files ----------------------------
   const focus = selectedStep?.top ?? -1;
+  // Recorded answers for sql and rest steps live beside the tests, by convention.
+  const mocksPath = workflowPath ? `tests/${base(workflowPath)}.mocks.yaml` : "";
   const skip = [...skipped].sort((a, b) => a - b);
   const editorOpen = desktop && !!workspace && view === "editor" && !sampleSetup;
   const documentKey = JSON.stringify([workspace, workflowPath, documentEpoch]);
   const samplePaths = pipeline.inputs.map((input) => bindings[input.id]).filter(Boolean);
-  const fileRevisions = useFileRevisions(editorOpen ? workspace : "", [...samplePaths, ...(artifact ? [artifact.result.path] : [])]);
+  const fileRevisions = useFileRevisions(editorOpen ? workspace : "", [...samplePaths, ...(mocksPath ? [mocksPath] : []), ...(artifact ? [artifact.result.path] : [])]);
   const openRuns = () => {
     fileRevisions.refresh();
     setWorkspacePanel("runs");
@@ -318,7 +374,7 @@ export default function App() {
   const hasRevision = (path: string) => Object.hasOwn(fileRevisions.revisions ?? {}, path);
   const filesReady = samplePaths.every(hasRevision) && !fileRevisions.error;
   const samples = pipeline.inputs.map(({ id }) => [id, bindings[id], fileRevisions.revisions?.[bindings[id]]]);
-  const runKey = JSON.stringify([workspace, documentEpoch, source, samples]);
+  const runKey = JSON.stringify([workspace, documentEpoch, source, samples, mocksPath, fileRevisions.revisions?.[mocksPath]]);
   const runIdentity = useMemo(() => ({ key: runKey }), [runKey, bindingEpoch, view, workflowPath]);
   const navigation = useMemo(() => ({ selection, panel, diagram }), [selection, panel, diagram]);
   const runContext = useRef<{ identity: RunIdentity; navigation: typeof navigation; panelOpen: boolean } | undefined>(undefined);
@@ -331,7 +387,7 @@ export default function App() {
   const canRun = canPreview && filesReady;
   const previousRun = !!artifact && artifact.key !== runKey;
   const currentRunFailure = runFailure?.identity === runIdentity ? runFailure.error : undefined;
-  const busy = saving ? "Saving" : running === runIdentity ? "Running" : "";
+  const busy = savingTest ? "Saving test" : saving ? "Saving" : running === runIdentity ? "Running" : "";
   const previewLimit = 200;
   const traceScope = JSON.stringify([documentKey, selectedStep?.id, selectedStep?.op]);
   const compare = selectedStep?.depth === 0 && (selectedStep.op === "fill" || selectedStep.op === "filter");
@@ -343,7 +399,7 @@ export default function App() {
   const trace = useCurrentRequest(
     canRun ? JSON.stringify([focus, compare, previewLimit]) : null,
     traceScope,
-    () => request<Trace>("trace", { workspace, yaml: source, inputs: bindings, step: focus, skip, compare, limit: previewLimit }),
+    () => request<Trace>("trace", { workspace, yaml: source, inputs: bindings, step: focus, skip, compare, mocks: mocksPath, limit: previewLimit }),
     280,
     (data) => {
       const lines = data.steps.flatMap((s) => (s.log ?? []).map((l) => `${s.step + 1}. ${l}`));
@@ -747,6 +803,21 @@ export default function App() {
       setSaving(false);
     }
   }
+  /** Why a run cannot be kept as a test right now ("" when it can). */
+  const testBlocker = !desktop ? "Saving a test needs the desktop app." : !workspace ? "Open a project folder first." : !workflowPath || doc.dirty ? "Save the workflow first: a test runs the saved file." : !bound ? "Give every source a sample file first." : "";
+  async function saveTest(name: string) {
+    try {
+      setSavingTest(true);
+      const saved = await request<{ file: string; expected: string }>("saveTest", { workspace, path: workflowPath, inputs: bindings, mocks: mocksPath, name });
+      setTestName(null);
+      addLog(`Test “${name}” added to ${saved.file}; expected output ${saved.expected}`);
+      say(`Test saved to ${saved.file}. Run the tests with: migo test tests`);
+    } catch (e) {
+      fail(e);
+    } finally {
+      setSavingTest(false);
+    }
+  }
   async function runWorkflow() {
     if (!canPreview) return say(!desktop ? "Running needs the desktop app." : !workspace ? "Open a project folder first." : !bound ? "Give every source a sample file first." : "Fix the YAML first.");
     if (!filesReady) return say(fileRevisions.error ?? "Checking sample files…");
@@ -756,7 +827,7 @@ export default function App() {
       setRunning(runIdentity);
       setRunFailure(undefined);
       addLog(`Run started: ${pipeline.inputs.map((i) => bindings[i.id]).join(", ")}`);
-      const result = await request<RunResult>("run", { workspace, workflowPath, yaml: source, inputs: bindings, omitPreview: true });
+      const result = await request<RunResult>("run", { workspace, workflowPath, yaml: source, inputs: bindings, omitPreview: true, mocks: mocksPath });
       if (!isCurrent()) return;
       setRun({ key: runKey, workspace, completedAt: Date.now(), result });
       addLog(`Wrote ${result.path}`);
@@ -913,6 +984,7 @@ export default function App() {
       } }] : []),
     ] : []),
     { group: "Workflow", label: "API endpoint and distribution", glyph: "⇄", run: () => setSelection({ kind: "endpoint" }) },
+    { group: "Workflow", label: "Save this run as a test…", hint: "Keep the sample files and the output as a regression test", glyph: "✓", run: () => (testBlocker ? say(testBlocker) : setTestName("")) },
     { group: "Workflow", label: "Build Linux package…", glyph: "▣", run: () => setPackaging(true) },
     { group: "Workflow", label: "All workflows", glyph: "⌂", run: () => guard(() => setView("home")) },
     { group: "Edit", label: "Undo", glyph: "↶", kbd: shortcut("Z"), run: undo },
@@ -1008,8 +1080,11 @@ export default function App() {
     if (!desktop) return notReady(title, "Open the desktop app to see the table after each step.");
     if (!workspace) return notReady("Open a project folder", "Studio reads sample files from a folder on this computer.", <button className="primary" onClick={() => void chooseWorkspace()}>Open folder…</button>);
     if (!bound && !parsed.error) {
-      const missing = pipeline.inputs.find((i) => !bindings[i.id])!;
-      return notReady("Add a sample file", <>Choose a sample file for source <b>{missing.id}</b> to see the data at every step.</>, <button className="primary" onClick={() => setSampleSetup(true)}>Set up samples</button>);
+      const missing = pipeline.inputs.filter((i) => !bindings[i.id]);
+      const many = missing.length > 1;
+      return notReady(many ? "Add sample files" : "Add a sample file",
+        <>Choose or drop sample files for <b>{missing.map(i => i.id).join(", ")}</b> to preview the workflow.</>,
+        <div className="actions-row"><button className="primary" onClick={() => void importSamples(many ? undefined : missing[0].id)}>{many ? "Import sample files…" : "Import sample file…"}</button>{setupButton}</div>);
     }
     if (parsed.error) return notReady("The YAML has an error", <span className="err">{parsed.error}</span>);
     const retryPreview = <button className="btn" onClick={retryTrace}>Retry preview</button>;
@@ -1060,7 +1135,7 @@ export default function App() {
   const panes = `panes${showNav ? "" : " no-nav"}${showInsp ? "" : " no-insp"}`;
   const editorToolbar = view === "editor" && !panelOpen;
   return (
-    <div ref={appRef} className="app" data-m={panelOpen ? "table" : panel} data-draft-storage-error={recovery.storageUnavailable || undefined}>
+    <div ref={appRef} className="app" style={{ "--console-h": consoleH ? `${consoleH}px` : undefined } as React.CSSProperties} data-m={panelOpen ? "table" : panel} data-draft-storage-error={recovery.storageUnavailable || undefined}>
       <header className="toolbar">
         <div className="tl">
           {editorToolbar && <button className="tb hide-sm" aria-label="Steps panel" aria-pressed={showNav} title={`Steps panel (${shortcut("1")})`} onClick={() => setShowNav(!showNav)}>{icons.nav}</button>}
@@ -1173,6 +1248,7 @@ export default function App() {
             }}
             route={route}
             bindings={bindings}
+            onImport={desktop && workspace ? (id) => void importSamples(id) : undefined}
           />
           {showNav && (
             <PaneSplitter label="Resize workflow navigator" controls="studio-navigator" side="left" {...paneWidths.navigator} onResize={(width) => resizePane("navigator", width)} />
@@ -1203,6 +1279,7 @@ export default function App() {
                 onSelect={setSelection}
                 onClose={closeInspector}
                 trace={currentTrace?.steps}
+                activeMocksPath={currentTrace?.mocks ? mocksPath : undefined}
                 previewPending={traceUpdating}
                 previewFailed={!!(trace.error || (canPreview && fileRevisions.error))}
                 columns={cols}
@@ -1239,7 +1316,30 @@ export default function App() {
           onGoTo={(id) => setSelection({ kind: "step", id })}
           open={consoleTab}
           onOpen={setConsoleTab}
+          resizer={
+            consoleTab && (
+              <Splitter
+                className="split-console"
+                label="Resize the console"
+                axis="y"
+                invert
+                value={consoleH ?? (consoleTab === "yaml" ? Math.round(window.innerHeight * 0.4) : 128)}
+                min={60}
+                max={Math.max(120, window.innerHeight - 220)}
+                fallback={128}
+                onChange={setConsoleH}
+              />
+            )
+          }
         />
+      )}
+      {dropping && view === "editor" && (
+        <div className="dropzone" aria-live="polite">
+          <div>
+            <b>Drop to use as sample files</b>
+            <span>.xlsx, .xls or .csv · matched to sources by file name{selection.kind === "source" ? `, else ${selection.id}` : ""}</span>
+          </div>
+        </div>
       )}
       {view === "editor" && (
         <nav className="mtabs" aria-label="Panels">
@@ -1299,6 +1399,20 @@ export default function App() {
             onCancel={() => setRecoveryReview(undefined)}
           />
         </Suspense>
+      )}
+      {testName !== null && (
+        <div className="scrim" onMouseDown={(e) => e.target === e.currentTarget && setTestName(null)}>
+          <form className="dialog" role="dialog" aria-label="Save as test" onSubmit={(e) => { e.preventDefault(); void saveTest(testName.trim()); }}>
+            <h2>Save this run as a test</h2>
+            <p>Studio runs the saved workflow on the current sample files and keeps the output as the expected result. Later, <code>migo test tests</code> reports any cell that changes.</p>
+            <input className="ctl" aria-label="Test name" autoFocus placeholder="What this run shows, e.g. Typical order file" value={testName} onChange={(e) => setTestName(e.target.value)} />
+            <div className="hint">Added to <code>tests/{base(workflowPath)}.test.yaml</code>{trace.data?.mocks ? <>, with the answers in <code>{mocksPath}</code></> : null}. Check the expected file before you commit it.</div>
+            <div className="actions">
+              <button type="button" className="btn" onClick={() => setTestName(null)}>Cancel</button>
+              <button className="primary" disabled={!/[A-Za-z0-9]/.test(testName) || !!busy}>Save test</button>
+            </div>
+          </form>
+        </div>
       )}
       {packaging && (
         <Suspense fallback={<div className="scrim"><p role="status">Loading package builder…</p></div>}><PackageBuilder

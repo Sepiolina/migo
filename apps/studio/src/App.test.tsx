@@ -10,7 +10,9 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: async () => { throw new Error("
 
 const col = (name: string, kind: "text" | "number" = "text") => ({ name, kind, filled: 2, distinct: 2 });
 /** A runner stand-in: the trace after each step of the parts template. */
-function bridge() {
+const handlers: Record<string, (payload: unknown) => void> = {};
+const emit = (event: string, payload: unknown) => act(async () => handlers[event]?.(payload));
+function bridge(more: Record<string, (params: Record<string, unknown>) => unknown> = {}) {
   const calls: { command: string; args?: Record<string, unknown> }[] = [];
   const trace = (step: number): StepTrace[] =>
     [0, 1, 2, 3].map((i) => ({
@@ -26,15 +28,22 @@ function bridge() {
     invoke: async (command: string, args?: Record<string, unknown>) => {
       calls.push({ command, args });
       if (command === "file_revisions") return Object.fromEntries((args?.paths as string[]).map(path => [path, "fixture"]));
+      if (more[command]) return more[command](args ?? {});
       if (command === "choose_workspace") return { path: "/work" };
       if (command === "list_workflows") return { paths: [] };
       if (command === "choose_sample_file") return { path: "samples/parts.xlsx", copied: true };
+      if (command === "choose_sample_files") return { files: [{ name: "parts.xlsx", path: "samples/parts.xlsx", copied: true }] };
       if (command === "runner_request") {
         const req = (args as { request: { command: string; params: { step: number } } }).request;
+        if (more[req.command]) return { ok: true, result: more[req.command](req.params) };
         if (req.command === "trace") return { ok: true, result: { steps: trace(req.params.step), format: "xlsx" } };
         if (req.command === "validate") return { ok: true, result: { name: "x", inputs: [], sheets: [] } };
       }
       throw new Error(`unexpected ${command}`);
+    },
+    listen: (event: string, handler: (payload: unknown) => void) => {
+      handlers[event] = handler;
+      return () => delete handlers[event];
     },
   };
   return calls;
@@ -120,6 +129,37 @@ describe("Studio", () => {
     await waitFor(() => expect(document.querySelector(".nav .row.sel")?.textContent).toContain("Sort by Quantity, largest first"));
   });
 
+  it("keeps a run as a workflow test and previews service steps from the mocks file", async () => {
+    const source = "name: Parts\ninput:\n  parts: {label: Parts}\nsteps:\n  - from: parts\n  - sql: {query: SELECT 1, save: one}\n  - save: out\noutput:\n  sheets: {Out: out}\n";
+    const step = (i: number, name: string): StepTrace => ({ step: i, name, line: i + 5, columns: [col("Part Number")], total: 1, rows: [["00123"]], ms: 1 });
+    const calls = bridge({
+      list_workflows: () => ({ paths: ["workflows/parts.yaml"] }),
+      read_workflow: () => ({ path: "workflows/parts.yaml", source, revision: "r1" }),
+      trace: () => ({ steps: [step(0, "from"), step(1, "sql"), step(2, "save")], format: "xlsx", mocks: true }),
+      saveTest: () => ({ file: "tests/parts.test.yaml", expected: "tests/parts.typical-file.xlsx" }),
+    });
+    localStorage.setItem("mai.bindings:/work:workflows/parts.yaml", JSON.stringify({ parts: "examples/parts.xlsx" }));
+    render(<App />);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Open folder…" })));
+    await act(async () => fireEvent.click(await screen.findByRole("button", { name: /^Parts workflows\/parts\.yaml/ })));
+    // The preview asks for the workflow's mocks file and says when it answers.
+    await waitFor(() => expect(screen.getByText(/answered from tests\/parts\.mocks\.yaml/)).toBeTruthy(), { timeout: 3000 });
+    const params = (command: string) =>
+      (calls.filter((c) => (c.args as { request?: { command: string } })?.request?.command === command).at(-1)!.args as { request: { params: Record<string, unknown> } }).request.params;
+    expect(params("trace").mocks).toBe("tests/parts.mocks.yaml");
+
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    fireEvent.click(await screen.findByText("Save this run as a test…"));
+    const dialog = screen.getByRole("dialog", { name: "Save as test" });
+    const save = within(dialog).getByRole("button", { name: "Save test" }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    fireEvent.change(within(dialog).getByLabelText("Test name"), { target: { value: "Typical file" } });
+    await act(async () => fireEvent.click(save));
+    expect(params("saveTest")).toMatchObject({ workspace: "/work", path: "workflows/parts.yaml", name: "Typical file", inputs: { parts: "examples/parts.xlsx" }, mocks: "tests/parts.mocks.yaml" });
+    expect(screen.queryByRole("dialog", { name: "Save as test" })).toBeNull();
+    expect(screen.getByText(/Test saved to tests\/parts\.test\.yaml/)).toBeTruthy();
+  });
+
   it("binds a sample file chosen with Browse", async () => {
     const calls = bridge();
     render(<App />);
@@ -163,5 +203,47 @@ describe("Studio", () => {
     expect(document.activeElement).toBe(grid);
     expect(grid.getAttribute("aria-activedescendant")).toBe(cell.id);
     expect(calls.some((call) => (call.args?.request as { command?: string })?.command === "run")).toBe(false);
+  });
+  const lastInputs = (calls: { args?: Record<string, unknown> }[]) => {
+    const traces = calls.filter((c) => (c.args as { request?: { command: string } })?.request?.command === "trace");
+    return (traces.at(-1)?.args as { request: { params: { inputs: unknown } } } | undefined)?.request.params.inputs;
+  };
+
+  it("imports sample files from the source list and from files dropped on the window", async () => {
+    const calls = bridge();
+    render(<App />);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Open folder…" })));
+    fireEvent.click(screen.getByRole("button", { name: /Summarize by group/ }));
+    // The row's import button binds the picked file to that source.
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Import a sample file for parts" })));
+    expect(calls.find((c) => c.command === "choose_sample_files")?.args).toEqual({ multiple: false });
+    await waitFor(() => expect(lastInputs(calls)).toEqual({ parts: "samples/parts.xlsx" }));
+    // A dropped file goes to the source; one that fails to import is reported.
+    await emit("samples-drag", true);
+    expect(screen.getByText("Drop to use as sample files")).toBeTruthy();
+    await emit("samples-dropped", { files: [{ name: "new.csv", path: "samples/new.csv", copied: true }, { name: "x.txt", error: "Choose an .xlsx, .xls or .csv file" }] });
+    await emit("samples-drag", false);
+    expect(screen.queryByText("Drop to use as sample files")).toBeNull();
+    await waitFor(() => expect(lastInputs(calls)).toEqual({ parts: "samples/new.csv" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Run log" }));
+    expect(screen.getByText(/Could not import x\.txt/)).toBeTruthy();
+    expect(screen.getByText(/parts ← samples\/new\.csv \(copied into the folder\)/)).toBeTruthy();
+  });
+
+  it("resizes the panels and remembers the sizes", async () => {
+    bridge();
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /Summarize by group/ }));
+    const nav = screen.getByRole("separator", { name: "Resize workflow navigator" });
+    // (Dragging is covered by scripts/smoke-studio.mjs: jsdom has no pointer coordinates.)
+    fireEvent.keyDown(nav, { key: "ArrowRight" });
+    fireEvent.keyDown(nav, { key: "ArrowRight" });
+    expect(nav.getAttribute("aria-valuenow")).toBe("292");
+    const insp = screen.getByRole("separator", { name: "Resize inspector" });
+    fireEvent.keyDown(insp, { key: "ArrowLeft" }); // the inspector grows to the left
+    expect(insp.getAttribute("aria-valuenow")).toBe("316");
+    fireEvent.keyDown(screen.getByRole("separator", { name: "Resize the console" }), { key: "ArrowUp" });
+    const app = document.querySelector(".app") as HTMLElement;
+    expect(app.style.getPropertyValue("--console-h")).toBe("144px");
   });
 });

@@ -3,6 +3,9 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -169,7 +172,7 @@ func TestNewAndValidateRefuseMistakes(t *testing.T) {
 // The repository's own workflow tests pass, and the runner reports a
 // difference, creates expected files with -update and checks error cases.
 func TestWorkflowTests(t *testing.T) {
-	if code, out := migo(t, "test", "../../examples"); code != 0 || !strings.Contains(out, "3 passed, 0 failed") {
+	if code, out := migo(t, "test", "../../examples"); code != 0 || !strings.Contains(out, "5 passed, 0 failed") {
 		t.Fatalf("examples: code %d: %s", code, out)
 	}
 	dir := t.TempDir()
@@ -216,5 +219,88 @@ func TestRunWritesCSV(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(filepath.Join(dir, "o.csv")); !bytes.Contains(data, []byte("Part Number")) {
 		t.Fatalf("csv content: %q", data)
+	}
+}
+
+const enrichWorkflow = `name: Enrich
+input:
+  parts: {label: Parts}
+steps:
+  - from: {input: parts, sheet: Parts, trim: true}
+  - rest:
+      url: '{config("url")}/stock'
+      method: post
+      each: 'map(rows, #["Part Number"])'
+      batch: '2'
+      body: '{codes: batch}'
+      rows: response.items
+      save: stock
+  - sql: {query: 'SELECT Code, Vendor FROM Vendors', save: vendors}
+  - join: {with: stock, on: [Part Number], right_on: [code], take: {Stock: qty}}
+  - join: {with: vendors, on: [Part Number], right_on: [Code], take: {Vendor: Vendor}}
+  - save: out
+output:
+  sheets: {Out: out}
+`
+
+// A run against real systems is recorded once; afterwards the workflow runs
+// and is tested from the recording, with the systems gone.
+func TestRecordThenReplayMocks(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct{ Codes []string }
+		json.NewDecoder(r.Body).Decode(&req)
+		items := []map[string]any{}
+		for _, c := range req.Codes {
+			items = append(items, map[string]any{"code": c, "qty": len(c) * 10})
+		}
+		json.NewEncoder(w).Encode(map[string]any{"items": items})
+	}))
+	dir := t.TempDir()
+	path := func(name string) string { return filepath.Join(dir, name) }
+	os.WriteFile(path("enrich.yaml"), []byte(enrichWorkflow), 0o644)
+	os.WriteFile(path("vendors.json"), []byte(`{"columns": ["Code", "Vendor"], "rows": [["00123", "Acme"]]}`), 0o644)
+	cfg := `{"url": "` + srv.URL + `"}`
+	parts := "parts=../../examples/parts.xlsx"
+
+	code, out := migo(t, "run", "-in", parts, "-cfg", cfg, "-sql-stub", path("vendors.json"), "-record", path("enrich.mocks.yaml"), "-out", path("live.xlsx"), path("enrich.yaml"))
+	if code != 0 || !strings.Contains(out, "recorded 1 sql result(s)") {
+		t.Fatalf("record: code %d: %s", code, out)
+	}
+	srv.Close() // from here on nothing real answers
+	recording, _ := os.ReadFile(path("enrich.mocks.yaml"))
+	if strings.Contains(string(recording), srv.URL) || !strings.Contains(string(recording), "url: /stock") {
+		t.Fatalf("the recording should hold the path, not the host:\n%s", recording)
+	}
+
+	if code, out := migo(t, "run", "-in", parts, "-mocks", path("enrich.mocks.yaml"), "-out", path("replay.xlsx"), path("enrich.yaml")); code != 0 {
+		t.Fatalf("replay: code %d: %s", code, out)
+	}
+	rows := func(file string) [][]string {
+		f, err := excelize.OpenFile(path(file))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer f.Close()
+		r, _ := f.GetRows("Out")
+		return r
+	}
+	live := rows("live.xlsx")
+	if len(live) < 2 || !reflect.DeepEqual(live, rows("replay.xlsx")) || !strings.Contains(strings.Join(live[1], "|"), "Acme") {
+		t.Fatalf("live %v\nreplay %v", live, rows("replay.xlsx"))
+	}
+
+	// The same recording drives a workflow test; inline mocks work too, and a
+	// failing status or a call nothing answers fails the run with a clear message.
+	abs, _ := filepath.Abs("../../examples/parts.xlsx")
+	in := "    in: {parts: " + filepath.ToSlash(abs) + "}\n"
+	os.WriteFile(path("enrich.test.yaml"), []byte("workflow: enrich.yaml\ntests:\n"+
+		"  - name: recorded\n"+in+"    mocks: enrich.mocks.yaml\n    expect: replay.xlsx\n"+
+		"  - name: service down\n"+in+"    mocks: {rest: [{status: 503}], sql: [{columns: [Code, Vendor], rows: []}]}\n    error: status code 503\n"+
+		"  - name: nothing answers\n"+in+"    error: no mock answers POST\n"), 0o644)
+	if code, out := migo(t, "test", path("enrich.test.yaml")); code != 0 || !strings.Contains(out, "3 passed, 0 failed") {
+		t.Fatalf("test: code %d: %s", code, out)
+	}
+	if code, out := migo(t, "run", "-in", parts, "-mocks", path("enrich.mocks.yaml"), "-record", path("x.yaml"), "-check", path("enrich.yaml")); code != 2 {
+		t.Fatalf("-mocks with -record: code %d: %s", code, out)
 	}
 }

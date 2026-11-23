@@ -28,6 +28,7 @@ interface Props {
   onSelect: (s: Selection) => void;
   onClose: () => void;
   trace?: StepTrace[];
+  activeMocksPath?: string;
   previewPending?: boolean;
   previewFailed?: boolean;
   columns: string[];
@@ -326,7 +327,7 @@ export function Inspector(p: Props) {
             <div className="hint">Studio has no form for “{step.op}”. Edit it in YAML below the table.</div>
           )}
           {step.spec?.help && <div className="hint">{step.spec.help}</div>}
-          {step.spec?.service && <div className="hint">Runs on the server only. Local previews skip external calls.</div>}
+          {step.spec?.service && <div className="hint">The server makes live calls. Studio previews run offline.</div>}
         </div>
         {step.depth === 0 && (
           <div className="sec">
@@ -335,7 +336,7 @@ export function Inspector(p: Props) {
             {p.trace && steps.some((s) => s.spec?.service) && (
               <details>
                 <summary>Preview details</summary>
-                <div className="hint">SQL and REST steps run on the server only. Local previews skip them and use the fallback values.</div>
+                <div className="hint">{p.activeMocksPath ? `SQL and REST steps are answered from ${p.activeMocksPath}.` : "Local previews skip SQL and REST calls and use the fallback values."}</div>
               </details>
             )}
           </div>

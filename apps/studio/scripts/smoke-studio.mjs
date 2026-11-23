@@ -86,6 +86,18 @@ try {
   }
   await setup.getByRole("button", { name: "Finish" }).click();
   assert.deepEqual([await width(".nav"), await width(".insp")], resized);
+  await page.getByRole("button", { name: "Import sample files", exact: true }).click();
+  await page.locator(".nav .row", { hasText: /^\w+bom.*bom_basic\.xlsx/ }).waitFor();
+  await page.locator(".nav .row", { hasText: /^\w+priority.*prio_basic\.xlsx/ }).waitFor();
+  await page.locator(".nav .row", { hasText: /^\w+priority/ }).click();
+  await page.locator("#in-file").fill("testdata/prio_basic.xlsx");
+  await page.locator("#in-file").press("Enter");
+  // Files dropped on the window (the host's event) bind the same way.
+  await page.evaluate(() => window.__maiEmit("samples-dropped", { files: [{ name: "prio_basic.xlsx", path: "testdata/prio_basic.xlsx", copied: false }] }));
+  await page.getByRole("tab", { name: "Run log" }).click();
+  await page.locator(".cline", { hasText: "priority ← testdata/prio_basic.xlsx" }).first().waitFor();
+  await page.getByRole("tab", { name: "Problems" }).click();
+
   await page.locator(".nav .row", { hasText: "Fill blanks down" }).click();
   await page.locator(".grid tbody tr").first().waitFor();
   assert.match(await page.locator(".sbar").innerText(), /6 rows/);

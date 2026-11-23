@@ -153,6 +153,14 @@ centered, and `.` or an omitted trailing position uses the cell style or the
 default left alignment.
 Studio passes `omitPreview: true` to `run` and reads the saved file through a separate
 preview request. The runner's default response still includes its inline preview.
+
+`trace` and `run` also take `mocks`, a workspace-relative mocks file: when it
+exists, sql and rest steps are answered from it (`internal/mock`) and the trace
+result has `mocks: true`; when it does not, the run is offline as before.
+`saveTest` takes `path` (the saved workflow), `inputs`, `mocks` and `name`, and
+adds a case to `tests/<workflow>.test.yaml` (`internal/wftest`). A new runner
+command must also be added to the allow-list in `authorize`
+(`src-tauri/src/lib.rs`).
 The native bridge replaces the workspace path with the folder approved by the
 native picker. The standalone runner is a local developer utility, not a remotely
 accessible authorization service.
