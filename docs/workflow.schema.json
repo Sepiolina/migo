@@ -1,0 +1,882 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "additionalProperties": false,
+  "definitions": {
+    "step": {
+      "additionalProperties": false,
+      "description": "One step: a `name: argument` pair, or if / then / else.",
+      "minProperties": 1,
+      "properties": {
+        "append": {
+          "description": "Append tables: Add the rows of saved tables; columns are matched by name. Saved dataset names separated by commas. Their rows are added below the current table.",
+          "type": [
+            "array",
+            "string",
+            "number"
+          ]
+        },
+        "compare": {
+          "additionalProperties": false,
+          "description": "Compare tables: Mark rows added, removed, changed or unchanged against a saved table. Compares the current table with a saved baseline by key columns and writes a status column.",
+          "properties": {
+            "by": {
+              "description": "by keys.",
+              "type": [
+                "array",
+                "string",
+                "number"
+              ]
+            },
+            "columns": {
+              "description": "compare columns.",
+              "type": [
+                "array",
+                "string",
+                "number"
+              ]
+            },
+            "normalize": {
+              "description": "ignore case and spaces.",
+              "type": "boolean"
+            },
+            "status": {
+              "description": "status column."
+            },
+            "with": {}
+          },
+          "required": [
+            "with",
+            "by"
+          ],
+          "type": "object"
+        },
+        "dedupe": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "by": {
+                  "type": [
+                    "array",
+                    "string",
+                    "number"
+                  ]
+                },
+                "keep": {
+                  "description": "keep.",
+                  "enum": [
+                    "first",
+                    "last"
+                  ]
+                },
+                "normalize": {
+                  "description": "ignore case and spaces.",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "by"
+              ],
+              "type": "object"
+            },
+            {
+              "type": [
+                "array",
+                "string",
+                "number"
+              ]
+            }
+          ],
+          "description": "Remove duplicates: Keep one row per key. Keep one row for each unique combination of these column titles, separated by commas."
+        },
+        "drop": {
+          "description": "Remove columns: Remove columns from the table. Column titles separated by commas. Later steps no longer see them.",
+          "type": [
+            "array",
+            "string",
+            "number"
+          ]
+        },
+        "else": {
+          "description": "If / else: Run steps only when a table condition holds. A table expression: it sees rows, table(\"name\"), sheets(\"input\") and config(\"key\").",
+          "items": {
+            "$ref": "#/definitions/step"
+          },
+          "type": "array"
+        },
+        "fail": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "message": {
+                  "description": "(text with {expression} parts)"
+                },
+                "when": {
+                  "description": "when. (table expression)"
+                }
+              },
+              "required": [
+                "message"
+              ],
+              "type": "object"
+            },
+            {
+              "description": "(text with {expression} parts)"
+            }
+          ],
+          "description": "Stop with error: Stop the run; the message becomes the API error. Text with {expression} parts. With a condition, the run stops only when it is true."
+        },
+        "fill": {
+          "description": "Fill blanks down: Fill blank cells from the row above. Column titles separated by commas. A blank cell takes the last non-blank value above it.",
+          "type": [
+            "array",
+            "string",
+            "number"
+          ]
+        },
+        "filter": {
+          "description": "Filter rows: Keep rows that match a condition. Keeps the rows where the condition is true, for example Quantity > 0 or Status != \"Cancelled\". (row expression)"
+        },
+        "from": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "columns": {
+                  "additionalProperties": {
+                    "description": "A column read from a fixed sheet column letter, such as A or BA."
+                  },
+                  "description": "fixed columns.",
+                  "type": "object"
+                },
+                "empty": {
+                  "description": "fail if empty. (text with {expression} parts)"
+                },
+                "header": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "columns": {
+                      "additionalProperties": {
+                        "description": "A column found by any of these header titles (case-insensitive), separated by commas.",
+                        "type": [
+                          "array",
+                          "string",
+                          "number"
+                        ]
+                      },
+                      "description": "header titles.",
+                      "type": "object"
+                    },
+                    "fallback": {
+                      "additionalProperties": {
+                        "description": "A column read from a fixed sheet column letter, such as A or BA."
+                      },
+                      "description": "fallback positions.",
+                      "type": "object"
+                    },
+                    "min": {
+                      "description": "with at least.",
+                      "minimum": 1,
+                      "type": "integer"
+                    },
+                    "search": {
+                      "description": "find header in first.",
+                      "minimum": 1,
+                      "type": "integer"
+                    }
+                  },
+                  "type": "object"
+                },
+                "input": {
+                  "description": "source."
+                },
+                "row_number": {
+                  "description": "row number column."
+                },
+                "sheet": {},
+                "skip_blank": {
+                  "description": "skip blank rows.",
+                  "type": "boolean"
+                },
+                "start": {
+                  "description": "first data row.",
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "trim": {
+                  "description": "trim cells.",
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "input"
+              ],
+              "type": "object"
+            },
+            {
+              "type": [
+                "string",
+                "number"
+              ]
+            }
+          ],
+          "description": "Read data: Start with an input workbook or a saved table. Starts the table from a source or a table saved earlier. Leave the sheet blank for the first sheet; a number counts from 1. A CSV file has one sheet, Sheet1."
+        },
+        "group": {
+          "additionalProperties": false,
+          "description": "Group rows: Summarize rows by key: one row per group. Separate column titles with commas. Leave Group by empty to total the whole table. Add one summary per aggregate.",
+          "properties": {
+            "by": {
+              "type": [
+                "array",
+                "string",
+                "number"
+              ]
+            },
+            "count": {
+              "description": "Summarize these columns in each group.",
+              "type": [
+                "array",
+                "string",
+                "number"
+              ]
+            },
+            "first": {
+              "description": "Summarize these columns in each group.",
+              "type": [
+                "array",
+                "string",
+                "number"
+              ]
+            },
+            "join": {
+              "description": "Summarize these columns in each group.",
+              "type": [
+                "array",
+                "string",
+                "number"
+              ]
+            },
+            "last": {
+              "description": "Summarize these columns in each group.",
+              "type": [
+                "array",
+                "string",
+                "number"
+              ]
+            },
+            "max": {
+              "description": "Summarize these columns in each group.",
+              "type": [
+                "array",
+                "string",
+                "number"
+              ]
+            },
+            "mean": {
+              "description": "Summarize these columns in each group.",
+              "type": [
+                "array",
+                "string",
+                "number"
+              ]
+            },
+            "min": {
+              "description": "Summarize these columns in each group.",
+              "type": [
+                "array",
+                "string",
+                "number"
+              ]
+            },
+            "sum": {
+              "description": "Summarize these columns in each group.",
+              "type": [
+                "array",
+                "string",
+                "number"
+              ]
+            }
+          },
+          "type": "object"
+        },
+        "if": {
+          "description": "If / else: Run steps only when a table condition holds. A table expression: it sees rows, table(\"name\"), sheets(\"input\") and config(\"key\"). (table expression)"
+        },
+        "join": {
+          "additionalProperties": false,
+          "description": "Join tables: Add columns from a saved table by matching keys. Adds columns from a table saved earlier where the key columns match. Take chooses and names the added columns; rows without a match get blanks.",
+          "properties": {
+            "how": {
+              "enum": [
+                "left",
+                "inner"
+              ]
+            },
+            "normalize": {
+              "description": "ignore case and spaces.",
+              "type": "boolean"
+            },
+            "on": {
+              "description": "on columns.",
+              "type": [
+                "array",
+                "string",
+                "number"
+              ]
+            },
+            "right_on": {
+              "description": "matching their.",
+              "type": [
+                "array",
+                "string",
+                "number"
+              ]
+            },
+            "suffix": {
+              "description": "suffix for clashes."
+            },
+            "take": {
+              "additionalProperties": {
+                "description": "Map one name to another: the left name is written, the right name is read."
+              },
+              "description": "take.",
+              "type": "object"
+            },
+            "with": {}
+          },
+          "required": [
+            "with",
+            "on"
+          ],
+          "type": "object"
+        },
+        "log": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "message": {
+                  "description": "(text with {expression} parts)"
+                },
+                "when": {
+                  "description": "when. (table expression)"
+                }
+              },
+              "required": [
+                "message"
+              ],
+              "type": "object"
+            },
+            {
+              "description": "(text with {expression} parts)"
+            }
+          ],
+          "description": "Log message: Write a message to the run log. Text with {expression} parts, e.g. Loaded {len(rows)} rows. Add a condition to log only sometimes."
+        },
+        "pick": {
+          "additionalProperties": false,
+          "description": "Pick rows: Choose one row per group with ordered rules. Rules run in order; the first rule with candidate rows chooses. The chosen row is marked true and gets the rule's reason.",
+          "properties": {
+            "by": {
+              "type": [
+                "array",
+                "string",
+                "number"
+              ]
+            },
+            "mark": {
+              "description": "mark column."
+            },
+            "reason": {
+              "description": "reason column."
+            },
+            "rules": {
+              "description": "rules.",
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "best": {
+                    "description": "highest. A numeric column; the highest value wins."
+                  },
+                  "reason": {
+                    "description": "reason. (text with {expression} parts)"
+                  },
+                  "rows": {
+                    "description": "candidates. (row expression)"
+                  },
+                  "when": {
+                    "description": "applies when. Sees size, best and tied. Default: size > 0. (name expression)"
+                  }
+                },
+                "required": [
+                  "rows"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "where": {
+              "description": "taking part. (row expression)"
+            }
+          },
+          "required": [
+            "mark",
+            "rules"
+          ],
+          "type": "object"
+        },
+        "rename": {
+          "additionalProperties": {
+            "description": "Enter the exact current column title and its new title."
+          },
+          "description": "Rename columns: Give columns new names. Enter the exact current column title, then its new title.",
+          "type": "object"
+        },
+        "rest": {
+          "additionalProperties": false,
+          "description": "REST request: Call an HTTP API in batches and save the returned rows. url, headers and on_error are text with {expression} parts. body sees batch and batch_number.",
+          "properties": {
+            "batch": {
+              "description": "batch size. (table expression)"
+            },
+            "body": {
+              "description": "body. (table expression)"
+            },
+            "columns": {
+              "description": "columns.",
+              "type": [
+                "array",
+                "string",
+                "number"
+              ]
+            },
+            "each": {
+              "description": "for each value of. (table expression)"
+            },
+            "headers": {
+              "additionalProperties": {
+                "description": "An HTTP header. The value is text with {expression} parts. (text with {expression} parts)"
+              },
+              "description": "headers.",
+              "type": "object"
+            },
+            "keys": {
+              "description": "key case.",
+              "enum": [
+                "lower",
+                "upper"
+              ]
+            },
+            "method": {
+              "enum": [
+                "GET",
+                "POST",
+                "PUT",
+                "PATCH",
+                "DELETE"
+              ]
+            },
+            "on_error": {
+              "description": "on error, log. (text with {expression} parts)"
+            },
+            "retries": {
+              "description": "retries. (table expression)"
+            },
+            "rows": {
+              "description": "rows from response. (table expression)"
+            },
+            "save": {
+              "description": "save as."
+            },
+            "url": {
+              "description": "url. (text with {expression} parts)"
+            }
+          },
+          "required": [
+            "url",
+            "save"
+          ],
+          "type": "object"
+        },
+        "save": {
+          "description": "Save table: Keep a copy of the current table for later steps or output sheets. Keeps a copy of the current table under this name, for lookups and output sheets. It cannot share a name with a source."
+        },
+        "select": {
+          "additionalProperties": {
+            "description": "Map one name to another: the left name is written, the right name is read."
+          },
+          "description": "Select columns: Choose, rename and order columns. Keep only these columns, in this order. The left name is the output, the right name the source column.",
+          "type": "object"
+        },
+        "set": {
+          "additionalProperties": {
+            "description": "Create or replace this column. Columns are calculated in order, so later ones can use earlier ones. (row expression)"
+          },
+          "description": "Calculate columns: Create or update columns with expressions, in order. Creates or replaces columns, in order, so later ones can use earlier ones. prev(\"Col\") reads the row above.",
+          "type": "object"
+        },
+        "sort": {
+          "additionalProperties": false,
+          "description": "Sort rows: Order rows by columns (stable). Separate column titles with commas. Choose numeric sorting for quantities and prices.",
+          "properties": {
+            "by": {
+              "type": [
+                "array",
+                "string",
+                "number"
+              ]
+            },
+            "desc": {
+              "type": "boolean"
+            },
+            "numeric": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "by"
+          ],
+          "type": "object"
+        },
+        "split": {
+          "additionalProperties": false,
+          "description": "Split rows: Route matching rows and the others through different steps. Matching rows run through then, the others through else; the results are appended (then first).",
+          "properties": {
+            "else": {
+              "description": "else.",
+              "items": {
+                "$ref": "#/definitions/step"
+              },
+              "type": "array"
+            },
+            "then": {
+              "description": "then.",
+              "items": {
+                "$ref": "#/definitions/step"
+              },
+              "type": "array"
+            },
+            "where": {
+              "description": "(row expression)"
+            }
+          },
+          "required": [
+            "where"
+          ],
+          "type": "object"
+        },
+        "sql": {
+          "additionalProperties": false,
+          "description": "SQL query: Query a configured database and save the result. Parameters are table expressions; a list expands to @p1, @p2… The current table is unchanged.",
+          "properties": {
+            "batch": {
+              "description": "values per query.",
+              "minimum": 1,
+              "type": "integer"
+            },
+            "columns": {
+              "description": "columns.",
+              "type": [
+                "array",
+                "string",
+                "number"
+              ]
+            },
+            "connection": {
+              "description": "connection."
+            },
+            "on_error": {
+              "description": "on error, log. (text with {expression} parts)"
+            },
+            "params": {
+              "additionalProperties": {
+                "description": "A query parameter (@name). The table expression sees rows; a list expands to several values. (table expression)"
+              },
+              "description": "parameters.",
+              "type": "object"
+            },
+            "query": {},
+            "save": {
+              "description": "save as."
+            }
+          },
+          "required": [
+            "query",
+            "save"
+          ],
+          "type": "object"
+        },
+        "stack": {
+          "additionalProperties": false,
+          "description": "Stack columns: One row per listed column, its value in a new column. Each row is repeated once per listed column, with that column's value in the new column.",
+          "properties": {
+            "columns": {
+              "type": [
+                "array",
+                "string",
+                "number"
+              ]
+            },
+            "into": {
+              "description": "into."
+            }
+          },
+          "required": [
+            "columns",
+            "into"
+          ],
+          "type": "object"
+        },
+        "then": {
+          "description": "If / else: Run steps only when a table condition holds. A table expression: it sees rows, table(\"name\"), sheets(\"input\") and config(\"key\").",
+          "items": {
+            "$ref": "#/definitions/step"
+          },
+          "type": "array"
+        },
+        "window": {
+          "additionalProperties": false,
+          "description": "Calculate by group: Compute columns per group, keeping every row. Expressions see group (the group's rows), index (position in group) and size. Leave by empty for one group.",
+          "properties": {
+            "by": {
+              "type": [
+                "array",
+                "string",
+                "number"
+              ]
+            },
+            "set": {
+              "additionalProperties": {
+                "description": "Create or replace this column. Columns are calculated in order, so later ones can use earlier ones. (row expression)"
+              },
+              "description": "set.",
+              "type": "object"
+            },
+            "where": {
+              "description": "only rows where. (row expression)"
+            }
+          },
+          "required": [
+            "set"
+          ],
+          "type": "object"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "description": "A MaiService workflow file. Generated by `migo schema`; see docs/WORKFLOWS.md.",
+  "properties": {
+    "input": {
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "null"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "label": {
+                "description": "What the file is, for messages. Default: the name.",
+                "type": "string"
+              },
+              "match": {
+                "description": "A regular expression: this input takes the first uploaded file whose name matches.",
+                "type": "string"
+              }
+            },
+            "type": "object"
+          }
+        ]
+      },
+      "description": "One entry per uploaded file: a name for the steps, with an optional label and match.",
+      "minProperties": 1,
+      "type": "object"
+    },
+    "name": {
+      "description": "The workflow's name, shown in response messages.",
+      "type": "string"
+    },
+    "output": {
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "description": "The output file format. Default: xlsx. csv writes the one named sheet.",
+          "enum": [
+            "xlsx",
+            "csv"
+          ]
+        },
+        "sheets": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "columns": {
+                    "description": "columns.",
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "column": {
+                          "description": "from column."
+                        },
+                        "header": {
+                          "description": "header."
+                        },
+                        "header_style": {
+                          "description": "header style."
+                        },
+                        "id": {},
+                        "number_format": {
+                          "description": "number format."
+                        },
+                        "style": {
+                          "description": "style."
+                        },
+                        "value": {
+                          "description": "value. (row expression)"
+                        },
+                        "width": {
+                          "description": "width.",
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "header"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  },
+                  "freeze": {
+                    "description": "freeze header.",
+                    "type": "boolean"
+                  },
+                  "from": {
+                    "description": "from dataset."
+                  },
+                  "header": {
+                    "description": "header style."
+                  },
+                  "header_height": {
+                    "description": "header height.",
+                    "type": "number"
+                  },
+                  "like": {
+                    "description": "like sheet."
+                  },
+                  "name": {
+                    "description": "name."
+                  },
+                  "style": {
+                    "description": "cell style."
+                  },
+                  "styles": {
+                    "description": "styles.",
+                    "items": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "align": {
+                          "description": "align."
+                        },
+                        "bold": {
+                          "description": "bold.",
+                          "type": "boolean"
+                        },
+                        "border": {
+                          "description": "border."
+                        },
+                        "columns": {
+                          "description": "columns.",
+                          "type": [
+                            "array",
+                            "string",
+                            "number"
+                          ]
+                        },
+                        "fill": {
+                          "description": "fill."
+                        },
+                        "font": {
+                          "description": "font."
+                        },
+                        "number_format": {
+                          "description": "number format."
+                        },
+                        "when": {
+                          "description": "when. (row expression)"
+                        }
+                      },
+                      "type": "object"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            }
+          ],
+          "description": "The output sheets: a list of sheets, or the short form {Sheet name: dataset}."
+        }
+      },
+      "required": [
+        "sheets"
+      ],
+      "type": "object"
+    },
+    "service": {
+      "additionalProperties": false,
+      "description": "How MaiService exposes this workflow: POST /api/<route>/upload and /run, GET /api/<route>. Every setting is optional.",
+      "properties": {
+        "description": {
+          "description": "description. (text with {expression} parts)"
+        },
+        "max_upload_mb": {
+          "description": "max upload MB.",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "owner_field": {
+          "description": "owner field. The form field with the requester id. Default: bam."
+        },
+        "owner_required": {
+          "description": "owner.",
+          "type": "boolean"
+        },
+        "route": {
+          "description": "route /api/. Lowercase letters, digits and hyphens. Default: the file name."
+        }
+      },
+      "type": "object"
+    },
+    "steps": {
+      "description": "Run top to bottom on the current table.",
+      "items": {
+        "$ref": "#/definitions/step"
+      },
+      "minItems": 1,
+      "type": "array"
+    }
+  },
+  "required": [
+    "name",
+    "input",
+    "steps",
+    "output"
+  ],
+  "title": "Mai workflow",
+  "type": "object"
+}
