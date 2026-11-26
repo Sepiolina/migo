@@ -3,7 +3,6 @@ package workflow
 import (
 	"fmt"
 	"math"
-	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -45,124 +44,6 @@ func groups(s *State, t *Table, by []string, where *program) ([][]int, error) {
 }
 
 var aggregates = []string{"sum", "count", "mean", "min", "max", "first", "last", "join"}
-
-// - group: {by: [Key], sum: [Qty], first: [Desc], ...}: one row per key.
-// Without by, the whole table becomes one row.
-func compileGroup(arg *yaml.Node, _ *scope) (tableFn, error) {
-	var spec map[string][]string
-	if err := strictDecode(arg, &spec); err != nil {
-		return nil, err
-	}
-	ops := map[string]string{}
-	for op, columns := range spec {
-		if op == "by" {
-			continue
-		}
-		if !contains(aggregates, op) {
-			return nil, fmt.Errorf("unknown aggregate %q (use by, %s)", op, strings.Join(aggregates, ", "))
-		}
-		for _, c := range columns {
-			if _, dup := ops[c]; dup {
-				return nil, fmt.Errorf("column %q aggregated twice", c)
-			}
-			ops[c] = op
-		}
-	}
-	for _, c := range spec["by"] {
-		if _, dup := ops[c]; dup {
-			return nil, fmt.Errorf("column %q is both a key and aggregated", c)
-		}
-	}
-	if len(ops) == 0 {
-		return nil, fmt.Errorf("names at least one aggregated column")
-	}
-	return func(t *Table, _ *State) (*Table, error) {
-		keys, err := t.cols(spec["by"])
-		if err != nil {
-			return nil, err
-		}
-		for c := range ops {
-			if _, err := t.col(c); err != nil {
-				return nil, err
-			}
-		}
-		out := &Table{}
-		for _, n := range keys {
-			out.Columns = append(out.Columns, t.Columns[n])
-		}
-		var agg []int // aggregated columns, in table order
-		for i, c := range t.Columns {
-			if _, ok := ops[c]; ok {
-				agg = append(agg, i)
-				out.Columns = append(out.Columns, c)
-			}
-		}
-		gs, err := groups(nil, t, spec["by"], nil)
-		if err != nil {
-			return nil, err
-		}
-		if len(keys) == 0 && len(gs) == 0 {
-			gs = [][]int{nil}
-		}
-		for _, g := range gs {
-			row := make([]any, 0, len(out.Columns))
-			for _, n := range keys {
-				row = append(row, t.Rows[g[0]][n])
-			}
-			for _, n := range agg {
-				v, err := aggregate(t, g, n, ops[t.Columns[n]])
-				if err != nil {
-					return nil, err
-				}
-				row = append(row, v)
-			}
-			out.Rows = append(out.Rows, row)
-		}
-		return out, nil
-	}, nil
-}
-
-func aggregate(t *Table, rows []int, n int, op string) (any, error) {
-	switch {
-	case op == "count":
-		return float64(len(rows)), nil
-	case len(rows) == 0 && op == "sum":
-		return 0.0, nil
-	case len(rows) == 0:
-		return nil, nil
-	case op == "first":
-		return t.Rows[rows[0]][n], nil
-	case op == "last":
-		return t.Rows[rows[len(rows)-1]][n], nil
-	case op == "join":
-		seen := map[string]bool{}
-		var values []string
-		for _, r := range rows {
-			if v := text(t.Rows[r][n]); strings.TrimSpace(v) != "" && !seen[v] {
-				seen[v] = true
-				values = append(values, v)
-			}
-		}
-		return strings.Join(values, ", "), nil
-	}
-	v := 0.0
-	for i, r := range rows {
-		x, err := numeric(t.Rows[r][n], r, t.Columns[n])
-		if err != nil {
-			return nil, err
-		}
-		switch {
-		case op == "sum" || op == "mean":
-			v += x
-		case op == "min" && (i == 0 || x < v), op == "max" && (i == 0 || x > v):
-			v = x
-		}
-	}
-	if op == "mean" {
-		v /= float64(len(rows))
-	}
-	return v, nil
-}
 
 // - window: {by: [Key], where: '<row condition>', set: {Col: '<expression>'}}
 // computes columns per group, keeping every row. Besides the row's own

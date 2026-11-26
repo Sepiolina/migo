@@ -1,19 +1,4 @@
-// Package workflow runs one YAML file per process: spreadsheet and file
-// wrangling with REST and SQL steps, branching and inline rules. Nothing about
-// a particular business process lives in Go; it is all in the file.
-//
-//	name: Parts summary
-//	input:
-//	  parts: {label: Parts}
-//	steps:
-//	  - from: parts[Parts]
-//	  - filter: 'num(Quantity) > 0'
-//	  - save: summary
-//	output:
-//	  sheets: {Parts: summary}
-//
-// Every step and expression is compiled when the file is loaded, so a typo
-// fails at startup, not mid-request. docs/WORKFLOWS.md is the reference.
+// Package workflow runs the YAML steps needed by Migo’s BOM workflow.
 package workflow
 
 import (
@@ -33,12 +18,11 @@ import (
 
 // Workflow is a loaded, compiled workflow file.
 type Workflow struct {
-	Name    string
-	Inputs  []Input // upload order
-	Sheets  []*SheetSpec
-	Service Service // how the HTTP service exposes it
-	Format  string  // output file format: "xlsx" (default) or "csv"
-	steps   []step
+	Name   string
+	Inputs []Input // upload order
+	Sheets []*SheetSpec
+
+	steps []step
 }
 
 // Input is one uploaded file. Match (a regexp on the uploaded filename) lets
@@ -88,20 +72,13 @@ type scope struct {
 
 type compiler func(arg *yaml.Node, sc *scope) (Runner, error)
 
-var ops map[string]compiler
-
-func init() {
-	ops = map[string]compiler{
-		"from": compileFrom, "save": compileSave, "log": compileLog, "fail": compileFail,
-		"select": tableStep(compileSelect), "rename": tableStep(compileRename),
-		"filter": tableStep(compileFilter), "set": tableStep(compileSet),
-		"fill": tableStep(compileFill), "dedupe": tableStep(compileDedupe), "drop": tableStep(compileDrop),
-		"group": tableStep(compileGroup), "sort": tableStep(compileSort),
-		"join": tableStep(compileJoin), "append": tableStep(compileAppend),
-		"compare": tableStep(compileCompare), "stack": tableStep(compileStack),
-		"window": tableStep(compileWindow), "pick": tableStep(compilePick),
-		"split": compileSplit, "sql": compileSQL, "rest": compileREST,
-	}
+var ops = map[string]compiler{
+	"from": compileFrom, "save": compileSave, "log": compileLog, "fail": compileFail,
+	"filter": tableStep(compileFilter), "set": tableStep(compileSet),
+	"fill": tableStep(compileFill), "dedupe": tableStep(compileDedupe),
+	"join": tableStep(compileJoin), "stack": tableStep(compileStack),
+	"window": tableStep(compileWindow), "pick": tableStep(compilePick),
+	"sql": compileSQL, "rest": compileREST,
 }
 
 // Load reads and compiles a workflow file.
@@ -118,12 +95,11 @@ func Load(path string) (*Workflow, error) {
 }
 
 type document struct {
-	Name    string    `yaml:"name"`
-	Input   yaml.Node `yaml:"input"`
-	Steps   yaml.Node `yaml:"steps"`
-	Service yaml.Node `yaml:"service"`
-	Output  struct {
-		Format string    `yaml:"format"`
+	Name  string    `yaml:"name"`
+	Input yaml.Node `yaml:"input"`
+	Steps yaml.Node `yaml:"steps"`
+
+	Output struct {
 		Sheets yaml.Node `yaml:"sheets"`
 	} `yaml:"output"`
 }
@@ -146,9 +122,6 @@ func Parse(data []byte) (*Workflow, error) {
 	if wf.Inputs, err = parseInputs(&doc.Input); err != nil {
 		return nil, err
 	}
-	if wf.Service, err = parseService(&doc.Service); err != nil {
-		return nil, err
-	}
 	sc := &scope{inputs: map[string]bool{}, saved: map[string]bool{}}
 	for _, in := range wf.Inputs {
 		sc.inputs[in.Name] = true
@@ -164,16 +137,6 @@ func Parse(data []byte) (*Workflow, error) {
 	}
 	if len(wf.Sheets) == 0 {
 		return nil, fmt.Errorf("output.sheets must name at least one sheet")
-	}
-	switch wf.Format = strings.ToLower(strings.TrimSpace(doc.Output.Format)); wf.Format {
-	case "", "xlsx":
-		wf.Format = "xlsx"
-	case "csv":
-		if len(wf.Sheets) != 1 {
-			return nil, fmt.Errorf("output.format csv writes one table: name exactly one sheet")
-		}
-	default:
-		return nil, fmt.Errorf("output.format %q: use xlsx or csv", doc.Output.Format)
 	}
 	for _, sh := range wf.Sheets {
 		if !sc.saved[sh.From] {
@@ -254,21 +217,7 @@ func (wf *Workflow) Run(ctx context.Context, rt Runtime, inputs map[string]strin
 	if err := runSteps(ctx, s, wf.steps); err != nil {
 		return err
 	}
-	if wf.Format == "csv" {
-		return writeCSV(ctx, out, wf.Sheets[0], s)
-	}
 	return writeWorkbook(ctx, out, wf.Sheets, s)
-}
-
-// Ext is the output file extension, with the dot.
-func (wf *Workflow) Ext() string { return "." + wf.Format }
-
-// ContentType is the MIME type of the output file.
-func (wf *Workflow) ContentType() string {
-	if wf.Format == "csv" {
-		return "text/csv; charset=utf-8"
-	}
-	return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 }
 
 // Assign pairs uploaded file names with the inputs: inputs with a Match
@@ -396,70 +345,6 @@ func onlyKeys(n *yaml.Node, keys ...string) error {
 		}
 	}
 	return nil
-}
-
-// - split: {where: '<row condition>', then: [steps], else: [steps]}
-// Matching rows go through then, the others through else; the results are
-// appended (then first), with the union of their columns.
-func compileSplit(arg *yaml.Node, sc *scope) (Runner, error) {
-	if arg == nil {
-		return nil, fmt.Errorf("needs where, then and/or else")
-	}
-	if err := onlyKeys(arg, "where", "then", "else"); err != nil {
-		return nil, err
-	}
-	if field(arg, "where") == nil {
-		return nil, fmt.Errorf("needs where")
-	}
-	where, err := compileExpr(field(arg, "where").Value, true, rowVars...)
-	if err != nil {
-		return nil, err
-	}
-	var then, els []step
-	if n := field(arg, "then"); n != nil {
-		if then, err = compileSteps(n, sc, "split.then."); err != nil {
-			return nil, err
-		}
-	}
-	if n := field(arg, "else"); n != nil {
-		if els, err = compileSteps(n, sc, "split.else."); err != nil {
-			return nil, err
-		}
-	}
-	return func(ctx context.Context, s *State) error {
-		t, err := s.current()
-		if err != nil {
-			return err
-		}
-		if err := where.check(t); err != nil {
-			return err
-		}
-		yes, no := &Table{Columns: t.Columns}, &Table{Columns: t.Columns}
-		for i := range t.Rows {
-			ok, err := where.test(rowEnv(t, i, s.vars()))
-			if err != nil {
-				return fmt.Errorf("row %d: %w", i+1, err)
-			}
-			if ok {
-				yes.Rows = append(yes.Rows, t.Rows[i])
-			} else {
-				no.Rows = append(no.Rows, t.Rows[i])
-			}
-		}
-		var parts []*Table
-		for _, branch := range []struct {
-			t     *Table
-			steps []step
-		}{{yes.clone(), then}, {no.clone(), els}} {
-			s.Cur = branch.t
-			if err := runSteps(ctx, s, branch.steps); err != nil {
-				return err
-			}
-			parts = append(parts, s.Cur)
-		}
-		s.Cur = unionRows(parts...)
-		return nil
-	}, nil
 }
 
 // - log: "Loaded {len(rows)} rows"            (or {when: <condition>, message: ...})

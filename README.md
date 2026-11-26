@@ -1,43 +1,35 @@
-# Migo YAML interpreter
+# Migo BOM workflow interpreter
 
-A standalone Go library extracted from Migo at commit
-`6294d2b87f7a756e69373ef551b650fa72e012fd`. It compiles workflow YAML and runs it
-against local CSV, XLSX, or BIFF8 XLS files. Workflows can transform tables,
-branch, retrieve data through SQL and HTTP, and write CSV or XLSX results.
+This standalone Go module runs Migo’s original
+[`workflows/bom.yaml`](workflows/bom.yaml), extracted from commit
+`6294d2b87f7a756e69373ef551b650fa72e012fd`. It takes a customer BOM and a
+Priority file and writes the styled `BOM` and `debug` sheets to an XLSX workbook.
 
-## Run the example
+The runtime implements the operations used by that YAML: `from`, `set`,
+`filter`, `dedupe`, `fill`, `window`, `join`, `stack`, `pick`, `save`,
+`if`, `log`, `fail`, `sql`, and `rest`. It preserves the workbook readers,
+expression evaluation, SQL batching, SAP retries, and XLSX formatting used
+by the original workflow.
 
-Use Go 1.22 or later. From this directory, run the example and inspect
-`orders-output.csv`.
+## Embed it in Go
+
+Use Go 1.22 or later. Clone the `yaml-interpreter` branch alongside your
+application.
 
 ```sh
-go run ./examples/run orders-output.csv
-go test ./...
+git clone --single-branch --branch yaml-interpreter https://github.com/Sepiolina/migo.git migo-yaml
 ```
 
-The sample workflow reads `examples/orders.csv`, keeps open orders, and
-computes their totals. The CSV starts with a UTF-8 byte order mark and contains the following rows.
-
-```csv
-Order,Total
-A-101,25
-A-103,12
-```
-
-## Embed in a Go application
-
-For local development, place your application's module alongside this one.
-From the application module directory, add a local module dependency.
+From your application’s module directory, add the local dependency.
 
 ```sh
 go mod edit -require=example.com/migo-yaml@v0.0.0
 go mod edit -replace=example.com/migo-yaml=../migo-yaml
 ```
 
-Use `example.com/migo-yaml/workflow` in your Go source, then run `go mod tidy`
-in your application. `example.com/migo-yaml` is the local module identifier.
-If you publish the library, update it in `go.mod` and the Go imports to your
-published path.
+Copy `workflows/bom.yaml` to your application’s working directory as
+`bom.yaml`. Add this program, run `go mod tidy`, and place the input files
+at the paths shown below.
 
 ```go
 package main
@@ -50,73 +42,44 @@ import (
 )
 
 func main() {
-	wf, err := workflow.Load("orders.yaml")
+	bom, err := workflow.Load("bom.yaml")
 	if err != nil {
 		log.Fatal(err)
 	}
-
-	inputs := map[string]string{"orders": "orders.csv"}
-	runtime := workflow.Runtime{
-		Log: func(line string) { log.Print(line) },
+	inputs := map[string]string{
+		"bom":      "customer.xlsx",
+		"priority": "priority.xlsx",
 	}
-	if err := wf.Run(context.Background(), runtime, inputs, "report"+wf.Ext()); err != nil {
+	rt := workflow.Runtime{Log: func(line string) { log.Print(line) }}
+	if err := bom.Run(context.Background(), rt, inputs, "annotated.xlsx"); err != nil {
 		log.Fatal(err)
 	}
 }
 ```
 
-Run this host program with copies of `examples/orders.yaml` and
-`examples/orders.csv` in its working directory. Supply the input paths keyed
-by YAML input name and choose a writable output path for each run. Use
-`Parse([]byte)` when your application already has the YAML in memory.
-Compile and validate workflows before accepting jobs, then reuse the compiled
-workflow across runs. Keep the compiled workflow and shared runtime
-configuration read-only during concurrent runs.
+Use `Parse` if your application already holds the YAML bytes. Reuse a
+compiled workflow across jobs with independent output paths and
+concurrency-safe runtime callbacks. Pass paths by input name, or use
+`Assign` to apply the YAML filename matching rules to an ordered input list.
 
-## Connect the runtime
+## Enable enrichment
 
-| Field | Host integration |
+The zero-value runtime runs the offline workflow. To match a configured
+Migo deployment, supply the same effective configuration and data sources.
+
+| Enrichment | Host integration |
 | --- | --- |
-| `Cfg` | Supply `workflow.Values{"host": "example.org"}` or implement `Value(key string) any`. YAML expressions read values through `config("host")`. Missing keys return nil. |
-| `Log` | Supply a function that accepts one log line. The zero value discards logs. |
-| `SQL` | Supply a function that takes a context, connection name, query, and positional arguments and returns a `*workflow.Table`. Select the database by name, bind the arguments using your driver, and keep column and row order aligned. SQL steps without a handler follow their configured error behavior. |
-| `HTTP` | Supply an `*http.Client` for REST steps. The default client has a 30-second timeout. |
-| `Sleep` | Optionally supply the delay function used between HTTP retry attempts. The default is `time.Sleep`. |
+| Material Master | Set `db_enabled` in `Runtime.Cfg`, and set `Runtime.SQL` to a callback using your SQL Server connection. The workflow passes connection name `db`, the query, and bound positional values for `@p1`, `@p2`, and so on. Execute the query with those arguments and return a `workflow.Table` with columns in result order and values aligned to those columns. |
+| SAP | Set `sap_enabled`, `sap_host`, `sap_port`, and `sap_werks`. Supply `sap_tcode`, `api_batch_size`, and `api_retries` when configured in Migo. The runtime sends requests to the SAP endpoint defined in the YAML. Set `Runtime.HTTP` to use your own HTTP client. |
 
-Workflow definitions can issue outbound requests and invoke the SQL handler.
-Use trusted YAML and scope the connections, HTTP client, and configuration
-values to the operations your host permits.
+Use `workflow.Values` to supply the configuration map, or implement
+`Value(key string) any`. The host manages connections, credentials, and job
+lifecycle. Load trusted workflow definitions because steps can issue HTTP
+requests and invoke the SQL callback.
 
-`Trace` runs the steps and returns per-step summaries without writing an
-output file. It still runs SQL and HTTP steps. A failing step reports its
-error in the corresponding `StepTrace.Error`.
+## Verify the extraction
 
-## How the interpreter works
-
-1. `Load` reads a file and delegates to `Parse`. The parser validates the
-   YAML structure and compiles step arguments and expressions into executable
-   functions. Each step carries its source line number.
-2. `Run` builds fresh state for each execution. `from` loads the current
-   table, transformation steps update it, and `save` stores named datasets
-   that later steps and output sheets can use.
-3. Output writers resolve the saved datasets, apply column mappings and cell
-   expressions, and write the requested format. XLSX output also applies
-   workbook styles.
-
-## Extend the interpreter
-
-Register a custom table step once at startup, before loading workflows or
-starting workers. `RegisterTableStep` takes a compiler that validates the
-YAML argument and returns a function that transforms a copy of the current
-table. The registry is shared across the process. For custom editor metadata,
-register the matching descriptor through `DescribeStep`. Use `Schema()`,
-`Describe()`, and `Reference()` to expose the language to editors or to
-generate its reference. [Custom step example](workflow/register_test.go)
-
-Existing `service` YAML remains valid and is available as `Workflow.Service`
-for hosts that implement their own routing. The integration entry points
-above run inside your application process.
-
-- [YAML syntax, expressions, and output settings](docs/WORKFLOWS.md)
-- [Step reference](docs/STEP_REFERENCE.md)
-- [JSON Schema](docs/workflow.schema.json)
+Run `go test ./...` from this checkout. The BOM tests compare both output
+sheets with Migo’s golden workbook for stubbed SQL and SAP disabled. They
+also check Priority workbook layouts and manufacturer part-number
+normalization.

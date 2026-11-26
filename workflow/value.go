@@ -82,22 +82,6 @@ func key(row []any, ix []int, normalize bool) string {
 	return b.String()
 }
 
-func compareCells(a, b any, numericOrder bool) int {
-	if numericOrder {
-		x, y := toNumber(a, 0), toNumber(b, 0)
-		switch {
-		case x < y:
-			return -1
-		case x > y:
-			return 1
-		}
-		return 0
-	}
-	return strings.Compare(text(a), text(b))
-}
-
-// toNumber is lenient: numbers as they are, text by JavaScript parseFloat
-// (commas ignored), anything else def.
 func toNumber(v any, def float64) float64 {
 	switch x := v.(type) {
 	case float64:

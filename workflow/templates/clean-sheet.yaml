@@ -1,9 +1,0 @@
-name: Clean a sheet
-input:
-  sheet: {label: Workbook to clean}
-steps:
-  - from: {input: sheet, trim: true, skip_blank: true}
-  - dedupe: [Part Number]
-  - save: clean
-output:
-  sheets: {Clean: clean}
