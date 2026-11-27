@@ -60,7 +60,6 @@ try {
   await page.getByRole("button", { name: "Open files…" }).click();
   await (await chooser).setFiles([`${repo}examples/parts-summary.yaml`, `${repo}examples/parts.xlsx`]);
   await page.getByRole("status").filter({ hasText: /Valid · \d+ rows out/ }).waitFor({ timeout: 60_000 });
-  await page.screenshot({ path: process.env.SHOT || "/dev/null" });
   await page.locator(".nav").getByText("samples/parts.xlsx").first().waitFor();
 
   // Save keeps it in the browser; YAML downloads.
