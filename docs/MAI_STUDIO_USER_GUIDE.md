@@ -22,6 +22,34 @@ npm run desktop:dev
 workflow diagram and download an SVG. Use the desktop app to open a project
 folder, preview workbook data, run a workflow or save YAML to the project.
 
+## Studio in a browser: one file to send
+
+`npm run build:web` (in `apps/studio`) builds `dist-web/mai-studio.html`: the
+whole of Studio and the production workflow engine (compiled to WebAssembly)
+in one file of about 9 MiB. Send it to the people who write or check
+workflows. They open it in Chrome, Edge or Firefox, from disk or any static
+web server. Nothing needs to be installed, there is no project folder to
+set up, and the page makes no network requests.
+
+- **Open files…** or drop files on the window. A `.yaml` workflow opens. Its
+  `.xlsx`, `.xls` or `.csv` sample files are bound to its sources by name.
+  Files ending in `.test.yaml` or `.mocks.yaml` go with the tests.
+- SQL and REST steps run offline, as in the desktop app. A
+  `<name>.mocks.yaml` file that is opened with workflow `<name>.yaml` answers
+  them.
+- Previews, **Run**, the workbook preview, **Runs** and **Tests** work as in
+  the desktop app. **↓ YAML** downloads the edited workflow, and **↓ Output**
+  downloads the last run's workbook or CSV.
+- Workflows, samples and tests are kept in this browser between visits.
+  **Remove my files** on the home screen deletes them. Outputs are kept
+  only until the page is closed.
+- The browser version cannot build Linux packages. It also has the limits
+  of a browser tab: about 768 MiB for all files together, and 25 MiB for
+  each imported file.
+
+For development, `npm run dev:web` serves the same build with live reload at
+`http://127.0.0.1:1421/`.
+
 ## The home screen
 
 Choose **Open folder…** and select your project folder, for example a clone of

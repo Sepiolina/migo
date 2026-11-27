@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
     "build": "tsc -b && vite build",
+    "build:web": "tsc -b && node scripts/build-web.mjs",
+    "dev:web": "node scripts/build-web.mjs --engine && vite --mode web --host 127.0.0.1 --port 1421 --strictPort",
     "typecheck": "tsc -b",
     "test": "vitest run",
     "tauri": "tauri",

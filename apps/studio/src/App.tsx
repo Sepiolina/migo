@@ -5,7 +5,7 @@ import { shortcut } from "./shortcut";
 import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import "./studio.css";
-import { isDesktop, listenNative, native, request, type Inspection, type RunnerError, type RunResult, type Trace, type Validation } from "./api";
+import { isDesktop, isWebTool, listenNative, native, request, type Inspection, type RunnerError, type RunResult, type Trace, type Validation } from "./api";
 import { asRunnerError, useCurrentRequest } from "./useCurrentRequest";
 import { RequestCache } from "./RequestCache";
 import { useFileRevisions } from "./useFileRevisions";
@@ -18,6 +18,9 @@ import { DataGrid, profileRows, type ColumnAction } from "./DataGrid";
 import { Console, type LogLine, type Problem } from "./Console";
 import { Splitter } from "./Splitter";
 import { assignSamples, type ImportedFile } from "./samples";
+
+/** Files picked or dropped; the browser build also imports workflows and tests. */
+type Imported = { files: ImportedFile[]; workflows?: string[]; tests?: string[]; error?: string };
 import { CommandMenu, type Command } from "./CommandMenu";
 import { Home, type WorkflowEntry } from "./Home";
 import { DiscardChangesDialog } from "./DiscardChangesDialog";
@@ -83,6 +86,8 @@ export default function App() {
   const doc = useDocument(workflowTemplates[1].source);
   const { source } = doc;
   const desktop = isDesktop();
+  /** The browser build: an in-memory workspace, files imported and downloaded. */
+  const web = isWebTool();
   const [view, setView] = useState<"home" | "editor">("home");
   const [workspacePanel, setWorkspacePanel] = useState<"runs" | "tests" | null>(null);
   const panelOpen = workspacePanel !== null;
@@ -325,7 +330,7 @@ export default function App() {
     fileRevisions.refresh();
     for (const [id, path] of Object.entries(pairs)) {
       const f = ok.find((x) => x.path === path)!;
-      addLog(`${id} ← ${path}${f.copied ? " (copied into the folder)" : ""}`);
+      addLog(`${id} ← ${path}${f.copied && !web ? " (copied into the folder)" : ""}`);
     }
     if (unassigned.length) addLog(`Not used: ${unassigned.join(", ")}. Select a source and import again, or name the file after it.`, true);
     const first = Object.keys(pairs)[0];
@@ -340,13 +345,81 @@ export default function App() {
       fail(e);
     }
   }
-  // Files dropped on the window (desktop app). The handler reads the latest state.
-  const onDrop = useRef<(p: { files: ImportedFile[]; error?: string }) => void>(() => undefined);
+  // Files dropped on the window. The handler reads the latest state. The
+  // browser build also takes workflows: the first one opens, and the sample
+  // files that came with it are bound once it has (pendingSamples).
+  const pendingSamples = useRef<{ path: string; files: ImportedFile[] } | undefined>(undefined);
+  const onDrop = useRef<(p: Imported) => void>(() => undefined);
   onDrop.current = (p) => {
     if (p.error) return fail(new Error(p.error));
+    for (const path of p.tests ?? []) addLog(`Added ${path}`);
+    const opened = p.workflows?.[0];
+    if (opened) {
+      for (const path of p.workflows!.slice(1)) addLog(`Added ${path}`);
+      void loadEntries(currentWorkspace.current);
+      return guard(() => {
+        pendingSamples.current = p.files.length ? { path: opened, files: p.files } : undefined;
+        void openWorkflow(opened);
+      });
+    }
+    if (!p.files.length) {
+      if (p.tests?.length) void loadEntries(currentWorkspace.current);
+      return;
+    }
     if (view !== "editor") return addLog("Open a workflow, then drop its sample files.", true);
     applySamples(p.files, { preferred: selection.kind === "source" ? selection.id : undefined });
   };
+  useEffect(() => {
+    const pending = pendingSamples.current;
+    if (!pending || view !== "editor" || workflowPath !== pending.path || parsed.error) return;
+    pendingSamples.current = undefined;
+    applySamples(pending.files);
+  });
+  async function importFiles() {
+    try {
+      onDrop.current(await native<Imported>("import_files"));
+    } catch (e) {
+      fail(e);
+    }
+  }
+  async function clearWebWorkspace() {
+    try {
+      await native("clear_workspace");
+      doc.load(workflowTemplates[1].source);
+      doc.markSaved(workflowTemplates[1].source);
+      updateYamlDraft();
+      setWorkflowPath("");
+      setRevision(null);
+      setRun(undefined);
+      setView("home");
+      await loadEntries(currentWorkspace.current);
+      say("Removed your workflows, samples and runs from this browser.");
+    } catch (e) {
+      fail(e);
+    }
+  }
+  async function downloadYaml() {
+    const name = workflowPath ? workflowPath.split("/").pop()! : `${slug(pipeline.name) || "workflow"}.yaml`;
+    try {
+      await native("download_text", { name, text: latestEditor().source });
+    } catch (e) {
+      fail(e);
+    }
+  }
+  async function downloadOutput() {
+    if (!artifact) return;
+    const ext = artifact.result.path.split(".").pop();
+    try {
+      await native("download_file", { path: artifact.result.path, name: `${slug(pipeline.name) || "output"}.${ext}` });
+    } catch (e) {
+      fail(e);
+    }
+  }
+  // The browser build has its workspace from the start: no folder to choose.
+  useEffect(() => {
+    if (web) void chooseWorkspace();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [web]);
   useEffect(() => {
     let alive = true;
     const offs: (() => void)[] = [];
@@ -564,7 +637,7 @@ export default function App() {
       currentWorkspace.current = picked.path;
       setWorkspace(picked.path);
       await loadEntries(picked.path);
-      addLog(`Opened folder ${picked.path}`);
+      addLog(web ? "Workspace in this browser: nothing leaves this computer" : `Opened folder ${picked.path}`);
     } catch (e) {
       fail(e);
     } finally {
@@ -974,6 +1047,9 @@ export default function App() {
       ...(desktop && !workspace ? [{ group: "Workflow", label: "Open project folder…", glyph: "▤", run: () => void chooseWorkspace() }] : []),
       { group: "Workflow", label: "Save", glyph: "↓", kbd: shortcut("S"), run: () => void save() },
       { group: "Workflow", label: "Save as…", glyph: "↓", run: () => beginSaveAs(workflowPath || `workflows/${slug(pipeline.name)}.yaml`) },
+      ...(web ? [{ group: "Workflow", label: "Download YAML", glyph: "↓", run: () => void downloadYaml() }] : []),
+      ...(web && artifact ? [{ group: "Workflow", label: "Download run output", glyph: "↓", run: () => void downloadOutput() }] : []),
+      ...(web ? [{ group: "Workflow", label: "Open files…", glyph: "▤", run: () => guard(() => void importFiles()) }] : []),
       ...(dirty ? [{ group: "Workflow", label: "Discard recovery copy", glyph: "×", run: () => {
         clearUnassignedDraft.current?.();
         const removed = recovery.clearCurrent();
@@ -1167,6 +1243,8 @@ export default function App() {
             <>
               <button className="tb hide-sm" aria-label="Inspector" aria-pressed={showInsp} title={`Inspector (${shortcut("2")})`} onClick={toggleInspector}>{icons.insp}</button>
               <button className="tb hide-sm" onClick={() => void save()} disabled={!!busy} title={`Save (${shortcut("S")})`}>Save</button>
+              {web && <button className="tb hide-sm" onClick={() => void downloadYaml()} title="Download the workflow YAML">↓ YAML</button>}
+              {web && artifact && <button className="tb" onClick={() => void downloadOutput()} title={`Download ${artifact.result.path.split("/").pop()} from the last run`}>↓ Output</button>}
               <button className="primary" onClick={() => void runWorkflow()} disabled={!!busy} title={`Run with sample files (${shortcut("Enter")})`}>▶ Run <span className="kbd hide-sm">{shortcut("Enter")}</span></button>
             </>
           )}
@@ -1216,6 +1294,7 @@ export default function App() {
             if (record) void reviewDraft(record);
           })}
           onOpenWorkspace={() => guard(() => void chooseWorkspace())}
+          web={web ? { onImport: () => void importFiles(), onClear: () => guard(() => void clearWebWorkspace()) } : undefined}
           onOpen={(p) => guard(() => void openWorkflow(p))}
           onSetup={(path) => guard(() => void openWorkflow(path, true))}
           onTemplate={(t) => guard(() => startTemplate(t))}
@@ -1291,7 +1370,7 @@ export default function App() {
                 inspection={selection.kind === "source" ? inspection.data : undefined}
                 route={route}
                 workflowPath={workflowPath}
-                canPackage={desktop && !!workspace && !!workflowPath && !dirty}
+                canPackage={desktop && !web && !!workspace && !!workflowPath && !dirty}
                 onPackage={() => setPackaging(true)}
                 onAddRead={(input) => {
                   change(insertStep(source, ["steps"], 0, { from: input }), `Read ${input}`);

@@ -21,6 +21,7 @@ validation coverage, and features still planned.
 - [Build a Linux deployment ZIP in Studio](#build-a-linux-deployment-zip-in-studio)
 - [Build a test folder for Linux or Windows](#build-a-test-folder-for-linux-or-windows)
 - [Deploy on Linux with PM2](#deploy-on-linux-with-pm2)
+- [Check workflows in a browser, with nothing installed](#check-workflows-in-a-browser-with-nothing-installed)
 - [Run a workflow without a server](#run-a-workflow-without-a-server)
 - [Development checks](#development-checks)
 - [Troubleshooting](#troubleshooting)
@@ -411,6 +412,22 @@ To update, stage a new executable under another filename, preserve the previous
 version, rename the new file into place, and run `pm2 restart maiservice`. Do not
 copy over a running Linux executable. Recheck health and upload/download behavior;
 restore the previous executable and restart if verification fails.
+
+## Check workflows in a browser, with nothing installed
+
+Build Studio as a single HTML file that you can send to anyone who writes or
+checks workflows (needs Go and Node.js on the build machine only):
+
+```sh
+cd apps/studio
+npm ci
+npm run build:web
+```
+
+Send `apps/studio/dist-web/mai-studio.html`. The recipient opens it in a
+browser and drops in a workflow `.yaml` and its sample Excel or CSV files. It
+validates, previews and runs workflows with the production engine,
+entirely offline. See the [user guide](docs/MAI_STUDIO_USER_GUIDE.md#studio-in-a-browser-one-file-to-send).
 
 ## Run a workflow without a server
 

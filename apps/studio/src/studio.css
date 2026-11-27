@@ -306,6 +306,7 @@ button.problem:hover { background: var(--hover); }
 .hero { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: center; padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); }
 .hero b { font-size: 14px; }
 .hero p { margin: 4px 0 0; color: var(--ink-2); line-height: 1.5; }
+.hero-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .list { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
 .wf { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: center; width: 100%; padding: 10px 14px; border: 0; border-bottom: 1px solid var(--line-soft); background: none; text-align: left; color: var(--ink); }
 .wf:last-child { border-bottom: 0; }
