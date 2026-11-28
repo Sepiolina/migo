@@ -3,7 +3,7 @@ GOFMT ?= gofmt
 CONFIG ?= config.json
 
 .DEFAULT_GOAL := help
-.PHONY: help build build-all linux windows dist test vet race fmt fmt-check workflows describe check run
+.PHONY: help build build-all linux windows dist test vet race fmt fmt-check workflows describe check run engine-kit
 
 help:
 	@echo 'make build       Build the service and CLI'
@@ -14,6 +14,7 @@ help:
 	@echo 'make describe    Regenerate the Studio catalog, JSON Schema and step reference after changing a step descriptor'
 	@echo 'make workflows   Check, run and test the example workflows without company services'
 	@echo 'make linux/windows  Cross-build a static service binary into dist/'
+	@echo 'make engine-kit  Zip the workflow engine, conformance suite and AGENTS.md for another project (dist/)'
 	@echo 'make dist        Build a deploy folder: binary, config.json, PM2 file (TARGET=linux|windows|all; asks if unset)'
 
 build:
@@ -21,6 +22,7 @@ build:
 	$(GO) build -o migo ./cmd/migo
 build-all:
 	$(GO) build ./...
+	cd engine && $(GO) build ./...
 linux:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -ldflags="-s -w" -o dist/maiservice ./cmd/maiservice
 windows:
@@ -31,25 +33,33 @@ run:
 	$(GO) run ./cmd/maiservice -config "$(CONFIG)"
 vet:
 	$(GO) vet ./...
+	cd engine && $(GO) vet ./...
 test: vet
 	$(GO) test ./...
+	cd engine && $(GO) test ./...
 race:
 	$(GO) test -race ./...
+	cd engine && $(GO) test -race ./...
 fmt:
-	$(GOFMT) -w cmd internal tools workflows
+	$(GOFMT) -w cmd internal tools workflows engine
 fmt-check:
-	@files="$$($(GOFMT) -l cmd internal tools workflows)" || exit 1; \
+	@files="$$($(GOFMT) -l cmd internal tools workflows engine)" || exit 1; \
 	if [ -n "$$files" ]; then echo "Run make fmt to format:"; echo "$$files"; exit 1; fi
+# The workflow engine (engine/) is its own Go module so other services can
+# import it; the targets above check it alongside the service.
 # Regenerate everything derived from the engine's step descriptors: Mai
 # Studio's step catalog, the editor JSON Schema and the step reference.
 describe:
 	$(GO) run ./cmd/migo describe -out apps/studio/src/steps.generated.json
 	$(GO) run ./cmd/migo schema -out docs/workflow.schema.json
 	$(GO) run ./cmd/migo docs -out docs/STEP_REFERENCE.md
+engine-kit:
+	$(GO) run ./tools/enginepack
 workflows:
 	$(GO) run ./cmd/migo -check -in bom=testdata/bom_basic.xlsx -in priority=testdata/prio_basic.xlsx workflows/bom.yaml
 	$(GO) run ./cmd/migo -check -cfg '{"db_enabled": true}' -sql-stub testdata/stub_master.json -in bom=testdata/bom_random7.xls -in priority=testdata/prio_random7.xls workflows/bom.yaml
 	$(GO) run ./cmd/migo -check -in parts=examples/parts.xlsx examples/parts-summary.yaml
 	$(GO) run ./cmd/migo validate workflows/*.yaml examples/*.yaml
 	$(GO) run ./cmd/migo test examples
+	$(GO) run ./cmd/migo test conformance
 check: fmt-check vet build-all race workflows

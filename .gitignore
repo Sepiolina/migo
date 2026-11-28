@@ -24,3 +24,5 @@ node_modules/
 /dist/
 .studio/packages/
 scripts/__pycache__/
+/apps/studio/dist-web/
+/apps/studio/.web-engine/

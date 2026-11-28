@@ -1,0 +1,6 @@
+# Studio template orders-totals with its sample files.
+workflow: ../engine/workflow/templates/orders-totals.yaml
+tests:
+  - name: template with its samples
+    in: {orders: ../examples/orders.xlsx}
+    expect: expected/template-orders-totals.xlsx

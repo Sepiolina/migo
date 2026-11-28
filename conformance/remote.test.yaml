@@ -1,0 +1,13 @@
+workflow: workflows/remote.yaml
+tests:
+  - name: sql and rest in batches, answered by mocks
+    in: {parts: inputs/parts.csv}
+    mocks: remote.mocks.yaml
+    expect: expected/remote.xlsx
+  - name: a rest error stops the run
+    in: {parts: inputs/parts.csv}
+    mocks:
+      config: {api: "http://stock.example"}
+      sql: [{query: Prices, columns: [Code, Price], rows: []}]
+      rest: [{status: 500}]
+    error: status code 500

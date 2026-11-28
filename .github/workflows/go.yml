@@ -20,5 +20,17 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
           cache: true
+          cache-dependency-path: |
+            go.sum
+            engine/go.sum
       - name: Quality checks
         run: make check
+      - name: Engine kit
+        if: matrix.go == '1.26.x'
+        run: go run ./tools/enginepack -out dist/mai-engine.zip
+      - uses: actions/upload-artifact@v4
+        if: matrix.go == '1.26.x'
+        with:
+          name: mai-engine-kit
+          path: dist/mai-engine.zip
+          if-no-files-found: error

@@ -1,0 +1,5 @@
+workflow: workflows/columns-and-rows.yaml
+tests:
+  - name: column and row steps with JavaScript number and text rules
+    in: {orders: inputs/orders.csv}
+    expect: expected/columns-and-rows.xlsx

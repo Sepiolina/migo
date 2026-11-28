@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"miservice/internal/workflow"
+	"github.com/Sepiolina/migo/engine/workflow"
 )
 
 const runManifestFile = "manifest.json"

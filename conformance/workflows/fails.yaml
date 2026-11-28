@@ -1,0 +1,12 @@
+# Conformance: a workflow that stops with a message.
+name: Fails
+input:
+  data: {label: Data}
+steps:
+  - from: data
+  - if: len(rows) > 2
+    then:
+      - fail: 'Too many rows: {len(rows)}'
+  - save: result
+output:
+  sheets: {Result: result}

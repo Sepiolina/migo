@@ -1,0 +1,6 @@
+﻿Code,Name,Stock,Site,Change,Status,Bucket
+A-1,Bolt,12,North,changed,changed,in stock
+A-2,Nut,0,North,unchanged,unchanged,empty
+A-3,Washer,5,South,removed,removed,in stock
+A-4,screw,7,South,changed,changed,in stock
+A-5,Rivet,3,East,added,added,in stock

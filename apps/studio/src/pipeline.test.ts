@@ -32,12 +32,28 @@ describe("pipeline model", () => {
     expect(p.name).toBe("BOM");
     expect(p.inputs.map((i) => i.id)).toEqual(["bom", "priority"]);
     expect(p.outputs.map((o) => o.name)).toEqual(["BOM", "debug"]);
+    // debug is `like: BOM` without from: it writes BOM's table, as the runner does.
+    expect(p.outputs.map((o) => o.from)).toEqual(["result", "result"]);
     expect(p.steps.every((s) => s.spec)).toBe(true);
     expect(p.steps.filter((s) => s.depth > 0).length).toBeGreaterThan(10);
     expect(p.steps[0].note).toContain("read the customer BOM");
     expect(p.steps[0].summary).toBe("Read bom · header found by title");
     expect(p.datasets).toContain("priorities");
     for (const s of p.steps) expect(() => readForm(bom, s.argPath, stepForm(s.spec!))).not.toThrow();
+  });
+  it("reads output sheets as the runner does: like takes the earlier sheet's table unless from is given", () => {
+    const p = readPipeline(`name: "  Like  "
+input: {a: {label: ""}}
+steps: [{from: a}, {save: t}, {save: u}]
+output:
+  sheets:
+    - {name: One, from: t, columns: [{header: x}]}
+    - {name: Two, like: One}
+    - {name: Three, like: One, from: u}
+`);
+    expect(p.name).toBe("Like");
+    expect(p.inputs[0].label).toBe("a");
+    expect(p.outputs.map((o) => [o.name, o.from])).toEqual([["One", "t"], ["Two", "t"], ["Three", "u"]]);
   });
   it("reads sheet requirements from unconditional workbook reads and preserves alternatives", () => {
     const p = readPipeline(`name: x

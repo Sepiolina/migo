@@ -160,7 +160,7 @@ export function readPipeline(source: string): Pipeline {
   const inputs: InputItem[] = isMap(input)
     ? input.items.map((p) => {
         const v = js(p.value) as Record<string, unknown> | undefined;
-        return { id: String(js(p.key)), label: String(v?.label ?? js(p.key)), match: String(v?.match ?? ""), sheetRequirements: [] };
+        return { id: String(js(p.key)), label: String(v?.label || js(p.key)), match: String(v?.match ?? ""), sheetRequirements: [] };
       })
     : [];
   const steps: StepItem[] = [];
@@ -217,16 +217,21 @@ export function readPipeline(source: string): Pipeline {
   walk(root.get("steps", true), ["steps"], 0, null);
   const sheets = doc.getIn(["output", "sheets"], true);
   const outputs: OutputItem[] = isSeq(sheets)
-    ? sheets.items.map((n, index) => {
+    ? sheets.items.reduce<OutputItem[]>((done, n, index) => {
         const v = js(n) as Record<string, unknown>;
-        return { index, name: String(v?.name ?? ""), from: String(v?.from ?? v?.like ?? ""), detailed: Object.keys(v ?? {}).some((k) => !["name", "from"].includes(k)) };
-      })
+        // like: <earlier sheet> takes that sheet's table unless from is given,
+        // as the runner does; the last earlier sheet with the name wins.
+        const like = v?.like == null ? undefined : [...done].reverse().find((o) => o.name === String(v.like));
+        const from = v?.from != null && v.from !== "" ? String(v.from) : like?.from ?? "";
+        done.push({ index, name: String(v?.name ?? ""), from, detailed: Object.keys(v ?? {}).some((k) => !["name", "from"].includes(k)) });
+        return done;
+      }, [])
     : isMap(sheets)
       ? sheets.items.map((p, index) => ({ index, name: String(js(p.key)), from: String(js(p.value)), detailed: false }))
       : [];
   const service = (js(root.get("service", true)) ?? {}) as Record<string, unknown>;
   return {
-    name: String(js(root.get("name", true)) ?? ""),
+    name: String(js(root.get("name", true)) ?? "").trim(),
     inputs,
     steps,
     outputs,

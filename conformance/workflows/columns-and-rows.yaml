@@ -1,0 +1,73 @@
+# Conformance: column and row steps, JavaScript number and text rules.
+name: Columns and rows
+input:
+  orders: {label: Orders CSV}
+steps:
+  - from: {input: orders, trim: true}
+  - rename: {' Customer ': Client}   # header cells keep their spaces
+  - fill: [Client]
+  - set:
+      Client: norm(Client)
+      Qty: toNumber(Qty, 0)
+      Price: parseFloat(Price)
+      Line: toNumber(Qty, 0) * toNumber(Price, 0)
+      Third: 1 / 3
+      Sum: 0.1 + 0.2
+      Big: 2 ** 70
+      Words: len(fields(Note))
+      Blank: blank(Note)
+      Code: replaceRe(str(Order), "^10+", "")
+  - filter: Qty != 0
+  - dedupe: {by: [Order, Client, Item], keep: last, normalize: true}
+  - sort: {by: [Line], desc: true, numeric: true}
+  - window:
+      by: [Client]
+      set: {Rank: index + 1, Of: size, ClientTotal: 'sum(map(group, #.Line))'}
+  - select:
+      Order: Order
+      Client: Client
+      Item: Item
+      Qty: Qty
+      Price: Price
+      Line: Line
+      Third: Third
+      Sum: Sum
+      Big: Big
+      Words: Words
+      Blank: Blank
+      Code: Code
+      Rank: Rank
+      Of: Of
+      ClientTotal: ClientTotal
+  - save: lines
+  - stack: {columns: [Qty, Price], into: Value}
+  - drop: [Third, Sum, Big, Words, Blank, Code, Rank, Of, ClientTotal]
+  - save: stacked
+  - from: lines
+  - group: {by: [Client], sum: [Line, Qty], count: [Order], max: [Price], join: [Item]}
+  - sort: {by: [Client]}
+  - save: totals
+output:
+  sheets:
+    - name: Lines
+      from: lines
+      freeze: true
+      header: {bold: true}
+      columns:
+        - {header: Order}
+        - {header: Client}
+        - {header: Item}
+        - {header: Qty, number_format: '0.00'}
+        - {header: Line total, column: Line}
+        - {header: Third}
+        - {header: Sum}
+        - {header: Big}
+        - {header: Words}
+        - {header: Blank}
+        - {header: Code}
+        - {header: Rank, value: 'str(Rank) + "/" + str(Of)'}
+        - {header: Client total, column: ClientTotal}
+      styles:
+        - {when: Line > 5, columns: [Line total], fill: "#FFFF00"}
+    - {name: Stacked, from: stacked}
+    - {name: Totals, from: totals}

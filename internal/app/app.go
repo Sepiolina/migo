@@ -11,10 +11,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"miservice/internal/config"
+	"github.com/Sepiolina/migo/engine/config"
+	"github.com/Sepiolina/migo/engine/logx"
 	"miservice/internal/httpx"
 	"miservice/internal/jobs"
-	"miservice/internal/logx"
 	"miservice/internal/module"
 	"miservice/internal/storage"
 )

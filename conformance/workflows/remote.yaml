@@ -1,0 +1,25 @@
+# Conformance: sql and rest steps, answered by a mocks file.
+name: Remote data
+input:
+  parts: {label: Parts}
+steps:
+  - from: {input: parts, trim: true}
+  - sql:
+      query: SELECT Code, Price FROM Prices WHERE Code IN (@codes)
+      params: {codes: 'map(rows, #.Code)'}
+      batch: 2
+      save: prices
+  - rest:
+      url: '{config("api")}/stock'
+      method: POST
+      each: 'map(rows, #.Code)'
+      batch: '3'
+      body: '{codes: batch}'
+      rows: response.items
+      save: stock
+  - join: {with: prices, on: [Code], take: {Unit price: Price}}
+  - join: {with: stock, on: [Code], right_on: [code], take: {On hand: qty}}
+  - set: {Value: 'toNumber(col("Unit price"), 0) * toNumber(col("On hand"), 0)'}
+  - save: result
+output:
+  sheets: {Parts: result}

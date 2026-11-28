@@ -8,8 +8,8 @@ import (
 	"os/exec"
 	"testing"
 
-	"miservice/internal/config"
-	"miservice/internal/logx"
+	"github.com/Sepiolina/migo/engine/config"
+	"github.com/Sepiolina/migo/engine/logx"
 	"miservice/internal/module"
 )
 

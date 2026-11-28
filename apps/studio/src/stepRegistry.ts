@@ -1,7 +1,7 @@
 /**
  * The Studio step registry: one spec per workflow step or nested item.
  *
- * The specs are declared once, in Go (internal/workflow/steps_info.go), and
+ * The specs are declared once, in Go (engine/workflow/steps_info.go), and
  * reach Studio as steps.generated.json, written by `make describe`. Never
  * edit that file by hand: to add or change a step, edit its Go descriptor and
  * regenerate (docs/MAI_STUDIO_DEVELOPMENT.md, "Add a step to Studio"). The

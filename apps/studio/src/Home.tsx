@@ -15,6 +15,7 @@ export function Home({
   onBack,
   recoveryDrafts,
   onOpenRecoveryDraft,
+  web,
 }: {
   workspace: string;
   desktop: boolean;
@@ -26,6 +27,8 @@ export function Home({
   onBack?: () => void;
   recoveryDrafts?: RecoveryEntry[];
   onOpenRecoveryDraft?: (id: string) => void;
+  /** The browser build: files are opened or dropped, not a folder. */
+  web?: { onImport: () => void; onClear: () => void };
 }) {
   return (
     <main className="home" aria-label="Workflows">
@@ -34,7 +37,18 @@ export function Home({
           <h1>Workflows</h1>
           <p className="lead">Each workflow reads Excel or CSV files, transforms them step by step, and is served by MaiService as an API endpoint.</p>
         </div>
-        {!desktop ? (
+        {web ? (
+          <div className="hero">
+            <div>
+              <b>Check a workflow in your browser</b>
+              <p>Open or drop a workflow (.yaml) together with its Excel or CSV sample files. Everything runs on this computer: nothing is uploaded, and SQL and REST steps stay offline (a <code>tests/&lt;name&gt;.mocks.yaml</code> file answers them). Your files are kept in this browser.</p>
+            </div>
+            <div className="hero-actions">
+              <button className="primary" onClick={web.onImport}>Open files…</button>
+              {workflows.some((w) => w.path.startsWith("workflows/")) && <button className="btn" onClick={web.onClear}>Remove my files</button>}
+            </div>
+          </div>
+        ) : !desktop ? (
           <div className="notice">This is the browser preview. Open the Mai Studio desktop app to open folders, preview data and run workflows. Templates open here so you can try the editor.</div>
         ) : (
           <div className="hero">
@@ -65,7 +79,7 @@ export function Home({
         )}
         {workspace && (
           <section>
-            <h2>In this project</h2>
+            <h2>{web ? "Your workflows and examples" : "In this project"}</h2>
             <div className="list">
               {workflows.length ? (
                 workflows.map((w) => (
@@ -82,7 +96,7 @@ export function Home({
                 ))
               ) : (
                 <div className="wf" style={{ cursor: "default" }}>
-                  <span className="hint">No project workflows or examples found. Start from a template below.</span>
+                  <span className="hint">{web ? "No workflows yet. Open or drop a .yaml file, or start from a template below." : "No project workflows or examples found. Start from a template below."}</span>
                 </div>
               )}
             </div>

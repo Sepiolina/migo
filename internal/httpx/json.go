@@ -3,7 +3,7 @@ package httpx
 import (
 	"net/http"
 
-	"miservice/internal/jsx"
+	"github.com/Sepiolina/migo/engine/jsx"
 )
 
 // WriteJSON writes v as a JSON response with the given status. Struct

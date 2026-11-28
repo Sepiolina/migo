@@ -1,0 +1,6 @@
+# Studio template excel-to-csv with its sample files.
+workflow: ../engine/workflow/templates/excel-to-csv.yaml
+tests:
+  - name: template with its samples
+    in: {sheet: ../examples/parts.xlsx}
+    expect: expected/template-excel-to-csv.csv

@@ -1,0 +1,19 @@
+# Answers for workflows/remote.yaml: no database or network is used.
+config: {api: "http://stock.example", db_enabled: true}
+sql:
+  - query: Prices
+    columns: [Code, Price]
+    rows:
+      - [A-1, 0.25]
+      - [A-2, 1.5]
+  - query: Prices
+    columns: [Code, Price]
+    rows:
+      - [A-3, 2]
+rest:
+  - url: /stock
+    method: POST
+    body: {items: [{code: A-1, qty: 100}, {code: A-2, qty: 7}, {code: A-3, qty: 0}]}
+  - url: /stock
+    method: POST
+    body: {items: [{code: A-4, qty: 12}]}

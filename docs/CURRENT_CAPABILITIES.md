@@ -15,6 +15,7 @@ execute a workflow from the command line without starting a server.
 | Component | Purpose | Current execution mode |
 | --- | --- | --- |
 | Mai Studio | Desktop block and graph workflow editing with Excel inspection | Local, offline fixture runs; external SQL/HTTP calls blocked |
+| Mai Studio (browser) | The same editor as one HTML file (`npm run build:web`), engine compiled to WebAssembly | In the browser tab, no install or folder; no network; no package builds |
 | MaiService | Go HTTP microservice for processing uploaded workbooks | Local or server deployment; external integrations depend on configuration and connectivity |
 | migo | Go command-line workflow runner | Local execution, optional runtime configuration and SQL stub |
 

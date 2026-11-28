@@ -11,12 +11,13 @@ cmd/maiservice            entrypoint (flags + app.Run) -- rarely edited
 internal/app             wiring. modules.go = the list of modules (1 line per module)
 internal/module          what a module is (Module, Starter, Closer, Services)
 internal/httpx           router, error responses, uploads, CORS/recover middleware
-internal/config          config.json (typed shared keys + cfg.String/Int/Bool for your own)
+engine/config            config.json (typed shared keys + cfg.String/Int/Bool for your own)
 internal/storage         generated files: temp -> commit, per-owner limit, retention cleanup
 internal/jobs            Gate (limit concurrent heavy jobs), FreeMemory
 internal/clients/sqlserver  shared lazy SQL Server pool
-internal/jsx, sheet      JS-exact number/trim semantics; .xls/.xlsx readers
-internal/workflow        the workflow engine: parser, steps, expressions, sql/rest, xlsx writer
+engine/jsx, sheet        JS-exact number/trim semantics; .xls/.xlsx readers
+engine/workflow          the workflow engine: parser, steps, expressions, sql/rest, xlsx writer
+                         (engine/ is its own Go module, github.com/Sepiolina/migo/engine)
 internal/modules/system  /api/health   <- smallest example of a module
 internal/modules/workflows  serves every workflow file at /api/<name>/{upload,download}
 workflows/               built-in workflow files (embedded in the binary); bom.yaml = the BOM process
@@ -105,7 +106,7 @@ each request.
 5. Test it like `internal/app/app_test.go`: build `app.New(cfg, logx.Nop, []module.Factory{reports.New})`
    and call `a.Handler()` with `httptest`.
 
-New config keys need no change to `internal/config`:
+New config keys need no change to `engine/config`:
 `s.Config.String("reports_url")`, `.Int("reports_timeout")`, `.Bool("reports_enabled")`
 (add the keys to `config.example.json`).
 
@@ -118,7 +119,7 @@ First check whether expressions already do it: `set` with `prev()`, `window`
 with `group`, and `pick` cover most row logic. A step type belongs in Go only
 when it is generic, meaning not tied to one process.
 
-1. Write the compiler in `internal/workflow` (table steps: `table.go` /
+1. Write the compiler in `engine/workflow` (table steps: `table.go` /
    `group.go`). A table step decodes its argument with `strictDecode`,
    compiles any expressions with `compileExpr`, and returns a `tableFn`:
 
@@ -162,7 +163,7 @@ when it is generic, meaning not tied to one process.
    }
    ```
 3. Describe it, so Mai Studio and API clients can offer it. Add one
-   `StepInfo` to `builtinSteps` in `internal/workflow/steps_info.go` (a step
+   `StepInfo` to `builtinSteps` in `engine/workflow/steps_info.go` (a step
    registered from another package calls `workflow.DescribeStep` beside
    `RegisterTableStep`):
 
@@ -183,7 +184,7 @@ when it is generic, meaning not tied to one process.
    with no TypeScript change), `docs/workflow.schema.json` (editors complete
    and check it) and `docs/STEP_REFERENCE.md`. `GET /api/workflows` serves the same catalog
    under `reference`, and `migo describe` prints it.
-5. Test it in `internal/workflow/workflow_test.go` (`TestTableSteps` runs a
+5. Test it in `engine/workflow/workflow_test.go` (`TestTableSteps` runs a
    small workflow on `testdata/parts.xls`), and document it in `docs/WORKFLOWS.md`.
 
 `go test ./...` fails when a step has no descriptor, when a descriptor is
@@ -221,7 +222,7 @@ Elsewhere:
 
 * Log through `logx.Logger` (`log.Printf(...)`); a nil logger is safe.
 * Anything that must behave like JavaScript (trim, number-to-string, parseFloat)
-  goes through `internal/jsx`, not the Go standard library: output must stay
+  goes through `engine/jsx`, not the Go standard library: output must stay
   cell-identical with the Node service.
 * Inject external systems (database, HTTP, clock) as function values or small
   structs so tests never need the real thing (`workflow.Runtime{SQL, HTTP, Sleep}`).
@@ -231,9 +232,9 @@ Elsewhere:
 
 Templates are what `migo new -template <id>` and Mai Studio's start page offer.
 
-1. Add `internal/workflow/templates/<id>.yaml`: a complete workflow whose
+1. Add `engine/workflow/templates/<id>.yaml`: a complete workflow whose
    first line is `name: ...`.
-2. Add its entry to `templates` in `internal/workflow/templates.go`: the id,
+2. Add its entry to `templates` in `engine/workflow/templates.go`: the id,
    a title, a one-line description, and a sample file for each input
    (relative to the repository root, usually in `examples/`).
 3. Run `make describe` and commit the regenerated files.

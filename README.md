@@ -21,6 +21,8 @@ validation coverage, and features still planned.
 - [Build a Linux deployment ZIP in Studio](#build-a-linux-deployment-zip-in-studio)
 - [Build a test folder for Linux or Windows](#build-a-test-folder-for-linux-or-windows)
 - [Deploy on Linux with PM2](#deploy-on-linux-with-pm2)
+- [Check workflows in a browser, with nothing installed](#check-workflows-in-a-browser-with-nothing-installed)
+- [Use the workflow engine in another project](#use-the-workflow-engine-in-another-project)
 - [Run a workflow without a server](#run-a-workflow-without-a-server)
 - [Development checks](#development-checks)
 - [Troubleshooting](#troubleshooting)
@@ -412,6 +414,37 @@ version, rename the new file into place, and run `pm2 restart maiservice`. Do no
 copy over a running Linux executable. Recheck health and upload/download behavior;
 restore the previous executable and restart if verification fails.
 
+## Check workflows in a browser, with nothing installed
+
+Build Studio as a single HTML file that you can send to anyone who writes or
+checks workflows (needs Go and Node.js on the build machine only):
+
+```sh
+cd apps/studio
+npm ci
+npm run build:web
+```
+
+Send `apps/studio/dist-web/mai-studio.html`. The recipient opens it in a
+browser and drops in a workflow `.yaml` and its sample Excel or CSV files. It
+validates, previews and runs workflows with the production engine,
+entirely offline. See the [user guide](docs/MAI_STUDIO_USER_GUIDE.md#studio-in-a-browser-one-file-to-send).
+
+## Use the workflow engine in another project
+
+The engine lives in `engine/`, a Go module of its own
+(`github.com/Sepiolina/migo/engine`). To hand it to a coding agent or
+another team, build the kit:
+
+```sh
+make engine-kit
+```
+
+`dist/mai-engine-<version>.zip` contains the module, a conformance suite of
+workflows with the exact outputs `migo` writes, and an `AGENTS.md` with
+integration rules and the checks that prove 1:1 output. See
+[engine/README.md](engine/README.md).
+
 ## Run a workflow without a server
 
 The `migo` command line creates, checks, runs and tests workflows. From the
@@ -501,7 +534,7 @@ retention and upload cleanup are managed by the storage layer.
 | `cmd/maiservice` | Microservice entry point |
 | `cmd/migo` | Standalone workflow CLI |
 | `cmd/mai-runner` | Desktop protocol sidecar |
-| `internal/workflow` | Production workflow parser and engine |
+| `engine` | The workflow engine as its own Go module (`github.com/Sepiolina/migo/engine`): parser, steps, Excel/CSV reading and writing. Other services can import it; see [engine/README.md](engine/README.md) |
 | `internal/modules` | HTTP feature modules |
 | `workflows` | Built-in YAML workflows |
 | `examples`, `testdata` | Example inputs and test fixtures |

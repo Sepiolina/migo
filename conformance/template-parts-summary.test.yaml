@@ -1,0 +1,6 @@
+# Studio template parts-summary with its sample files.
+workflow: ../engine/workflow/templates/parts-summary.yaml
+tests:
+  - name: template with its samples
+    in: {parts: ../examples/parts.xlsx}
+    expect: expected/template-parts-summary.xlsx

@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"miservice/internal/logx"
+	"github.com/Sepiolina/migo/engine/logx"
 )
 
 // The upload folder follows one rule:

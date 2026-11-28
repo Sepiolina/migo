@@ -121,11 +121,20 @@ export class RunnerError extends Error {
 type Bridge = {
   invoke: (command: string, args?: Record<string, unknown>) => Promise<unknown>;
   listen?: (event: string, handler: (payload: unknown) => void) => () => void;
+  /** The browser host (src/web): an in-memory workspace instead of a folder. */
+  web?: boolean;
 };
 const bridge = () => (window as unknown as { __maiBridge?: Bridge }).__maiBridge;
 
 export function isDesktop() {
   return "__TAURI_INTERNALS__" in window || !!bridge();
+}
+/**
+ * Studio runs in a browser with its own engine (vite --mode web): there is
+ * no folder to open, files are imported or dropped, and results downloaded.
+ */
+export function isWebTool() {
+  return !!bridge()?.web;
 }
 /** Call a native host command. */
 export function native<T>(command: string, args?: Record<string, unknown>): Promise<T> {

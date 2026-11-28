@@ -9,6 +9,33 @@ concurrency:
 permissions:
   contents: read
 jobs:
+  browser:
+    # The single-file browser Studio: the Go engine as WebAssembly, offline.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: apps/studio/package-lock.json
+      - run: npm ci
+        working-directory: apps/studio
+      - run: npm run build:web
+        working-directory: apps/studio
+      - run: npx vitest run src/web
+        working-directory: apps/studio
+      - run: node scripts/smoke-web.mjs
+        working-directory: apps/studio
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mai-studio-html
+          path: apps/studio/dist-web/mai-studio.html
+          if-no-files-found: error
   desktop:
     runs-on: ubuntu-24.04
     timeout-minutes: 40

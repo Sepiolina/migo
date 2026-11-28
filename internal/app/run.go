@@ -6,8 +6,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"miservice/internal/config"
-	"miservice/internal/logx"
+	"github.com/Sepiolina/migo/engine/config"
+	"github.com/Sepiolina/migo/engine/logx"
 )
 
 // Run is the whole program: load config, build the app, serve until
