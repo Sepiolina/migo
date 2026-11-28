@@ -22,6 +22,7 @@ of the engine.
 | `mock` | Answers SQL and REST steps from a `.mocks.yaml` file, for tests and offline runs. |
 | `wftest` | Runs `.test.yaml` workflow tests that compare a run with an expected output. |
 | `sheet` | Reads `.xlsx`, `.xls` and `.csv` files into grids of text. |
+| `cli`, `cmd/migo` | The `migo` command line. This build has no SQL Server driver; the repository's `cmd/migo` adds it through `cli.Options`. |
 | `jsx`, `logx` | Number, text and truthiness rules shared with the Node service, and the logger interface. |
 
 ## Run a workflow
@@ -61,6 +62,18 @@ To run without a database or network, use a mocks file:
 set, err := mock.Load("tests/stock-lookup.mocks.yaml")
 rt, err := set.Runtime(nil)
 ```
+
+## Hand it to another project
+
+`make engine-kit` in the repository root writes `dist/mai-engine-<version>.zip`.
+CI also attaches the zip to every run as `mai-engine-kit`. The zip contains:
+
+- this module;
+- the conformance suite (`conformance/`): workflows, inputs and the exact
+  outputs `migo` writes;
+- the workflow documentation;
+- `AGENTS.md`, which tells a coding agent how to integrate the engine and
+  prove that its output matches `migo`.
 
 ## Develop
 

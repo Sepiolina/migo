@@ -1,0 +1,6 @@
+# Studio template lookup-enrich with its sample files.
+workflow: ../engine/workflow/templates/lookup-enrich.yaml
+tests:
+  - name: template with its samples
+    in: {orders: ../examples/orders.xlsx, regions: ../examples/regions.csv}
+    expect: expected/template-lookup-enrich.xlsx

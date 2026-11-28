@@ -1,0 +1,8 @@
+workflow: workflows/fails.yaml
+tests:
+  - name: under the limit runs
+    in: {data: inputs/two-rows.csv}
+    expect: expected/fails-ok.xlsx
+  - name: over the limit fails with the message
+    in: {data: inputs/three-rows.csv}
+    error: 'Too many rows: 3'

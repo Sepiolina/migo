@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -216,5 +217,36 @@ func TestBOMPriorityLayouts(t *testing.T) {
 	err := loadBOM(t).Run(context.Background(), rt, map[string]string{"bom": "../../testdata/bom_basic.xlsx", "priority": bad}, filepath.Join(dir, "bad-out.xlsx"))
 	if err == nil || err.Error() != "Priority file has no priorities. Expected FPN and Priority columns on its Shortage sheet or, without one, its first sheet." {
 		t.Errorf("bad priority: %v", err)
+	}
+}
+
+// One parsed workflow runs concurrently, as MaiService and library users
+// run it: every run writes the same cells (run with -race).
+func TestConcurrentRunsOfOneWorkflow(t *testing.T) {
+	wf := loadBOM(t)
+	inputs := map[string]string{"bom": "../../testdata/bom_random7.xls", "priority": "../../testdata/prio_random7.xls"}
+	want := readAll(t, "../../testdata/golden_random7_nosap.xlsx")
+	dir := t.TempDir()
+	// One runtime for every run, as MaiService shares one per workflow.
+	rt := Runtime{Cfg: cfg(t, `{"db_enabled": true}`), SQL: stubSQL(t, "../../testdata/stub_master.json")}
+	errs := make(chan error, 4)
+	for i := 0; i < 4; i++ {
+		go func(i int) {
+			out := filepath.Join(dir, fmt.Sprintf("out%d.xlsx", i))
+			if err := wf.Run(context.Background(), rt, inputs, out); err != nil {
+				errs <- err
+				return
+			}
+			if got := readAll(t, out); !reflect.DeepEqual(got, want) {
+				errs <- fmt.Errorf("run %d: output differs from the golden file", i)
+				return
+			}
+			errs <- nil
+		}(i)
+	}
+	for i := 0; i < 4; i++ {
+		if err := <-errs; err != nil {
+			t.Error(err)
+		}
 	}
 }

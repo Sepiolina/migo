@@ -1,0 +1,5 @@
+workflow: workflows/tables.yaml
+tests:
+  - name: compare, append, join, split and csv output
+    in: {old: inputs/stock-old.csv, new: inputs/stock-new.csv}
+    expect: expected/tables.csv

@@ -1,0 +1,16 @@
+# The production BOM workflow (workflows/bom.yaml), offline.
+workflow: ../workflows/bom.yaml
+tests:
+  - name: basic BOM and priority list
+    in: {bom: ../testdata/bom_basic.xlsx, priority: ../testdata/prio_basic.xlsx}
+    expect: expected/bom-basic.xlsx
+  - name: random BOM from .xls files
+    in: {bom: ../testdata/bom_random7.xls, priority: ../testdata/prio_random7.xls}
+    expect: expected/bom-random7.xlsx
+  - name: workbook with an offset table range
+    in: {bom: ../testdata/offset_range.xlsx, priority: ../testdata/prio_basic.xlsx}
+    expect: expected/bom-offset-range.xlsx
+  - name: random BOM with the database answered (matches testdata/golden_random7_nosap.xlsx)
+    in: {bom: ../testdata/bom_random7.xls, priority: ../testdata/prio_random7.xls}
+    mocks: bom-random7.mocks.yaml
+    expect: ../testdata/golden_random7_nosap.xlsx

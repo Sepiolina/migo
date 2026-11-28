@@ -1,0 +1,6 @@
+# Studio template clean-sheet with its sample files.
+workflow: ../engine/workflow/templates/clean-sheet.yaml
+tests:
+  - name: template with its samples
+    in: {sheet: ../examples/parts.xlsx}
+    expect: expected/template-clean-sheet.xlsx

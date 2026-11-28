@@ -1,0 +1,31 @@
+# Conformance: steps that combine tables, branches, and CSV output.
+name: Tables
+input:
+  old: {label: Old stock, match: '(?i)old'}
+  new: {label: New stock, match: '(?i)new'}
+steps:
+  - from: {input: old, trim: true}
+  - save: before
+  - from: {input: new, trim: true}
+  # normalize applies to the keys (by) only: "screw " vs "Screw" is still a change
+  - compare: {with: before, by: [Code], columns: [Name, Stock], status: Change, normalize: true}
+  - save: compared
+  - from: before
+  - append: [compared]
+  - dedupe: {by: [Code], keep: last}
+  - join: {with: compared, on: [Code], how: inner, suffix: _new, take: {Status: Change}}
+  - split:
+      where: num(Stock) > 0
+      then:
+        - set: {Bucket: '"in stock"'}
+      else:
+        - set: {Bucket: '"empty"'}
+        - log: 'Empty rows: {len(rows)}'
+  - if: 'any(rows, #.Status == "added")'
+    then:
+      - log: 'Added codes found'
+  - sort: {by: [Code]}
+  - save: result
+output:
+  format: csv
+  sheets: {Result: result}

@@ -22,6 +22,7 @@ validation coverage, and features still planned.
 - [Build a test folder for Linux or Windows](#build-a-test-folder-for-linux-or-windows)
 - [Deploy on Linux with PM2](#deploy-on-linux-with-pm2)
 - [Check workflows in a browser, with nothing installed](#check-workflows-in-a-browser-with-nothing-installed)
+- [Use the workflow engine in another project](#use-the-workflow-engine-in-another-project)
 - [Run a workflow without a server](#run-a-workflow-without-a-server)
 - [Development checks](#development-checks)
 - [Troubleshooting](#troubleshooting)
@@ -428,6 +429,21 @@ Send `apps/studio/dist-web/mai-studio.html`. The recipient opens it in a
 browser and drops in a workflow `.yaml` and its sample Excel or CSV files. It
 validates, previews and runs workflows with the production engine,
 entirely offline. See the [user guide](docs/MAI_STUDIO_USER_GUIDE.md#studio-in-a-browser-one-file-to-send).
+
+## Use the workflow engine in another project
+
+The engine lives in `engine/`, a Go module of its own
+(`github.com/Sepiolina/migo/engine`). To hand it to a coding agent or
+another team, build the kit:
+
+```sh
+make engine-kit
+```
+
+`dist/mai-engine-<version>.zip` contains the module, a conformance suite of
+workflows with the exact outputs `migo` writes, and an `AGENTS.md` with
+integration rules and the checks that prove 1:1 output. See
+[engine/README.md](engine/README.md).
 
 ## Run a workflow without a server
 
