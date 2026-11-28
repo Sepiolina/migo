@@ -16,7 +16,7 @@ import (
 	"strconv"
 	"strings"
 
-	"miservice/internal/jsx"
+	"github.com/Sepiolina/migo/engine/jsx"
 )
 
 // Config is the parsed config.json.
@@ -107,7 +107,29 @@ func Load(path string) (*Config, error) {
 		return nil, errors.New("config must be a JSON object")
 	}
 	abs, _ := filepath.Abs(target)
-	c := &Config{raw: m, Dir: filepath.Dir(abs)}
+	c := New(m)
+	c.Dir = filepath.Dir(abs)
+	c.Port = parseInt(os.Getenv("PORT"))
+	if c.Port == 0 {
+		c.Port = c.Int("port")
+	}
+	if c.Port == 0 {
+		c.Port = 5000
+	}
+	return c, nil
+}
+
+// New builds a configuration from config.json keys, for a
+// program that keeps its settings elsewhere. Workflows read the keys with
+// config("key"); Port is the "port" key (0 when absent) and Dir is empty.
+func New(values map[string]any) *Config {
+	// Values go through JSON so Go ints, structs and the like read the same
+	// as the numbers, objects and strings of a config.json file.
+	raw := map[string]any{}
+	if b, err := json.Marshal(values); err == nil {
+		_ = json.Unmarshal(b, &raw)
+	}
+	c := &Config{raw: raw, Port: parseInt(raw["port"])}
 	c.DB = DB{
 		Enabled:  c.Bool("db_enabled"),
 		Server:   c.String("db_server"),
@@ -117,12 +139,5 @@ func Load(path string) (*Config, error) {
 		Name:     c.String("db_name"),
 		TLSMin:   c.String("db_tls_min"),
 	}
-	c.Port = parseInt(os.Getenv("PORT"))
-	if c.Port == 0 {
-		c.Port = c.Int("port")
-	}
-	if c.Port == 0 {
-		c.Port = 5000
-	}
-	return c, nil
+	return c
 }

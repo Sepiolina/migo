@@ -29,7 +29,7 @@ import (
 	"time"
 
 	"filippo.io/age"
-	"miservice/internal/workflow"
+	"github.com/Sepiolina/migo/engine/workflow"
 )
 
 type Options struct {

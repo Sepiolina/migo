@@ -37,8 +37,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"miservice/internal/config"
-	"miservice/internal/workflow"
+	"github.com/Sepiolina/migo/engine/config"
+	"github.com/Sepiolina/migo/engine/workflow"
 )
 
 // Set is the content of a mocks file.

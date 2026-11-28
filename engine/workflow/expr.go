@@ -10,7 +10,7 @@ import (
 	"github.com/expr-lang/expr/ast"
 	"github.com/expr-lang/expr/vm"
 
-	"miservice/internal/jsx"
+	"github.com/Sepiolina/migo/engine/jsx"
 )
 
 // Expressions are expr-lang (https://expr-lang.org/docs/language-definition).

@@ -3,7 +3,7 @@ package httpx
 import (
 	"net/http"
 
-	"miservice/internal/logx"
+	"github.com/Sepiolina/migo/engine/logx"
 )
 
 // Middleware wraps an http.Handler.

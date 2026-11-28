@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"miservice/internal/jsx"
+	"github.com/Sepiolina/migo/engine/jsx"
 )
 
 // Cells are typed: string, float64, bool or nil (blank). Sheets read as

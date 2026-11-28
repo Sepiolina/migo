@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"miservice/internal/wftest"
-	"miservice/internal/workflow"
+	"github.com/Sepiolina/migo/engine/wftest"
+	"github.com/Sepiolina/migo/engine/workflow"
 )
 
 func fixtureRoot(t *testing.T) string {

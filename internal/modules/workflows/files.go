@@ -3,7 +3,7 @@ package workflows
 import (
 	"strings"
 
-	"miservice/internal/jsx"
+	"github.com/Sepiolina/migo/engine/jsx"
 )
 
 // ParseEmployeeNumber ports helpers.parseEmployeeNumber; ok is false for

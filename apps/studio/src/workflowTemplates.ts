@@ -1,6 +1,6 @@
 /**
  * Starter workflows. They are declared once, in Go
- * (internal/workflow/templates/*.yaml and templates.go), shared with
+ * (engine/workflow/templates/*.yaml and templates.go), shared with
  * `migo new`, and reach Studio in steps.generated.json (`make describe`).
  * Each one runs on the example files in the repository.
  */

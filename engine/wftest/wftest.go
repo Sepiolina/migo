@@ -31,8 +31,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"miservice/internal/mock"
-	"miservice/internal/workflow"
+	"github.com/Sepiolina/migo/engine/mock"
+	"github.com/Sepiolina/migo/engine/workflow"
 )
 
 // Suffix is the file name ending of a workflow test file.

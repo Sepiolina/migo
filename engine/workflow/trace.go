@@ -6,7 +6,7 @@ import (
 	"math"
 	"time"
 
-	"miservice/internal/config"
+	"github.com/Sepiolina/migo/engine/config"
 )
 
 // StepTrace is the current table after one top-level step, as an editor

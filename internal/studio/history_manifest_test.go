@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"miservice/internal/workflow"
+	"github.com/Sepiolina/migo/engine/workflow"
 )
 
 func historyRunFixture(t *testing.T) (Params, *workflow.Workflow, map[string]string) {

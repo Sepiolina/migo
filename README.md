@@ -518,7 +518,7 @@ retention and upload cleanup are managed by the storage layer.
 | `cmd/maiservice` | Microservice entry point |
 | `cmd/migo` | Standalone workflow CLI |
 | `cmd/mai-runner` | Desktop protocol sidecar |
-| `internal/workflow` | Production workflow parser and engine |
+| `engine` | The workflow engine as its own Go module (`github.com/Sepiolina/migo/engine`): parser, steps, Excel/CSV reading and writing. Other services can import it; see [engine/README.md](engine/README.md) |
 | `internal/modules` | HTTP feature modules |
 | `workflows` | Built-in YAML workflows |
 | `examples`, `testdata` | Example inputs and test fixtures |

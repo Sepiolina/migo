@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"miservice/internal/logx"
+	"github.com/Sepiolina/migo/engine/logx"
 )
 
 func TestOutputStore(t *testing.T) {

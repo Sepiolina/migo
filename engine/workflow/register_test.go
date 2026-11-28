@@ -8,7 +8,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"miservice/internal/workflow"
+	"github.com/Sepiolina/migo/engine/workflow"
 )
 
 func init() {

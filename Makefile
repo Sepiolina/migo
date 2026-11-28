@@ -21,6 +21,7 @@ build:
 	$(GO) build -o migo ./cmd/migo
 build-all:
 	$(GO) build ./...
+	cd engine && $(GO) build ./...
 linux:
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -ldflags="-s -w" -o dist/maiservice ./cmd/maiservice
 windows:
@@ -31,15 +32,20 @@ run:
 	$(GO) run ./cmd/maiservice -config "$(CONFIG)"
 vet:
 	$(GO) vet ./...
+	cd engine && $(GO) vet ./...
 test: vet
 	$(GO) test ./...
+	cd engine && $(GO) test ./...
 race:
 	$(GO) test -race ./...
+	cd engine && $(GO) test -race ./...
 fmt:
-	$(GOFMT) -w cmd internal tools workflows
+	$(GOFMT) -w cmd internal tools workflows engine
 fmt-check:
-	@files="$$($(GOFMT) -l cmd internal tools workflows)" || exit 1; \
+	@files="$$($(GOFMT) -l cmd internal tools workflows engine)" || exit 1; \
 	if [ -n "$$files" ]; then echo "Run make fmt to format:"; echo "$$files"; exit 1; fi
+# The workflow engine (engine/) is its own Go module so other services can
+# import it; the targets above check it alongside the service.
 # Regenerate everything derived from the engine's step descriptors: Mai
 # Studio's step catalog, the editor JSON Schema and the step reference.
 describe:

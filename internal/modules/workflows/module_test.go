@@ -12,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Sepiolina/migo/engine/config"
+	"github.com/Sepiolina/migo/engine/logx"
 	"miservice/internal/app"
-	"miservice/internal/config"
-	"miservice/internal/logx"
 	"miservice/internal/modules/workflows"
 )
 

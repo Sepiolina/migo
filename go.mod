@@ -3,15 +3,19 @@ module miservice
 go 1.22
 
 require (
-	github.com/expr-lang/expr v1.17.5
 	github.com/microsoft/go-mssqldb v1.7.2
-	github.com/richardlehane/mscfb v1.0.4
 	github.com/xuri/excelize/v2 v2.8.1
-	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
-	filippo.io/age v1.2.1 // indirect
+	github.com/expr-lang/expr v1.17.5 // indirect
+	github.com/richardlehane/mscfb v1.0.4 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
+)
+
+require (
+	filippo.io/age v1.2.1
+	github.com/Sepiolina/migo/engine v0.0.0
 	github.com/golang-sql/civil v0.0.0-20220223132316-b832511892a9 // indirect
 	github.com/golang-sql/sqlexp v0.1.0 // indirect
 	github.com/mohae/deepcopy v0.0.0-20170929034955-c48cc78d4826 // indirect
@@ -23,3 +27,5 @@ require (
 	golang.org/x/sys v0.21.0 // indirect
 	golang.org/x/text v0.16.0 // indirect
 )
+
+replace github.com/Sepiolina/migo/engine => ./engine

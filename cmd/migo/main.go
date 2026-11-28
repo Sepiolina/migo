@@ -23,11 +23,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Sepiolina/migo/engine/config"
+	"github.com/Sepiolina/migo/engine/mock"
+	"github.com/Sepiolina/migo/engine/workflow"
 	"miservice/internal/clients/sqlserver"
-	"miservice/internal/config"
-	"miservice/internal/mock"
 	"miservice/internal/modules/workflows"
-	"miservice/internal/workflow"
 )
 
 func main() {

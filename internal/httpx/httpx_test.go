@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"miservice/internal/logx"
+	"github.com/Sepiolina/migo/engine/logx"
 )
 
 func serve(rt *Router, method, path string) *httptest.ResponseRecorder {

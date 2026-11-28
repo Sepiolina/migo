@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Sepiolina/migo/engine/workflow"
 	"miservice/internal/httpx"
 	"miservice/internal/jobs"
-	"miservice/internal/workflow"
 )
 
 // Response bodies are structs (not maps) so key order matches the Express

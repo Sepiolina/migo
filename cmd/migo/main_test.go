@@ -14,7 +14,7 @@ import (
 
 	"github.com/xuri/excelize/v2"
 
-	"miservice/internal/workflow"
+	"github.com/Sepiolina/migo/engine/workflow"
 )
 
 func TestExampleWorkflow(t *testing.T) {

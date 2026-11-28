@@ -57,7 +57,7 @@ its YAML and is saved unchanged.
 Steps are declared once, in Go. Studio has no per-step code to write.
 
 1. Add a `StepInfo` for the step to `builtinSteps` in
-   `internal/workflow/steps_info.go`
+   `engine/workflow/steps_info.go`
    ([Extending, section 3](EXTENDING.md#3-add-a-generic-step-type) has an example):
    `Form` says where fields live (`map`, `entries` for a whole-map argument,
    `inline` for if/then/else); `Scalar`/`List` name the field a short form fills.
@@ -155,10 +155,10 @@ Studio passes `omitPreview: true` to `run` and reads the saved file through a se
 preview request. The runner's default response still includes its inline preview.
 
 `trace` and `run` also take `mocks`, a workspace-relative mocks file: when it
-exists, sql and rest steps are answered from it (`internal/mock`) and the trace
+exists, sql and rest steps are answered from it (`engine/mock`) and the trace
 result has `mocks: true`; when it does not, the run is offline as before.
 `saveTest` takes `path` (the saved workflow), `inputs`, `mocks` and `name`, and
-adds a case to `tests/<workflow>.test.yaml` (`internal/wftest`). A new runner
+adds a case to `tests/<workflow>.test.yaml` (`engine/wftest`). A new runner
 command must also be added to the allow-list in `authorize`
 (`src-tauri/src/lib.rs`).
 The native bridge replaces the workspace path with the folder approved by the

@@ -20,5 +20,8 @@ jobs:
         with:
           go-version: ${{ matrix.go }}
           cache: true
+          cache-dependency-path: |
+            go.sum
+            engine/go.sum
       - name: Quality checks
         run: make check

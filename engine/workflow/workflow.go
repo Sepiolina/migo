@@ -30,8 +30,8 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"miservice/internal/config"
-	"miservice/internal/logx"
+	"github.com/Sepiolina/migo/engine/config"
+	"github.com/Sepiolina/migo/engine/logx"
 )
 
 // Workflow is a loaded, compiled workflow file.

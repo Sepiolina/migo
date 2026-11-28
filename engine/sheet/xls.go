@@ -9,7 +9,7 @@ import (
 
 	"github.com/richardlehane/mscfb"
 
-	"miservice/internal/jsx"
+	"github.com/Sepiolina/migo/engine/jsx"
 )
 
 // BIFF8 record ids used here.

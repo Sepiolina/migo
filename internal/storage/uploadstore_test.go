@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"miservice/internal/logx"
+	"github.com/Sepiolina/migo/engine/logx"
 )
 
 func exists(p string) bool { _, err := os.Stat(p); return err == nil }

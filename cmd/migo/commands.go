@@ -12,8 +12,8 @@ import (
 	"sort"
 	"strings"
 
-	"miservice/internal/wftest"
-	"miservice/internal/workflow"
+	"github.com/Sepiolina/migo/engine/wftest"
+	"github.com/Sepiolina/migo/engine/workflow"
 )
 
 const usage = `migo creates, checks, runs and tests workflow files, without a server.
@@ -174,7 +174,7 @@ func validate(_ context.Context, args []string, stdout, stderr io.Writer) int {
 	return 0
 }
 
-// test runs workflow test files (see internal/wftest).
+// test runs workflow test files (see engine/wftest).
 func test(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("migo test", flag.ContinueOnError)
 	update := flags.Bool("update", false, "write the outputs as the expected files instead of failing on a difference")

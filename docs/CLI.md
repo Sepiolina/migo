@@ -65,7 +65,7 @@ built-in workflows compiled into the service, so the walkthrough above uses
 | `excel-to-csv` | Convert a sheet to a CSV file |
 
 Mai Studio's start page offers the same templates. They live in
-`internal/workflow/templates/`; see
+`engine/workflow/templates/`; see
 [Extending](EXTENDING.md#6-add-a-starter-template) to add one.
 
 ## Check a workflow

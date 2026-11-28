@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"miservice/internal/logx"
+	"github.com/Sepiolina/migo/engine/logx"
 )
 
 // Handler is an HTTP handler that reports failure by returning an error.

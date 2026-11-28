@@ -52,3 +52,16 @@ func TestLoadErrors(t *testing.T) {
 		t.Error("null config")
 	}
 }
+
+func TestNewWithoutAFile(t *testing.T) {
+	c := New(map[string]any{"port": 8080, "db_enabled": true, "db_port": "1433", "stock_url": "http://stock", "limit": 2.5})
+	if c.Port != 8080 || !c.DB.Enabled || c.DB.Port != 1433 || c.String("stock_url") != "http://stock" || c.Int("limit") != 2 {
+		t.Fatalf("New: %+v", c)
+	}
+	if c.Dir != "" || c.Value("missing") != nil {
+		t.Fatalf("New: %+v", c)
+	}
+	if New(nil).Value("x") != nil {
+		t.Fatal("New(nil) must be empty")
+	}
+}

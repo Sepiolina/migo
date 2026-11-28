@@ -10,7 +10,7 @@ import (
 
 	"github.com/xuri/excelize/v2"
 
-	"miservice/internal/config"
+	"github.com/Sepiolina/migo/engine/config"
 )
 
 // stubSQL answers every query with the table in path ({"columns": [...],

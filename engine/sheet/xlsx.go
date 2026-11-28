@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"strings"
 
-	"miservice/internal/jsx"
+	"github.com/Sepiolina/migo/engine/jsx"
 )
 
 type xlsxBook struct {

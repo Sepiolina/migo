@@ -10,8 +10,8 @@ import (
 	"github.com/xuri/excelize/v2"
 	"gopkg.in/yaml.v3"
 
-	"miservice/internal/jsx"
-	"miservice/internal/sheet"
+	"github.com/Sepiolina/migo/engine/jsx"
+	"github.com/Sepiolina/migo/engine/sheet"
 )
 
 // fromSpec is the from step argument.

@@ -14,12 +14,12 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Sepiolina/migo/engine/mock"
+	"github.com/Sepiolina/migo/engine/sheet"
+	"github.com/Sepiolina/migo/engine/wftest"
+	"github.com/Sepiolina/migo/engine/workflow"
 	"github.com/xuri/excelize/v2"
 	"miservice/internal/deploy"
-	"miservice/internal/mock"
-	"miservice/internal/sheet"
-	"miservice/internal/wftest"
-	"miservice/internal/workflow"
 )
 
 const Version = 1

@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"miservice/internal/wftest"
-	"miservice/internal/workflow"
+	"github.com/Sepiolina/migo/engine/wftest"
+	"github.com/Sepiolina/migo/engine/workflow"
 )
 
 const workflowTestTimeout = 30 * time.Second

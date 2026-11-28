@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"miservice/internal/sheet"
-	"miservice/internal/workflow"
+	"github.com/Sepiolina/migo/engine/sheet"
+	"github.com/Sepiolina/migo/engine/workflow"
 )
 
 const csvFlow = `name: Orders
